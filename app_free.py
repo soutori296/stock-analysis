@@ -6,15 +6,15 @@ import time
 import requests
 import io
 import re
-import extra_streamlit_components as stx
 
 # --- アイコン設定 ---
+# GitHubにアップロードされた画像を直接読み込むURL
 ICON_URL = "https://raw.githubusercontent.com/soutori296/stock-analysis/main/aisan.png"
 
 # ページ設定
 st.set_page_config(page_title="教えて！AIさん 2", page_icon=ICON_URL, layout="wide")
 
-# --- タイトルエリア ---
+# --- タイトルエリア (画像とテキストを横並び) ---
 col_icon, col_title = st.columns([1, 8])
 
 with col_icon:
@@ -92,30 +92,12 @@ with st.expander("?? スコア配分・利確計算ロジックの説明書を�
     *   逆張り: 半益(5MA)、全益(25MA)
     """)
 
-# --- サイドバー設定 (Cookie対応版) ---
-st.sidebar.header("設定")
-
-# Cookieマネージャー初期化
-cookie_manager = stx.CookieManager()
-cookie_key = cookie_manager.get(cookie="gemini_api_key")
-api_key = None
-
-# 優先順位: Secrets > Cookie > 手動入力
+# サイドバー設定
 if "GEMINI_API_KEY" in st.secrets:
     api_key = st.secrets["GEMINI_API_KEY"]
-    st.sidebar.success("?? Secretsからキーを読み込みました")
-elif cookie_key:
-    api_key = cookie_key
-    st.sidebar.success("?? ブラウザからキーを読み込みました")
-    if st.sidebar.button("キーを削除 (ログアウト)"):
-        cookie_manager.delete("gemini_api_key")
-        st.rerun()
+    st.sidebar.success("?? Security Clearance: OK")
 else:
-    user_input = st.sidebar.text_input("Gemini API Key", type="password")
-    if user_input:
-        # 30日間保存
-        cookie_manager.set("gemini_api_key", user_input, expires_at=datetime.datetime.now() + datetime.timedelta(days=30))
-        st.rerun()
+    api_key = st.sidebar.text_input("Gemini API Key", type="password")
 
 # 初期値
 tickers_input = st.text_area(
@@ -211,7 +193,6 @@ def get_technical_summary(ticker):
         if len(df) < 25: return None
 
         last_day = df.iloc[-1]
-        
         current_price = fund["price"] if fund["price"] else last_day['Close']
         vol_sma5 = last_day['Vol_SMA5']
         current_vol = fund["volume"] if fund["volume"] else last_day['Volume']
@@ -344,7 +325,7 @@ def generate_ranking_table(high_score_list, low_score_list):
     【出力データのルール】
     1. **表のみ出力**: 挨拶、市場概況、独り言は一切不要。
     2. **推奨買値(残)**: データ内の「{d['buy_display']}」を**カッコ内の数値も含めて**そのまま出力。
-    3. **利確(半益/全益)**: データ内の `{d['profit_display']}` をそのまま出力。（`<br>`タグを含む）
+    3. **利確(半益/全益)**: データ内の文字列をそのまま出力。
     4. **出来高**: ヘッダーは「出来高<br>(5日比)」。中身は「1.20倍」のように記述。
     5. **アイの所感**: 80文字程度で、具体的かつ冷静な分析を記述。
        - もし戦略が「??大口流入?」なら、機関投資家の介入可能性について触れること。
