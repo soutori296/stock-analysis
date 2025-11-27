@@ -48,11 +48,11 @@ if api_key:
 def get_stock_info_from_kabutan(code):
     """
     株探から「社名」「PER」「PBR」を柔軟に取得する関数
-    HTML構造の変化や改行コードに強いロジックに変更
+    HTMLタグに依存せず、キーワード近辺の数値を探索するロジックに変更
     """
     url = f"https://kabutan.jp/stock/?code={code}"
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
     }
     
     info = {"name": "不明", "per": "-", "pbr": "-"}
@@ -60,25 +60,33 @@ def get_stock_info_from_kabutan(code):
     try:
         res = requests.get(url, headers=headers, timeout=5)
         res.encoding = res.apparent_encoding
-        # HTML内の改行や余計な空白を削除して1行にする（検索ミスを防ぐため）
-        html = res.text.replace("\n", "").replace("\r", "")
+        html = res.text
         
         # 1. 社名取得
         match_name = re.search(r'<title>(.*?)【', html)
         if match_name:
             info["name"] = match_name.group(1).strip()
             
-        # 2. PER取得
-        # パターン: "PER" -> "(連)または(単)" -> 任意のタグや文字 -> 数値 -> "倍"
-        # 例: <th>PER(連)</th><td><span class="...">15.3</span>倍</td>
-        match_per = re.search(r'PER\((?:連|単)\).*?>([0-9\.,\-]+)</span>', html)
-        if match_per:
-            info["per"] = match_per.group(1) + "倍"
+        # ヘルパー関数: キーワード近辺の数値を抽出
+        def extract_value_nearby(keyword, text_content):
+            # キーワードを探す (連) -> (単) の順
+            idx = text_content.find(keyword + "(連)")
+            if idx == -1:
+                idx = text_content.find(keyword + "(単)")
+            
+            if idx != -1:
+                # キーワードの後ろ200文字くらいを切り出す
+                chunk = text_content[idx:idx+200]
+                # "数字 + 倍" のパターンを探す
+                # [0-9\.,\-]+ は「数字、ドット、カンマ、ハイフン」の連続
+                match = re.search(r'([0-9\.,\-]+)(?:</span>)?倍', chunk)
+                if match:
+                    return match.group(1) + "倍"
+            return "-"
 
-        # 3. PBR取得
-        match_pbr = re.search(r'PBR\((?:連|単)\).*?>([0-9\.,\-]+)</span>', html)
-        if match_pbr:
-            info["pbr"] = match_pbr.group(1) + "倍"
+        # 2. PER/PBR取得
+        info["per"] = extract_value_nearby("PER", html)
+        info["pbr"] = extract_value_nearby("PBR", html)
             
         return info
         
@@ -232,8 +240,6 @@ def generate_ranking_table(summaries):
     2. 以下のカラム構成でMarkdown表を作成。
     
     | 順位 | コード | 企業名 | 現在値 | 戦略 | PO判定 | RSI | 出来高(5日比) | 推奨買値 | 利確戦略(半益/全益) | 割安度(PER/PBR) | アイの所感(40文字) |
-    
-    ※順位は「戦略の明確さ（強い順張り or 売られすぎ逆張り）」順。
     
     3. **【アイの独り言（投資家への警鐘）】**
        - 最後にこのセクションを設け、ここだけは**「～だ」「～である」「～と思う」という常体（独白調）**に切り替えてください。
