@@ -8,17 +8,21 @@ import io
 import re
 
 # ページ設定
-st.set_page_config(page_title="日本株AI推奨ランキング", layout="wide")
-st.title("🇯🇵 日本株 AI推奨ランキング")
+st.set_page_config(page_title="日本株AI参謀", layout="wide")
+
+# タイトルエリア
+st.title("📈 日本株AI参謀 - Strategic Trade Signal")
 st.markdown("""
-- **AI分析モデル**: Gemini 2.5 Flash
-- **機能**: 分割利確（半益/全益）、トレンド強度判定、実戦的指値算出
-""")
+<style>
+    .big-font { font-size:20px !important; font-weight: bold; color: #4A4A4A; }
+</style>
+<p class="big-font">市場のノイズを排除し、ピンポイントの価格で「順張り・分割利確」シナリオを提示します。</p>
+""", unsafe_allow_html=True)
 
 # サイドバー設定
 if "GEMINI_API_KEY" in st.secrets:
     api_key = st.secrets["GEMINI_API_KEY"]
-    st.sidebar.success("🔑 APIキーを読み込みました")
+    st.sidebar.success("🔑 Security Clearance: OK")
 else:
     api_key = st.sidebar.text_input("Gemini API Key", type="password")
 
@@ -28,7 +32,7 @@ default_tickers = """4028
 7483
 1871
 3611"""
-tickers_input = st.text_area("銘柄コードを入力 (改行やカンマ区切り)", default_tickers, height=150)
+tickers_input = st.text_area("Analysing Targets (銘柄コードを入力)", default_tickers, height=150)
 
 # AIモデル設定
 model_name = 'gemini-2.5-flash'
@@ -39,7 +43,7 @@ if api_key:
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel(model_name)
     except Exception as e:
-        st.error(f"API設定エラー: {e}")
+        st.error(f"System Error: {e}")
 
 def get_real_company_name(code):
     url = f"https://kabutan.jp/stock/?code={code}"
@@ -85,10 +89,9 @@ def get_technical_summary(ticker):
         price = latest['Close']
         ma5, ma25, ma75 = latest['SMA5'], latest['SMA25'], latest['SMA75']
         
-        # 直近の高値（レジスタンスラインの参考用）
         recent_high = df['High'].max()
 
-        # 1. 乖離率
+        # 乖離率
         dev_str = "-"
         if not pd.isna(ma5):
             dev5 = (price - ma5) / ma5 * 100
@@ -96,7 +99,13 @@ def get_technical_summary(ticker):
             dev75 = (price - ma75) / ma75 * 100
             dev_str = f"{dev5:+.1f}% / {dev25:+.1f}% / {dev75:+.1f}%"
 
-        # 2. PO判定 & トレンド強度
+        # 利確ターゲット価格の計算（25MA基準）
+        # +10%乖離、+20%乖離の価格をPython側で正確に計算してあげる
+        target_price_10 = ma25 * 1.10
+        target_price_15 = ma25 * 1.15
+        target_price_20 = ma25 * 1.20
+
+        # PO判定 & トレンド強度
         po_status = "なし"
         trend_strength = "中立"
         
@@ -117,7 +126,7 @@ def get_technical_summary(ticker):
                 po_status = "▼下落PO"
                 trend_strength = "弱い"
 
-        # 3. 出来高
+        # 出来高
         vol_msg = "-"
         if latest['Vol_SMA5'] > 0:
             vol_ratio = latest['Volume'] / latest['Vol_SMA5']
@@ -126,15 +135,18 @@ def get_technical_summary(ticker):
         summary_text = f"""
         【銘柄: {ticker} ({company_name})】
         - 現在値: {price:,.0f}円
-        - 半年以内の最高値(節目): {recent_high:,.0f}円
+        - 半年高値(レジスタンス): {recent_high:,.0f}円
         - トレンド強度: {trend_strength}
         - PO判定: {po_status}
         - MA乖離率(5/25/75): {dev_str}
         - 出来高比: {vol_msg}
-        - テクニカル指標実数値:
+        - [指値・利確計算用データ]:
           * 5日線: {ma5:.0f}円
           * 25日線: {ma25:.0f}円
           * 75日線: {ma75:.0f}円
+          * 参考ターゲットA(25MA+10%): {target_price_10:.0f}円
+          * 参考ターゲットB(25MA+15%): {target_price_15:.0f}円
+          * 参考ターゲットC(25MA+20%): {target_price_20:.0f}円
         """
         return ticker, summary_text, company_name
         
@@ -142,52 +154,49 @@ def get_technical_summary(ticker):
         return None, None, None
 
 def generate_ranking_table(summaries):
-    if model is None: return "APIキー設定エラー"
+    if model is None: return "API Key Required."
 
     prompt = f"""
-    あなたは「優秀なプロトレーダー」の視点で分析してください。
-    
-    【口調・性格の設定（※重要）】
-    - 口調は「～だわ」「～わよ」「～ね」といった、理知的で少しサバサバした大人の女性。
-    - ユーザーに対して少し辛口で、「甘い考えは捨てなさい」「しっかりしなさい」と叱咤激励するスタンス。
+    あなたは「優秀なプロトレーダー（30代女性、理知的でサバサバ系）」の視点で戦略を立ててください。
     
     【絶対禁止事項】
-    ❌ **「私は30代のトレーダーです」といった自己紹介や、自分の設定を明かす発言は絶対にしないでください。**
-    ❌ 挨拶も不要です。いきなり相場の分析結果から話し始めてください。
+    ❌ 「私は〇〇です」といった自己紹介や、自分の設定を明かす発言は絶対にしないでください。
+    ❌ 挨拶も不要です。いきなりプロの視点で分析結果から話し始めてください。
+    ❌ **価格を範囲（～）で書くことは禁止です。** 「2,900～3,000円」ではなく「2,950円」と1つの価格に絞ってください。
 
-    【分析ロジック】
-    1. **半益ライン (50%利確)**:
-       - 確実に利益を確保するため、直近高値(節目)付近、または乖離率+10%〜15%で設定。
-       
-    2. **全益ライン (残り全決済)**:
-       - 乖離率+20%以上の過熱圏、または次の大きな心理的節目。
-
-    3. **買い指値**:
-       - トレンド強度「極めて強い」なら「5日線付近」で強気に。
-       - それ以外なら「25日線」で待つこと。
+    【戦略ロジック】
+    1. **半益ライン (Profit Taking 1)**:
+       - データにある「半年高値」か「参考ターゲットA(+10%)」のうち、現在値に近い方を採用し、**ピンポイントの価格**で指定してください。
+       - 書き方例: 「2,950円(半年高値)」
+    2. **全益ライン (Profit Taking 2)**:
+       - 「参考ターゲットB(+15%)」または「参考ターゲットC(+20%)」の価格を採用してください。
+       - 書き方例: 「3,200円(乖離+15%)」
+    3. **エントリー (Entry)**:
+       - トレンド強度「極めて強い」なら「5日線」の価格。
+       - それ以外なら「25日線」の価格。
 
     【データ】
     {summaries}
     
     【出力構成】
-    1. 冒頭で、今回の銘柄群に対する辛口な短評を2行程度（自己紹介は不可）。
-    2. 以下のカラム構成でMarkdownの表を作成。
+    1. 冒頭で、今回の銘柄リストに対する辛口な相場観を2行程度。
+    2. 以下のMarkdown表を作成。
     
     | 順位 | コード | 企業名 | 現在値 | PO判定 | 出来高(5日比) | 推奨買値(指値) | 利確戦略(半益 / 全益) |
     
-    ※順位は「上昇PO × 出来高増」を優先。
+    ※順位は「上昇PO × 出来高増」を最優先。
     """
     
     try:
         response = model.generate_content(prompt)
         return response.text
     except Exception as e:
-        return f"AI生成エラー: {str(e)}"
+        return f"AI Generation Error: {str(e)}"
 
 # メイン処理
-if st.button("🚀 分析開始"):
+if st.button("🚀 EXECUTE STRATEGY (戦略実行)"):
     if not api_key:
-        st.warning("サイドバーにAPIキーを入力してください。")
+        st.warning("APIキーを入力してください。")
     else:
         normalized_input = tickers_input.replace("\n", ",").replace("、", ",").replace(" ", "")
         raw_tickers = list(set(normalized_input.split(","))) 
@@ -206,7 +215,7 @@ if st.button("🚀 分析開始"):
             if not t: continue
             
             count += 1
-            status_text.text(f"データ取得中 ({count}/{total}): {t} ...")
+            status_text.text(f"Processing Data ({count}/{total}): {t} ...")
             
             code, summary, real_name = get_technical_summary(t)
             
@@ -218,13 +227,13 @@ if st.button("🚀 分析開始"):
             time.sleep(1.0) 
 
         if valid_tickers:
-            status_text.text("🤖 AIが戦略を構築中...")
+            status_text.text("🤖 AI Strategist is calculating precise target prices...")
             result = generate_ranking_table(combined_data)
             
-            st.success("分析完了")
-            st.markdown("### 📊 AI推奨ポートフォリオ")
+            st.success("Analysis Complete.")
+            st.markdown("### 📊 Strategic Portfolio Report")
             st.markdown(result)
-            with st.expander("詳細データログ"):
+            with st.expander("Show Raw Data (Calculated Targets)"):
                 st.text(combined_data)
         else:
-            st.error("データ取得失敗。")
+            st.error("No valid data found.")
