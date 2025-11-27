@@ -8,15 +8,15 @@ import io
 import re
 
 # ページ設定
-st.set_page_config(page_title="日本株AI参謀", layout="wide")
+st.set_page_config(page_title="教えて！AIさん 2", layout="wide")
 
 # タイトルエリア
-st.title("📈 日本株AI参謀 - Strategic Trade Signal")
+st.title("📈 教えて！AIさん 2")
 st.markdown("""
 <style>
-    .big-font { font-size:20px !important; font-weight: bold; color: #4A4A4A; }
+    .big-font { font-size:18px !important; font-weight: bold; color: #4A4A4A; }
 </style>
-<p class="big-font">「順張り/逆張り」の判定に加え、リスク管理の要である「分割利確（半益）」戦略を提示します。</p>
+<p class="big-font">順張り・逆張りの自動判定、分割利確、出来高分析、RSIなど、全ての重要指標を網羅した完全版です。</p>
 """, unsafe_allow_html=True)
 
 # サイドバー設定
@@ -32,7 +32,7 @@ default_tickers = """4028
 7483
 1871
 3611"""
-tickers_input = st.text_area("Analysing Targets (銘柄コードを入力)", default_tickers, height=150)
+tickers_input = st.text_area("銘柄コードを入力 (改行やカンマ区切り)", default_tickers, height=150)
 
 # AIモデル設定
 model_name = 'gemini-2.5-flash'
@@ -109,33 +109,41 @@ def get_technical_summary(ticker):
             dev25_val = dev25
             dev_str = f"{dev5:+.1f}% / {dev25:+.1f}% / {dev75:+.1f}%"
 
-        # --- ターゲット価格の計算 (Python側で精密計算) ---
-        # A. 順張り用ターゲット
-        target_trend_half = ma25 * 1.10 # +10%
-        target_trend_full = ma25 * 1.20 # +20%
-        
-        # B. 逆張り用ターゲット (リバウンド狙い)
-        # 半益: 5日線に戻ったら一部確保 (深い位置にいる場合)
-        target_rebound_half = ma5 
-        # 全益: 25日線 (平均回帰)
-        target_rebound_full = ma25
-
-        # 戦略タイプ判定
-        strategy_type = "中立"
-        
-        # 1. 順張り判定 (上昇PO)
+        # PO判定
+        po_status = "なし"
         if len(df) >= 2:
             prev = df.iloc[-2]
             slope5_up = ma5 > prev['SMA5']
             slope25_up = ma25 > prev['SMA25']
-            if ma5 > ma25 and ma25 > ma75 and slope5_up and slope25_up:
-                strategy_type = "🔥順張り(Trend)"
-        
-        # 2. 逆張り判定 (RSI<30 or 25MA乖離<-10%)
-        if rsi_val <= 30 or dev25_val <= -10:
-            strategy_type = "🌊逆張り(Rebound)"
+            if ma5 > ma25 and ma25 > ma75:
+                if slope5_up and slope25_up:
+                    po_status = "🔥上昇PO(完成)"
+                else:
+                    po_status = "上昇配列"
+            elif ma5 < ma25 and ma25 < ma75:
+                po_status = "▼下落PO"
 
-        # 出来高
+        # 戦略判定 & ターゲット計算
+        strategy_type = "中立"
+        target_half = 0
+        target_full = 0
+        
+        # A. 順張り (上昇PO または 上昇配列)
+        if "上昇" in po_status:
+            strategy_type = "🔥順張り"
+            target_half = ma25 * 1.10 # +10%
+            target_full = ma25 * 1.20 # +20%
+            # 直近高値が近ければそちらを優先
+            if recent_high > price and recent_high < target_half:
+                target_half = recent_high
+        
+        # B. 逆張り (RSI<30 または 乖離<-10%)
+        elif rsi_val <= 30 or dev25_val <= -10:
+            strategy_type = "🌊逆張り"
+            target_half = ma5  # 5日線回復で半益
+            target_full = ma25 # 25日線で全益
+
+        # 出来高倍率
         vol_msg = "-"
         if latest['Vol_SMA5'] > 0:
             vol_ratio = latest['Volume'] / latest['Vol_SMA5']
@@ -144,17 +152,17 @@ def get_technical_summary(ticker):
         summary_text = f"""
         【銘柄: {ticker} ({company_name})】
         - 現在値: {price:,.0f}円
-        - 半年高値(節目): {recent_high:,.0f}円
         - 戦略タイプ: {strategy_type}
+        - PO判定: {po_status}
         - RSI(14): {rsi_val:.1f}
+        - 出来高(5日比): {vol_msg}
         - MA乖離率: {dev_str}
-        - 出来高比: {vol_msg}
         
-        [重要: 戦略別ターゲット価格]
+        [重要: 計算済みターゲット価格]
         * 5日線: {ma5:.0f}円
         * 25日線: {ma25:.0f}円
-        * 順張り用・半益目安(+10%): {target_trend_half:.0f}円
-        * 順張り用・全益目安(+20%): {target_trend_full:.0f}円
+        * 半益ターゲット(計算値): {target_half:.0f}円
+        * 全益ターゲット(計算値): {target_full:.0f}円
         """
         return ticker, summary_text, company_name
         
@@ -165,37 +173,33 @@ def generate_ranking_table(summaries):
     if model is None: return "API Key Required."
 
     prompt = f"""
-    あなたは「優秀なプロトレーダー（30代女性、理知的・サバサバ系）」です。
-    提供されたデータに基づき、「順張り/逆張り」の判定と「分割利確（半益/全益）」の戦略を提示してください。
+    あなたは「優秀なプロトレーダー（30代女性、理知的でサバサバ系）」です。
     
     【絶対禁止事項】
     ❌ 自己紹介や挨拶は不要。いきなり分析結果から記述。
     ❌ 価格を範囲（～）で書くことは禁止。ピンポイントの価格を指定。
 
-    【戦略ロジック】
-    銘柄の「戦略タイプ」を見てロジックを切り替えてください。
-
-    **🅰️ 戦略タイプが「🔥順張り(Trend)」の場合**:
-       - **推奨買値**: トレンド強度に応じ「5日線」または「直近高値ブレイク」で指値。
-       - **利確戦略(半益)**: 「直近高値(節目)」または「+10%目安の価格」のうち、近い方を指定。
-       - **利確戦略(全益)**: 「+20%目安の価格」を指定。
-
-    **🅱️ 戦略タイプが「🌊逆張り(Rebound)」の場合**:
-       - **推奨買値**: RSIが低いので「現在値」または「5日線乖離」で指値。
-       - **利確戦略(半益)**: 「5日線」にタッチしたら一部利確（早期撤退用）。
-       - **利確戦略(全益)**: 「25日線」まで戻ったら全決済。
+    【出力データのルール】
+    提供されたデータに基づき、以下の要素を必ず全て網羅した表を作成してください。
+    
+    1. **戦略**: 「🔥順張り」か「🌊逆張り」か。
+    2. **推奨買値**: 
+       - 順張りなら「5日線」か「直近高値ブレイク」。
+       - 逆張りなら「現在値」か「乖離-10%地点」。
+    3. **利確戦略**: Pythonで計算された「半益ターゲット」「全益ターゲット」の数値を必ず使うこと。
+    4. **割安度**: 知識データベースからPER/PBRを補完。
+    5. **PO判定・RSI・出来高**: 提供データをそのまま表示。
 
     【データ】
     {summaries}
     
     【出力構成】
-    1. 冒頭で、全体の地合い（順張り優勢か、逆張り優勢か）について短評を2行。
-    2. 以下のMarkdown表を作成。
+    1. 冒頭で、全体の地合いについての短評（2行）。
+    2. 以下のカラム構成でMarkdown表を作成。
     
-    | 順位 | コード | 企業名 | 戦略 | RSI | 推奨買値(指値) | 利確戦略(半益 / 全益) |
+    | 順位 | コード | 企業名 | 現在値 | 戦略 | PO判定 | RSI | 出来高(5日比) | 推奨買値 | 利確戦略(半益/全益) | 割安度(PER/PBR) |
     
-    ※「戦略」カラムには「🔥順張り」か「🌊逆張り」を明記。
-    ※順位は「チャンスの大きさ（勢い または 乖離幅）」順。
+    ※順位は「戦略の明確さ（強い順張り or 売られすぎ逆張り）」順。
     """
     
     try:
@@ -205,7 +209,7 @@ def generate_ranking_table(summaries):
         return f"AI Generation Error: {str(e)}"
 
 # メイン処理
-if st.button("🚀 EXECUTE STRATEGY (戦略実行)"):
+if st.button("🚀 分析開始"):
     if not api_key:
         st.warning("APIキーを入力してください。")
     else:
@@ -238,7 +242,7 @@ if st.button("🚀 EXECUTE STRATEGY (戦略実行)"):
             time.sleep(1.0) 
 
         if valid_tickers:
-            status_text.text("🤖 Calculating Optimal Split-Exit Targets...")
+            status_text.text("🤖 AI Strategist is calculating optimal portfolio...")
             result = generate_ranking_table(combined_data)
             
             st.success("Analysis Complete.")
