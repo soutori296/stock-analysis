@@ -1,23 +1,27 @@
 import streamlit as st
-import pandas_datareader.data as web
 import pandas as pd
 import google.generativeai as genai
 import datetime
 import time
 import requests
+import io
 import re
 
 # ページ設定
 st.set_page_config(page_title="日本株AI推奨ランキング", layout="wide")
-st.title("🇯🇵 日本株 AI推奨ランキング (社名確定・完全版)")
+st.title("🇯🇵 日本株 AI推奨ランキング (鬼コーチ版)")
 st.markdown("""
-- **社名取得**: Webから正式名称を取得するため、**間違いがありません**。
-- **機能**: PO判定、全MA乖離率、出来高倍率分析を含みます。
+- **改善点**: 「適宜調整」などの逃げ口上を禁止し、MAの数値に基づいた具体的な指値・利確目標を出させます。
+- **機能**: 正式社名取得、PO判定、MA乖離、出来高分析。
 """)
 
 # サイドバー設定
-st.sidebar.header("設定")
-api_key = st.sidebar.text_input("Gemini API Key", type="password")
+# Secretsにキーがあれば自動入力、なければ手動入力
+if "GEMINI_API_KEY" in st.secrets:
+    api_key = st.secrets["GEMINI_API_KEY"]
+    st.sidebar.success("🔑 APIキーを自動読み込み済")
+else:
+    api_key = st.sidebar.text_input("Gemini API Key", type="password")
 
 # 初期値
 default_tickers = """4028
@@ -39,10 +43,7 @@ if api_key:
         st.error(f"API設定エラー: {e}")
 
 def get_real_company_name(code):
-    """
-    株探(Kabutan)のページから正式名称をスクレイピングして取得する関数
-    AIのハルシネーション（嘘）を防ぐための物理的な名称取得
-    """
+    """株探から正式社名を取得"""
     url = f"https://kabutan.jp/stock/?code={code}"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
@@ -50,7 +51,6 @@ def get_real_company_name(code):
     try:
         res = requests.get(url, headers=headers, timeout=5)
         res.encoding = res.apparent_encoding
-        # <title>トヨタ自動車【7203】... </title> から社名を抽出
         match = re.search(r'<title>(.*?)【', res.text)
         if match:
             return match.group(1).strip()
@@ -65,17 +65,24 @@ def get_technical_summary(ticker):
     if not ticker.isdigit(): return None, None, None
     stock_code = f"{ticker}.JP"
     
-    # 【追加】ここで正式社名を取得してしまう
+    # 社名取得
     company_name = get_real_company_name(ticker)
     
-    start = datetime.datetime.now() - datetime.timedelta(days=180)
-    end = datetime.datetime.now()
+    # Stooqからデータ取得
+    csv_url = f"https://stooq.com/q/d/l/?s={stock_code}&i=d"
     
     try:
-        df = web.DataReader(stock_code, 'stooq', start, end)
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+        res = requests.get(csv_url, headers=headers, timeout=10)
+        
+        if res.status_code != 200: return None, None, None
+        
+        df = pd.read_csv(io.BytesIO(res.content), index_col="Date", parse_dates=True)
         if df.empty: return None, None, None
         
         df = df.sort_index()
+        start_date = datetime.datetime.now() - datetime.timedelta(days=180)
+        df = df[df.index >= start_date]
         
         # 移動平均線
         df['SMA5'] = df['Close'].rolling(window=5).mean()
@@ -83,11 +90,9 @@ def get_technical_summary(ticker):
         df['SMA75'] = df['Close'].rolling(window=75).mean()
         df['Vol_SMA5'] = df['Volume'].rolling(window=5).mean()
         
-        if len(df) < 75: return None, None, None
+        if len(df) < 5: return None, None, None
 
-        # データ計算
         latest = df.iloc[-1]
-        prev = df.iloc[-2]
         price = latest['Close']
         
         # 1. 乖離率
@@ -100,18 +105,20 @@ def get_technical_summary(ticker):
             dev_str = f"{dev5:+.1f}% / {dev25:+.1f}% / {dev75:+.1f}%"
 
         # 2. PO判定
-        slope5_up = ma5 > prev['SMA5']
-        slope25_up = ma25 > prev['SMA25']
-        slope75_up = ma75 > prev['SMA75']
-        
         po_status = "なし"
-        if ma5 > ma25 and ma25 > ma75:
-            if slope5_up and slope25_up and slope75_up:
-                po_status = "🔥上昇PO(完成)"
-            else:
-                po_status = "上昇配列"
-        elif ma5 < ma25 and ma25 < ma75:
-            po_status = "▼下落PO"
+        if len(df) >= 2:
+            prev = df.iloc[-2]
+            slope5_up = ma5 > prev['SMA5']
+            slope25_up = ma25 > prev['SMA25']
+            slope75_up = ma75 > prev['SMA75']
+            
+            if ma5 > ma25 and ma25 > ma75:
+                if slope5_up and slope25_up and slope75_up:
+                    po_status = "🔥上昇PO(完成)"
+                else:
+                    po_status = "上昇配列"
+            elif ma5 < ma25 and ma25 < ma75:
+                po_status = "▼下落PO"
 
         # 3. 出来高
         vol_msg = "-"
@@ -119,41 +126,47 @@ def get_technical_summary(ticker):
             vol_ratio = latest['Volume'] / latest['Vol_SMA5']
             vol_msg = f"{vol_ratio:.1f}倍"
 
-        # AIへ渡すデータに「確定した社名」を含める
+        # AIへ渡すデータ（MAの実数値を強調して渡す）
         summary_text = f"""
-        【銘柄コード: {ticker}】
-        - 正式社名: {company_name}
+        【銘柄: {ticker} ({company_name})】
         - 現在値: {price:,.0f}円
         - PO判定: {po_status}
-        - MA乖離(5/25/75): {dev_str}
-        - 出来高(5日比): {vol_msg}
+        - MA乖離率: {dev_str}
+        - 出来高比: {vol_msg}
+        - [重要]テクニカル指標の実数値:
+          * 5日線(短期支持線): {ma5:.0f}円
+          * 25日線(中期支持線): {ma25:.0f}円
+          * 75日線(長期支持線): {ma75:.0f}円
         """
         return ticker, summary_text, company_name
         
-    except Exception:
+    except Exception as e:
         return None, None, None
 
 def generate_ranking_table(summaries):
     if model is None: return "APIキー設定エラー"
 
     prompt = f"""
-    あなたはプロのトレーダーです。提供されたデータからランキング表を作成してください。
-    
-    【重要：社名について】
-    データ内に「正式社名」が含まれています。**絶対にその社名をそのまま使用してください。**
-    あなたの知識で社名を勝手に書き換えないでください。
+    あなたは辛口のプロトレーダーです。曖昧なアドバイスは一切不要です。
+    提供されたデータ（特にMAの実数値）を使って、具体的なトレードプランを提示してください。
     
     【データ】
     {summaries}
     
+    【禁止事項】
+    ❌ 「様子見を推奨」「適宜判断」「個別要因による」「情報不足」といった逃げの表現。
+    ❌ 具体的な数値のないアドバイス。
+    
     【出力ルール】
-    1. 以下のカラムを持つ **Markdown表** を作成してください。
+    Markdownの表を作成してください。カラムは以下。
     
-    | 順位 | コード | 企業名 | 現在値 | PO判定 | MA乖離(5/25/75) | 出来高(5日比) | 割安度(PER/PBR) | 推奨買値 | 利確目標 |
+    | 順位 | コード | 企業名 | 現在値 | PO判定 | MA乖離(5/25/75) | 推奨買値(指値) | 利確ターゲット | 割安度(PER/PBR) |
     
-    2. テクニカルデータ（PO判定、乖離率など）はデータの数値をそのまま使ってください。
-    3. 「割安度」のみ、あなたの知識（PER/PBRの目安）で補完してください。
-    4. 順位は「🔥上昇PO」かつ「出来高増」の銘柄を1位にしてください。
+    【入力のヒント】
+    1. **推奨買値**: データにある「5日線」や「25日線」の数値を使い、「2,700円(5MA付近)」のように具体的に書くこと。上昇POなら押し目買い、下落POなら「見送り」と書く。
+    2. **利確ターゲット**: 現在値から計算して「3,000円(乖離+10%)」や、キリの良い数字を具体的に提示する。
+    3. **割安度**: あなたの知識データベースから概算のPER/PBRを出し、「10.5倍(割安)」のように書く。「詳細評価推奨」などの言葉は禁止。不明なら推定値または「不明」と書く。
+    4. **順位**: 「🔥上昇PO」の銘柄を必ず上位にする。
     """
     
     try:
@@ -163,7 +176,7 @@ def generate_ranking_table(summaries):
         return f"生成エラー: {str(e)}"
 
 # メイン処理
-if st.button("🚀 分析開始 (社名Web取得)"):
+if st.button("🚀 分析開始"):
     if not api_key:
         st.warning("サイドバーにAPIキーを入力してください")
     else:
@@ -186,29 +199,23 @@ if st.button("🚀 分析開始 (社名Web取得)"):
             count += 1
             status_text.text(f"データ取得中 ({count}/{total}): {t} ...")
             
-            # テクニカルデータ + 社名取得
             code, summary, real_name = get_technical_summary(t)
             
             if code:
                 valid_tickers.append(code)
                 combined_data += summary + "\n"
-                # ログに社名が出ているか確認用
-                print(f"取得成功: {code} -> {real_name}")
             
             progress_bar.progress(count / total)
-            # Webアクセスが入るので少しウェイトを入れる（マナー）
             time.sleep(1.0) 
 
         if valid_tickers:
-            status_text.text("🤖 データが揃いました。AIが表を作成中...")
-            
+            status_text.text("🤖 鬼コーチAIが具体的な数値を計算中...")
             result = generate_ranking_table(combined_data)
             
-            st.success("完了！正式社名でレポートを作成しました。")
-            st.markdown("### 📊 AI推奨ポートフォリオ (確定版)")
+            st.success("完了！")
+            st.markdown("### 📊 AI推奨ポートフォリオ (具体的数値版)")
             st.markdown(result)
-            
-            with st.expander("AIに渡したデータ（ここで社名が合っているか確認できます）"):
+            with st.expander("詳細ログ"):
                 st.text(combined_data)
         else:
             st.error("データ取得失敗。")
