@@ -47,53 +47,38 @@ if api_key:
 
 def get_stock_info_from_kabutan(code):
     """
-    株探から「社名」「PER」「PBR」に加え、「現在値」「出来高」も取得する完全版
+    株探から現在値とファンダメンタルズを取得
     """
     url = f"https://kabutan.jp/stock/?code={code}"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
     }
     
-    data = {
-        "name": "不明", "per": "-", "pbr": "-", 
-        "price": None, "volume": None  # 数値として取得
-    }
+    data = {"name": "不明", "per": "-", "pbr": "-", "price": None}
     
     try:
         res = requests.get(url, headers=headers, timeout=5)
         res.encoding = res.apparent_encoding
-        # HTMLの改行を削除して検索しやすくする
         html = res.text.replace("\n", "").replace("\r", "")
         
-        # 1. 社名取得
+        # 社名
         match_name = re.search(r'<title>(.*?)【', html)
-        if match_name:
-            data["name"] = match_name.group(1).strip()
+        if match_name: data["name"] = match_name.group(1).strip()
             
-        # 2. PER/PBR取得 (ヒストリカルやテーブル内を探索)
-        # より広範にヒットするよう調整
+        # PER/PBR (柔軟検索)
         def extract_val(key, text):
-            # "PER" ... "20.6" ... "倍" のような並びを探す
             m = re.search(rf'{key}.*?>([0-9\.,\-]+)(?:</span>)?(?:倍|％)', text)
             return m.group(1) + "倍" if m else "-"
 
         data["per"] = extract_val("PER", html)
         data["pbr"] = extract_val("PBR", html)
 
-        # 3. 【新機能】現在値の取得
-        # <th scope="row">現在値</th> ... <td>2,632</td>
+        # 現在値 (リアルタイム)
         match_price = re.search(r'現在値</th>\s*<td[^>]*>([0-9,]+)</td>', html)
         if match_price:
             data["price"] = float(match_price.group(1).replace(",", ""))
-
-        # 4. 【新機能】出来高の取得
-        # <th scope="row">出来高</th> ... <td>30,000&nbsp;株</td>
-        match_vol = re.search(r'出来高</th>\s*<td[^>]*>([0-9,]+).*?株</td>', html)
-        if match_vol:
-            data["volume"] = float(match_vol.group(1).replace(",", ""))
             
         return data
-        
     except Exception:
         return data
 
@@ -103,10 +88,10 @@ def get_technical_summary(ticker):
     if not ticker.isdigit(): return None, None, None
     stock_code = f"{ticker}.JP"
     
-    # 株探から最新データ（現在値・出来高含む）を取得
+    # 1. 株探からリアルタイム現在値などを取得
     fund = get_stock_info_from_kabutan(ticker)
     
-    # 過去データはStooqから取得
+    # 2. Stooqから日足データ（前日終値まで）を取得
     csv_url = f"https://stooq.com/q/d/l/?s={stock_code}&i=d"
     
     try:
@@ -121,7 +106,7 @@ def get_technical_summary(ticker):
         start_date = datetime.datetime.now() - datetime.timedelta(days=180)
         df = df[df.index >= start_date]
         
-        # テクニカル指標計算（Stooqの過去データを使用）
+        # テクニカル計算
         df['SMA5'] = df['Close'].rolling(window=5).mean()
         df['SMA25'] = df['Close'].rolling(window=25).mean()
         df['SMA75'] = df['Close'].rolling(window=75).mean()
@@ -136,24 +121,35 @@ def get_technical_summary(ticker):
         
         if len(df) < 14: return None, None, None
 
-        # --- データの統合ロジック ---
-        # 株探で「現在値」が取れていればそれを採用、取れなければStooqの終値
-        current_price = fund["price"] if fund["price"] else df.iloc[-1]['Close']
+        # --- 分析データは「前日の確定値 (Stooq)」を使用 ---
+        # これにより、中途半端な当日の出来高と比較するミスを防ぐ
+        last_day = df.iloc[-1]
         
-        # 株探で「今日の出来高」が取れていればそれを採用
-        current_vol = fund["volume"] if fund["volume"] else df.iloc[-1]['Volume']
-
-        # 過去の指標（昨日の時点）
-        ma5 = df.iloc[-1]['SMA5']
-        ma25 = df.iloc[-1]['SMA25']
-        ma75 = df.iloc[-1]['SMA75']
-        rsi_val = df.iloc[-1]['RSI']
+        # 前日終値
+        prev_close = last_day['Close']
+        
+        # 現在値 (株探が取れればそれ、取れなければ前日終値)
+        current_price = fund["price"] if fund["price"] else prev_close
+        
+        # 移動平均線 (前日確定分)
+        ma5 = last_day['SMA5']
+        ma25 = last_day['SMA25']
+        ma75 = last_day['SMA75']
+        
+        # RSI (前日確定分)
+        rsi_val = last_day['RSI']
+        
+        # 直近高値
         recent_high = df['High'].max()
-        
-        # 出来高5日平均（Stooqのデータ）
-        vol_sma5 = df.iloc[-1]['Vol_SMA5']
 
-        # 乖離率（最新価格 vs 昨日のMA で計算）
+        # 出来高倍率 (前日の出来高 / 前日時点の5日平均)
+        # これなら「昨日、出来高が急増したか？」が正確にわかる
+        vol_msg = "-"
+        if last_day['Vol_SMA5'] > 0:
+            vol_ratio = last_day['Volume'] / last_day['Vol_SMA5']
+            vol_msg = f"{vol_ratio:.1f}倍 (前日確定値)"
+
+        # 乖離率 (現在値 vs 前日MA で計算)
         dev_str = "-"
         dev25_val = 0
         if not pd.isna(ma5):
@@ -163,7 +159,7 @@ def get_technical_summary(ticker):
             dev25_val = dev25
             dev_str = f"{dev5:+.1f}% / {dev25:+.1f}% / {dev75:+.1f}%"
 
-        # PO判定 (Stooqの形状で判定)
+        # PO判定 (前日確定分)
         slope5_up = ma5 > df.iloc[-2]['SMA5']
         slope25_up = ma25 > df.iloc[-2]['SMA25']
         
@@ -195,23 +191,18 @@ def get_technical_summary(ticker):
             target_half = ma5
             target_full = ma25
 
-        # 出来高倍率 (今日の出来高 / 過去5日平均)
-        vol_msg = "-"
-        if vol_sma5 > 0 and current_vol:
-            vol_ratio = current_vol / vol_sma5
-            vol_msg = f"{vol_ratio:.1f}倍"
-
         summary_text = f"""
         【銘柄: {ticker} ({fund['name']})】
-        - [最新]現在値: {current_price:,.0f}円 (Source: 株探)
-        - [最新]出来高: {current_vol:,.0f}株 (5日平均比: {vol_msg})
-        - 割安度: PER {fund['per']} / PBR {fund['pbr']}
+        - [最新]現在値: {current_price:,.0f}円
+        - [前日]終値: {prev_close:,.0f}円
+        - 割安度(株探): PER {fund['per']} / PBR {fund['pbr']}
         
-        - テクニカル状況(日足ベース):
-          * 戦略: {strategy_type}
+        - テクニカル指標 (全て前日確定値を基準に算出):
+          * 戦略タイプ: {strategy_type}
           * PO判定: {po_status}
-          * RSI(14): {rsi_val:.1f}
-          * MA乖離率: {dev_str}
+          * RSI(14日): {rsi_val:.1f}
+          * 出来高倍率: {vol_msg}
+          * MA乖離率(現在値ベース): {dev_str}
         
         [ターゲット価格]
         * 5日線: {ma5:.0f}円
@@ -238,13 +229,11 @@ def generate_ranking_table(summaries):
     ❌ 価格を範囲（～）で書くことは禁止。ピンポイントの価格を指定。
 
     【出力データのルール】
-    提供されたデータに基づき、以下の要素を必ず全て網羅した表を作成してください。
-    
-    1. **戦略**: 「🔥順張り」か「🌊逆張り」か。
-    2. **RSI装飾**: RSIが**30以下なら「🔵(数値)」**、**70以上なら「🔴(数値)」**、それ以外はそのまま表示。
-    3. **割安度**: 提供データにある **「割安度: PER...」** の数値をそのまま記載すること。
-    4. **利確戦略**: 計算された「半益ターゲット」「全益ターゲット」の数値を必ず使うこと。
-    5. **アイの所感**: **40文字以内**で、データに基づいた冷静なコメントを記述（丁寧語）。
+    1. **出来高(前日比)**: データにある「出来高倍率」を記載。これは前日確定値なので、その旨を踏まえて分析。
+    2. **現在値**: 最新の現在値を表示。
+    3. **戦略**: 「🔥順張り」か「🌊逆張り」か。
+    4. **RSI装飾**: 30以下「🔵」、70以上「🔴」。
+    5. **アイの所感**: 40文字以内、丁寧語。
 
     【データ】
     {summaries}
@@ -253,13 +242,13 @@ def generate_ranking_table(summaries):
     1. 冒頭で、全体の地合いについて理知的な短評（2行）。
     2. 以下のカラム構成でMarkdown表を作成。
     
-    | 順位 | コード | 企業名 | 現在値 | 戦略 | PO判定 | RSI | 出来高(5日比) | 推奨買値 | 利確戦略(半益/全益) | 割安度(PER/PBR) | アイの所感(40文字) |
+    | 順位 | コード | 企業名 | 現在値 | 戦略 | RSI | 出来高(前日比) | 推奨買値 | 利確(半益/全益) | 割安度(PER/PBR) | アイの所感(40文字) |
     
-    ※順位は「戦略の明確さ（強い順張り or 売られすぎ逆張り）」順。
+    ※順位は「戦略の明確さ」順。
     
     3. **【アイの独り言（投資家への警鐘）】**
-       - 最後にこのセクションを設け、ここだけは**「～だ」「～である」「～と思う」という常体（独白調）**に切り替えてください。
-       - プロとして相場を俯瞰し、静かにリスクを懸念する内容を3行程度で記述してください。
+       - ここだけは「～だ」「～である」「～思う」という常体（独白調）。
+       - プロとして相場を俯瞰し、静かにリスクを懸念する内容を3行程度で記述。
     """
     
     try:
