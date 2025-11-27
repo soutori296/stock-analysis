@@ -36,20 +36,30 @@ with col_title:
     </p>
     """, unsafe_allow_html=True)
 
-# ヘルプ
-with st.expander("ℹ️ RSI評価・バックテストの仕組みを見る"):
+# ヘルプ (ロジック説明)
+with st.expander("ℹ️ ロジック完全解説 (指値・勝率・スコア)"):
     st.markdown("""
-    ### 🎯 RSI評価基準 (ユーザー指定)
-    *   **30以下 (🔵)**: 売られすぎ。逆張りのチャンス。
-    *   **55〜65 (🟢🔥)**: **理想的な買いゾーン**。上昇トレンド中の押し目。
-    *   **50付近**: どっちつかず（下落警戒）。スコア加点は控えめ。
-    *   **70以上 (🔴)**: 買われすぎ。天井警戒。
+    ### 🧠 自動売買判断ロジック (指値の決め方)
+    銘柄のトレンド状態を診断し、以下の3パターンで推奨指値を自動変更しています。
 
-    ### 🛠 バックテスト機能 (AIの進化)
-    過去30営業日のデータを使って、以下のシミュレーションを自動で行います。
-    *   **「5日線(5MA)まで落ちてきたら買い、その後5%上がったら勝ち」**
-    *   この勝率を計算し、AIに伝えます。
-    *   AIは「この銘柄は5MAが効きやすい（勝率80%）」などを判断材料にします。
+    1.  **🔥順張り (上昇トレンド)**
+        *   **指値:** **5日線 (5MA)**
+        *   **理由:** 勢いがある株は25日線まで落ちてこないことが多いため、浅い押し目を狙います。
+    2.  **🌊逆張り (売られすぎ)**
+        *   **指値:** **現在値**
+        *   **理由:** RSI低下など底値圏シグナルが出ているため、指値を待たず即エントリーを検討します。
+    3.  **👀様子見 (レンジ・弱い)**
+        *   **指値:** **25日線 (25MA)**
+        *   **理由:** 勢いが弱いため、安全なラインまで深く引きつけます。
+
+    ### 🛠 バックテスト (勝率検証) の仕組み
+    *   **検証内容:** 過去30日間で「**5日線**まで下がった日に買い、その後5日以内に**+5%**上昇したか？」を検証。
+    *   **目的:** 現在の戦略に関わらず、「この銘柄は素直に反発するクセがあるか？（ダマシが少ないか）」という基礎体力を測るため、一律5MA基準でテストしています。
+
+    ### 💯 AIスコア加点 (RSI基準)
+    *   **55〜65**: **+25点 (理想的な買い場)** ... 上昇トレンド中の押し目の可能性大。
+    *   **30以下**: +15点 (売られすぎ) ... 逆張りのチャンス。
+    *   **70以上**: -10点 (買われすぎ) ... 天井警戒。
     """)
 
 # --- サイドバー設定 ---
@@ -248,154 +258,3 @@ def get_technical_summary(ticker):
         score = max(0, min(100, score))
 
         # 戦略決定
-        if "順張り" in po_status:
-            strategy = "🔥順張り"
-            buy_target_val = ma5
-            t_half = max(current_price * 1.05, ma25 * 1.10)
-            t_full = max(current_price * 1.10, ma25 * 1.20)
-        else:
-            if rsi <= 35:
-                strategy = "🌊逆張り"
-                buy_target_val = current_price
-                t_half = ma5
-                t_full = ma25
-            else:
-                strategy = "👀様子見"
-                buy_target_val = ma25
-                t_half = 0
-                t_full = 0
-
-        diff = current_price - buy_target_val
-        diff_txt = f"{diff:+,.0f}" if diff != 0 else "0"
-        
-        buy_price_display = f"{buy_target_val:,.0f} ({diff_txt})"
-        if strategy == "👀様子見": buy_price_display = "様子見"
-
-        def fmt_target(val): return f"{val:,.0f}" if val > 0 else "-"
-        profit_display = f"{fmt_target(t_half)}<br>{fmt_target(t_full)}"
-
-        return {
-            "code": ticker,
-            "name": fund['name'],
-            "price": current_price,
-            "score": score,
-            "strategy": strategy,
-            "po": po_status,
-            "rsi": rsi,
-            "rsi_fmt": rsi_mark,
-            "vol_ratio": vol_ratio,
-            "cap": fund["cap"],
-            "fund_str": f"{fund['per']}/{fund['pbr']}",
-            "buy_display": buy_price_display, 
-            "profit_display": profit_display,
-            "backtest": backtest_result # バックテスト結果を追加
-        }
-    except Exception:
-        return None
-
-def generate_ranking_table(high_score_list, low_score_list):
-    if model is None: return "API Key Required."
-
-    def list_to_text(lst):
-        txt = ""
-        for d in lst:
-            txt += f"""
-            [{d['code']} {d['name']}]
-            - スコア:{d['score']}, 戦略:{d['strategy']}
-            - RSI:{d['rsi']:.1f}, 出来高:{d['vol_ratio']:.2f}倍
-            - ★過去1ヶ月の5MA押し目勝率: {d['backtest']}
-            - 現在値:{d['price']:,.0f}, 指値:{d['buy_display']}
-            --------------------------------
-            """
-        return txt if txt else "なし"
-
-    prompt = f"""
-    あなたは「アイ」という名前のプロトレーダー（30代女性）です。
-    今回は「過去の検証データ（バックテスト）」も踏まえて、より精度の高いアドバイスを行います。
-    
-    【口調の設定】
-    - 常に冷静で、理知的な「です・ます」調を使ってください。
-    
-    【データ活用指示】
-    - **バックテスト勝率**が高い銘柄（80%以上など）は、「過去の傾向からしても信頼性が高い」と強く推奨してください。
-    - 逆に勝率が低い、またはデータ不足の場合は「慎重に」と添えてください。
-    - RSIが55-65の銘柄は「理想的な押し目」として高く評価してください。
-
-    【出力データのルール】
-    1. **表のみ出力**: 挨拶などは不要。
-    2. **勝率**: 表の中に「5MA勝率」という列を作り、バックテスト結果（例: 80% (4/5)）を表示。
-    3. **RSI装飾**: 30以下「🔵」、55-65「🟢🔥」、70以上「🔴」。
-    4. **アイの所感**: 80文字程度で、バックテスト結果にも触れながらコメント。
-
-    【データ1: 注目ゾーン】
-    {list_to_text(high_score_list)}
-
-    【データ2: 警戒ゾーン】
-    {list_to_text(low_score_list)}
-    
-    【出力構成】
-    **【買い推奨・注目ゾーン】**
-    | 順位 | コード | 企業名 | スコア | 戦略 | RSI | 5MA勝率 | 現在値 | 推奨買値(残) | 利確<br>(半益/全益) | アイの所感 |
-    
-    **【様子見・警戒ゾーン】**
-    (同じ形式の表を作成)
-    """
-    
-    try:
-        response = model.generate_content(prompt)
-        return response.text
-    except Exception as e:
-        return f"AI Error: {str(e)}"
-
-# メイン処理
-if st.button("🚀 分析開始 (アイに聞く)"):
-    if not api_key:
-        st.warning("APIキーを入力してください。")
-    elif not tickers_input.strip():
-        st.warning("銘柄コードを入力してください。")
-    else:
-        normalized_input = tickers_input.replace("\n", ",").replace("、", ",").replace(" ", "")
-        raw_tickers = list(set([t for t in normalized_input.split(",") if t]))
-        
-        if len(raw_tickers) > 40:
-            st.error(f"⛔ 銘柄数が多すぎます(現在{len(raw_tickers)}件)。40件以下にしてください。")
-        else:
-            data_list = []
-            progress_bar = st.progress(0)
-            status_text = st.empty()
-            
-            for i, t in enumerate(raw_tickers):
-                status_text.text(f"Processing ({i+1}/{len(raw_tickers)}): {t} ...")
-                data = get_technical_summary(t)
-                if data:
-                    data_list.append(data)
-                progress_bar.progress((i + 1) / len(raw_tickers))
-                time.sleep(1.0) 
-
-            if data_list:
-                # ソート: バックテスト勝率順も追加
-                if sort_option == "AIスコア順 (おすすめ)":
-                    data_list.sort(key=lambda x: x['score'], reverse=True)
-                elif sort_option == "バックテスト勝率順":
-                    # 文字列 "80% (4/5)" から 80 を取り出す
-                    data_list.sort(key=lambda x: int(x['backtest'][:2]) if x['backtest'][0].isdigit() else -1, reverse=True)
-                elif sort_option == "RSI順 (理想55-65優先)":
-                    # 55-65を最大値、それ以外を距離でソートするロジック
-                    data_list.sort(key=lambda x: -abs(x['rsi'] - 60)) 
-                elif sort_option == "時価総額順":
-                    data_list.sort(key=lambda x: x['cap'], reverse=True)
-
-                high_score_list = [d for d in data_list if d['score'] >= 70]
-                low_score_list = [d for d in data_list if d['score'] < 70]
-
-                status_text.text("🤖 アイがバックテスト結果を検証中...")
-                result = generate_ranking_table(high_score_list, low_score_list)
-                
-                st.success("分析完了")
-                st.markdown("### 📊 アイ推奨ポートフォリオ")
-                st.markdown(result, unsafe_allow_html=True)
-                
-                with st.expander("詳細データリスト"):
-                    st.dataframe(pd.DataFrame(data_list)[['code', 'name', 'price', 'score', 'rsi', 'backtest']])
-            else:
-                st.error("有効なデータが取得できませんでした。")
