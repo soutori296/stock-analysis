@@ -17,47 +17,55 @@ st.markdown("""
     .big-font { font-size:18px !important; font-weight: bold; color: #4A4A4A; }
     
     /* --- 表のスタイル調整 (CSS) --- */
-    /* 全体のフォントサイズと配置 */
-    table { width: 100%; border-collapse: collapse; }
+    table { width: 100%; border-collapse: collapse; table-layout: auto; }
     th, td { 
         font-size: 14px; 
         vertical-align: middle !important; 
-        padding: 8px !important;
-        line-height: 1.4 !important;
+        padding: 6px 4px !important; /* パディングを少し詰める */
+        line-height: 1.3 !important;
     }
     
-    /* 3列目: 企業名 (幅を広く、太字に) */
+    /* 3列目: 企業名 (幅を縮小) */
     th:nth-child(3), td:nth-child(3) { 
-        min-width: 180px; 
+        min-width: 130px; /* 180 -> 130 */
         font-weight: bold; 
     }
     
-    /* 4列目: スコア (改行禁止、幅固定) */
+    /* 4列目: スコア */
     th:nth-child(4), td:nth-child(4) { 
         white-space: nowrap; 
-        width: 60px; 
+        width: 50px; 
         text-align: center; 
     }
 
-    /* 7列目: 出来高 (ヘッダー2行対応) */
-    th:nth-child(7) { min-width: 80px; }
-
-    /* 10列目: 利確 (2行表示用に幅確保) */
-    th:nth-child(10), td:nth-child(10) { 
-        min-width: 140px; 
-        white-space: pre-wrap; /* 改行を有効化 */
+    /* 7列目: 出来高 (幅を縮小) */
+    th:nth-child(7), td:nth-child(7) { 
+        min-width: 60px; /* 80 -> 60 */
+        font-size: 13px; /* 少し小さくして収める */
     }
 
-    /* 11列目: アイの所感 (幅を制限) */
+    /* 9列目: 推奨買値 (幅確保) */
+    th:nth-child(9), td:nth-child(9) {
+        white-space: nowrap;
+    }
+
+    /* 10列目: 利確 (幅を縮小) */
+    th:nth-child(10), td:nth-child(10) { 
+        min-width: 110px; /* 140 -> 110 */
+        font-size: 13px;
+        white-space: pre-wrap; 
+    }
+
+    /* 11列目: アイの所感 (幅を拡大) */
     th:nth-child(11), td:nth-child(11) { 
-        width: 25%; /* 全体の25%程度に抑える */
-        min-width: 200px;
+        width: 40%; /* 全体の4割を割り当て */
+        min-width: 300px; /* 200 -> 300 */
     }
 </style>
 <p class="big-font">あなたの提示した銘柄についてアイが分析して売買戦略を伝えます。</p>
 """, unsafe_allow_html=True)
 
-# ヘルプ（スコア説明）の復活
+# ヘルプ（スコア説明）
 with st.expander("ℹ️ スコア配分・判定ロジックの説明書を見る"):
     st.markdown("""
     ### 💯 AIスコア算出ルール (100点満点)
@@ -66,9 +74,9 @@ with st.expander("ℹ️ スコア配分・判定ロジックの説明書を見�
     #### 1. トレンド判定 (移動平均線の並び)
     | 状態 | 変動 | 判定基準 |
     | :--- | :--- | :--- |
-    | **🔥上昇PO** | **+20点** | 5日 > 25日 > 75日 かつ 5日線上向き (最強) |
+    | **🔥上昇PO** | **+20点** | 5日 > 25日 > 75日 かつ 5日線上向き |
     | **上昇配列** | **+10点** | 並び順は良いが、勢いが少し弱い |
-    | **▼下落PO** | **-20点** | 5日 < 25日 < 75日 (完全な下落) |
+    | **▼下落PO** | **-20点** | 5日 < 25日 < 75日 |
     | その他 | ±0点 | レンジ、調整局面など |
 
     #### 2. RSI判定 (14日)
@@ -191,6 +199,7 @@ def get_technical_summary(ticker):
         last_day = df.iloc[-1]
         
         current_price = fund["price"] if fund["price"] else last_day['Close']
+        
         vol_sma5 = last_day['Vol_SMA5']
         current_vol = fund["volume"] if fund["volume"] else last_day['Volume']
         
@@ -205,7 +214,7 @@ def get_technical_summary(ticker):
         if ma5 > ma25 and ma25 > ma75:
             if slope5_up: 
                 score += 20
-                po_status = "🔥順張り"
+                po_status = "🔥上昇PO"
             else: 
                 score += 10
                 po_status = "上昇配列"
@@ -259,9 +268,11 @@ def get_technical_summary(ticker):
         diff_txt = f"{diff:+,.0f}" if diff != 0 else "0"
         
         if strategy == "👀様子見":
-            buy_price_display = "様子見"
+            buy_price_display = "様子見推奨"
         else:
-            buy_price_display = f"{buy_target_val:,.0f} ({diff_txt})"
+            # 符号を明示的につける
+            sign = "+" if diff > 0 else ""
+            buy_price_display = f"{buy_target_val:,.0f} ({sign}{diff_txt})"
 
         def fmt_target(target, current):
             if target == 0: return "-"
@@ -269,8 +280,6 @@ def get_technical_summary(ticker):
             pct = (target - current) / current * 100
             return f"{target:,.0f} (+{pct:.1f}%)"
 
-        # 2行表示用の利確ターゲット文字列を作成
-        # <br>タグを使うことでAIに改行を強制させる
         profit_display = f"{fmt_target(t_half_calc, current_price)}<br>{fmt_target(t_full_calc, current_price)}"
 
         return {
@@ -286,7 +295,7 @@ def get_technical_summary(ticker):
             "cap": fund["cap"],
             "fund_str": f"{fund['per']}/{fund['pbr']}",
             "buy_display": buy_price_display, 
-            "profit_display": profit_display # 2行化済み
+            "profit_display": profit_display
         }
         
     except Exception:
@@ -316,10 +325,11 @@ def generate_ranking_table(high_score_list, low_score_list):
     - 常に冷静で、理知的な「です・ます」調を使ってください。
     
     【出力データのルール】
-    1. **表のみ出力**: 冒頭の挨拶、市場概況、末尾の独り言は一切不要。
-    2. **利確(半益/全益)**: データ内の `{d['profit_display']}` をそのままセルに入れてください。（`<br>`タグが含まれています）
-    3. **出来高**: ヘッダーは「出来高<br>(5日比)」としてください。中身は「1.20倍」のように記述。
-    4. **アイの所感**: 80文字程度で、具体的かつ冷静な分析を記述。
+    1. **表のみ出力**: 挨拶、市場概況、独り言は一切不要。
+    2. **推奨買値(残)**: データ内の「{d['buy_display']}」を**カッコ内の数値も含めて**そのまま出力すること。省略禁止。
+    3. **利確(半益/全益)**: データ内の `{d['profit_display']}` をそのまま出力。（`<br>`タグを含む）
+    4. **出来高**: ヘッダーは「出来高<br>(5日比)」。中身は「1.20倍」のように記述。
+    5. **アイの所感**: 80文字程度で、具体的かつ冷静な分析を記述。
 
     【データ1: 買い推奨・注目ゾーン (スコア70以上)】
     {list_to_text(high_score_list)}
@@ -364,7 +374,6 @@ if st.button("🚀 分析開始 (アイに聞く)"):
             time.sleep(1.0) 
 
         if data_list:
-            # ソート処理
             if sort_option == "AIスコア順 (おすすめ)":
                 data_list.sort(key=lambda x: x['score'], reverse=True)
             elif sort_option == "RSI順 (低い順)":
@@ -388,10 +397,9 @@ if st.button("🚀 分析開始 (アイに聞く)"):
             st.success("分析完了")
             st.markdown("### 📊 アイ推奨ポートフォリオ")
             
-            # CSSを適用した状態でMarkdownを表示
             st.markdown(result, unsafe_allow_html=True)
             
             with st.expander("詳細データリスト(確認用)"):
-                st.dataframe(pd.DataFrame(data_list)[['code', 'name', 'price', 'score', 'strategy', 'rsi', 'vol_ratio']])
+                st.dataframe(pd.DataFrame(data_list)[['code', 'name', 'price', 'score', 'strategy', 'rsi', 'vol_ratio', 'buy_display']])
         else:
             st.error("有効なデータが取得できませんでした。")
