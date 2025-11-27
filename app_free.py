@@ -43,9 +43,9 @@ with col_title:
             overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
         }
 
-        /* 4列目: 時価総額 (幅を縮小) */
+        /* 4列目: 時価総額 */
         th:nth-child(4), td:nth-child(4) { 
-            width: 70px; /* 狭く */
+            width: 70px; 
             font-size: 12px; 
             text-align: right; 
         }
@@ -59,9 +59,9 @@ with col_title:
         /* 9列目: 現在値 */
         th:nth-child(9), td:nth-child(9) { white-space: nowrap; }
 
-        /* 10列目: 推奨買値 (幅を縮小) */
+        /* 10列目: 推奨買値 */
         th:nth-child(10), td:nth-child(10) { 
-            width: 80px; /* 狭く */
+            width: 80px; 
             font-size: 12px; 
         }
 
@@ -80,7 +80,7 @@ with col_title:
     <p class="big-font" style="margin-top: 0px;">あなたの提示した銘柄についてアイが分析して売買戦略を伝えます。</p>
     """, unsafe_allow_html=True)
 
-# ヘルプ (元の内容を復元＋バックテスト説明追加)
+# ヘルプ
 with st.expander("ℹ️ スコア配分・機能説明"):
     st.markdown("""
     ### 💯 AIスコア算出ルール (100点満点)
@@ -90,7 +90,7 @@ with st.expander("ℹ️ スコア配分・機能説明"):
     3. **出来高**: 急増で加点
     4. **バックテスト (裏機能)**: 過去の検証で勝率が高い銘柄はさらに加点。
 
-    ### 🛠 ダイナミック・バックテスト (追加機能)
+    ### 🛠 ダイナミック・バックテスト (時価総額連動)
     時価総額に合わせて、勝率判定の難易度を自動調整しています。
     *   **大型株 (1兆円以上)**: **+3%** 上昇で「勝ち」
     *   **中型株 (1000億円以上)**: **+4%** 上昇で「勝ち」
@@ -129,64 +129,67 @@ if api_key:
 
 def get_stock_info_from_kabutan(code):
     """
-    株探から情報を取得 (強力なテキスト解析版)
-    HTMLタグを全削除してからテキスト検索を行うため、レイアウト変更に強い
+    株探から情報を取得 (強力スクレイピング版)
+    キーワード周辺の文字列を切り出して解析することで、HTML構造の変化や改行に強くする
     """
     url = f"https://kabutan.jp/stock/?code={code}"
     headers = {"User-Agent": "Mozilla/5.0"}
     data = {"name": "不明", "per": "-", "pbr": "-", "price": None, "volume": None, "cap": 0}
+    
     try:
         res = requests.get(url, headers=headers, timeout=5)
         res.encoding = res.apparent_encoding
+        # HTMLタグを除去してテキスト化（空白は1つにまとめる）
+        html = res.text
+        text_content = re.sub(r'<[^>]+>', ' ', html)
+        text_content = re.sub(r'\s+', ' ', text_content)
         
-        # 1. HTMLタグを除去してプレーンテキスト化
-        html = res.text.replace("\n", "").replace("\r", "")
-        # scriptやstyleタグの中身を消す
-        text_only = re.sub(r'<script.*?>.*?</script>', '', html)
-        text_only = re.sub(r'<style.*?>.*?</style>', '', text_only)
-        # タグをスペースに置換
-        text_only = re.sub(r'<[^>]+>', ' ', text_only)
-        # 連続するスペースを1つに
-        text_only = re.sub(r'\s+', ' ', text_only).strip()
-        
-        # 1. 社名 (HTMLから取得した方が確実)
+        # 1. 社名
         match_name = re.search(r'<title>(.*?)【', html)
         if match_name: 
             raw_name = match_name.group(1).strip()
-            data["name"] = re.sub(r'[（\(].*?[）\)]', '', raw_name) # カッコ削除
+            data["name"] = re.sub(r'[（\(].*?[）\)]', '', raw_name)
 
-        # 2. 現在値 (テキスト解析)
-        # "現在値 2,632" のような並びを探す
-        match_price = re.search(r'現在値\s*([0-9,.]+)', text_only)
-        if match_price:
-            data["price"] = float(match_price.group(1).replace(",", ""))
+        # ヘルパー: キーワードの後ろにある数値を探す関数
+        def find_value_after_keyword(keyword, text, pattern):
+            idx = text.find(keyword)
+            if idx == -1: return None
+            # キーワード周辺50文字を切り出す
+            chunk = text[idx:idx+80]
+            match = re.search(pattern, chunk)
+            return match
 
-        # 3. 出来高
-        match_vol = re.search(r'出来高\s*([0-9,]+)\s*株', text_only)
-        if match_vol:
-            data["volume"] = float(match_vol.group(1).replace(",", ""))
+        # 2. 現在値 ("現在値" の後ろの数字)
+        m_price = find_value_after_keyword("現在値", text_content, r'([0-9,.]+)')
+        if m_price:
+            try: data["price"] = float(m_price.group(1).replace(",", ""))
+            except: pass
 
-        # 4. 時価総額 (兆対応)
-        # "時価総額 28兆6,605 億円" のようなパターン
-        match_cap = re.search(r'時価総額\s*([0-9,兆]+)\s*億円', text_only)
-        if match_cap:
-            raw_cap = match_cap.group(1).replace(",", "")
+        # 3. 出来高 ("出来高" の後ろの数字 + 株)
+        m_vol = find_value_after_keyword("出来高", text_content, r'([0-9,]+)\s*株')
+        if m_vol:
+            try: data["volume"] = float(m_vol.group(1).replace(",", ""))
+            except: pass
+
+        # 4. 時価総額 ("時価総額" の後ろの数字 + 兆/億)
+        # パターン: 28兆6,605 億円  または  4,401 億円
+        m_cap = find_value_after_keyword("時価総額", text_content, r'([0-9,]+(?:兆[0-9,]+)?)\s*億円')
+        if m_cap:
+            raw_cap = m_cap.group(1).replace(",", "")
             if "兆" in raw_cap:
                 parts = raw_cap.split("兆")
                 trillion = int(parts[0])
-                # "605" のような億部分があれば足す
                 billion = int(parts[1]) if parts[1] else 0
                 data["cap"] = trillion * 10000 + billion
             else:
                 data["cap"] = int(raw_cap)
 
-        # 5. PER / PBR
-        # "PER 13.1 倍" のようなパターン
-        match_per = re.search(r'PER\s*([0-9\.,\-]+)\s*倍', text_only)
-        if match_per: data["per"] = match_per.group(1) + "倍"
-        
-        match_pbr = re.search(r'PBR\s*([0-9\.,\-]+)\s*倍', text_only)
-        if match_pbr: data["pbr"] = match_pbr.group(1) + "倍"
+        # 5. PER / PBR ("PER" の後ろの数字 + 倍)
+        m_per = find_value_after_keyword("PER", text_content, r'([0-9\.,\-]+)\s*倍')
+        if m_per: data["per"] = m_per.group(1) + "倍"
+
+        m_pbr = find_value_after_keyword("PBR", text_content, r'([0-9\.,\-]+)\s*倍')
+        if m_pbr: data["pbr"] = m_pbr.group(1) + "倍"
 
         return data
     except Exception:
@@ -199,6 +202,8 @@ def run_dynamic_backtest(df, market_cap):
         
         target_pct = 0.05
         cap_str = "5%"
+        # 時価総額が取れなかった(0)場合は小型株扱いで5%になるが、
+        # 今回の修正で取れるようになるはず
         if market_cap >= 10000: # 1兆円
             target_pct = 0.03
             cap_str = "3%"
@@ -326,7 +331,6 @@ def get_technical_summary(ticker):
 
         diff = current_price - buy_target_val
         diff_txt = f"{diff:+,.0f}" if diff != 0 else "0"
-        
         buy_display = f"{buy_target_val:,.0f} ({diff_txt})"
         if strategy == "👀様子見": buy_display = "様子見推奨"
 
