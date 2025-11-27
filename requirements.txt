@@ -4,3 +4,4 @@ pandas-datareader
 google-generativeai
 plotly
 requests
+setuptools
