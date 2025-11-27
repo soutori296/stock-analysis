@@ -175,19 +175,24 @@ def get_stock_info_from_kabutan(code):
         return data
 
 def run_dynamic_backtest(df, market_cap):
-    """時価総額に応じたバックテスト"""
+    """時価総額に応じたバックテスト (条件緩和版)"""
     try:
         if len(df) < 40: return "データ不足"
         
-        target_pct = 0.05
-        cap_str = "5%"
+        # デフォルト(時価総額不明時)は小型株扱い(4%)
+        target_pct = 0.04 
+        cap_str = "4%"
         
+        # 時価総額が取れている場合
         if market_cap > 0:
             if market_cap >= 10000: # 1兆円
-                target_pct = 0.03
-                cap_str = "3%"
+                target_pct = 0.02 # 2% (3%->2%へ緩和)
+                cap_str = "2%"
             elif market_cap >= 1000: # 1000億円
-                target_pct = 0.04
+                target_pct = 0.03 # 3% (4%->3%へ緩和)
+                cap_str = "3%"
+            else: # 小型株
+                target_pct = 0.04 # 4% (5%->4%へ緩和)
                 cap_str = "4%"
         
         test_period = df.iloc[-35:-5]
@@ -197,8 +202,11 @@ def run_dynamic_backtest(df, market_cap):
             row = test_period.iloc[i]
             entry_price = row['SMA5']
             target_price = entry_price * (1 + target_pct)
+            
+            # 5MA以下でエントリー
             if row['Low'] <= entry_price:
                 entries += 1
+                # 5日以内に目標達成か？
                 future_high = df['High'].iloc[test_period.index.get_loc(row.name)+1 : test_period.index.get_loc(row.name)+6].max()
                 if future_high >= target_price: wins += 1
         
@@ -454,3 +462,4 @@ if st.button("🚀 分析開始 (アイに聞く)"):
                     st.dataframe(pd.DataFrame(data_list)[['code', 'name', 'price', 'cap_disp', 'score', 'rsi_str', 'vol_str', 'backtest']])
             else:
                 st.error("有効なデータが取得できませんでした。")
+
