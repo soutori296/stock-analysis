@@ -22,21 +22,63 @@ with col_title:
     st.markdown("""
     <style>
         .big-font { font-size:18px !important; font-weight: bold; color: #4A4A4A; }
-        table { width: 100%; border-collapse: collapse; }
-        th, td { font-size: 14px; vertical-align: middle !important; padding: 6px 4px !important; }
-        th:nth-child(3), td:nth-child(3) { font-weight: bold; min-width: 140px; } /* 企業名 */
-        th:nth-child(11), td:nth-child(11) { min-width: 250px; } /* 所感 */
+        
+        /* --- 表のスタイル調整 --- */
+        table { width: 100%; border-collapse: collapse; table-layout: auto; }
+        th, td { 
+            font-size: 14px; 
+            vertical-align: middle !important; 
+            padding: 6px 4px !important;
+            line-height: 1.4 !important;
+        }
+        
+        /* 3列目: 企業名 */
+        th:nth-child(3), td:nth-child(3) { 
+            min-width: 130px; 
+            font-weight: bold; 
+        }
+        
+        /* 4列目: スコア */
+        th:nth-child(4), td:nth-child(4) { 
+            white-space: nowrap; 
+            width: 50px; 
+            text-align: center; 
+        }
+
+        /* 9列目: 推奨買値 */
+        th:nth-child(9), td:nth-child(9) {
+            white-space: nowrap;
+        }
+
+        /* 10列目: 利確 (％が入るので少し広げる) */
+        th:nth-child(10), td:nth-child(10) { 
+            min-width: 130px;
+            font-size: 13px;
+            white-space: pre-wrap; 
+        }
+
+        /* 12列目: アイの所感 */
+        th:nth-child(12), td:nth-child(12) { 
+            width: 40%;
+            min-width: 300px;
+        }
     </style>
     <p class="big-font" style="margin-top: 0px;">あなたの提示した銘柄についてアイが分析して売買戦略を伝えます。</p>
     """, unsafe_allow_html=True)
 
 # ヘルプ
-with st.expander("ℹ️ ロジック解説"):
+with st.expander("ℹ️ スコア配分・機能説明"):
     st.markdown("""
-    ### 🛠 データ取得の仕組み
-    *   **現在値**: 株探からリアルタイム取得（小数点対応）。
-    *   **テクニカル（RSI・MA）**: Stooqの日足確定データを使用。
-    *   **バックテスト**: 過去30日間で「5MA買い→5%上昇」の成功率を検証。
+    ### 💯 AIスコア算出ルール (100点満点)
+    **基本点: 50点** からスタートし、以下の要素で加点・減点を行います。
+    1. **トレンド**: 🔥順張り(+20)、上昇配列(+10)、▼下落(-20)
+    2. **RSI**: 55-65(+25 理想的)、30以下(+15)、70以上(-10)
+    3. **出来高**: 急増で加点
+    4. **バックテスト (裏機能)**: 過去の5MA押し目買い勝率が高い銘柄は、さらに加点されます。
+
+    ### 🎯 利確ターゲット
+    *   順張り: 半益(Max[現在値+5%, 25MA+10%])、全益(Max[現在値+10%, 25MA+20%])
+    *   逆張り: 半益(5MA)、全益(25MA)
     """)
 
 # --- サイドバー設定 ---
@@ -66,7 +108,7 @@ if api_key:
         st.error(f"System Error: {e}")
 
 def get_stock_info_from_kabutan(code):
-    """株探から情報を取得（小数点対応版）"""
+    """株探から情報を取得"""
     url = f"https://kabutan.jp/stock/?code={code}"
     headers = {"User-Agent": "Mozilla/5.0"}
     data = {"name": "不明", "per": "-", "pbr": "-", "price": None, "volume": None, "cap": 0}
@@ -75,28 +117,23 @@ def get_stock_info_from_kabutan(code):
         res.encoding = res.apparent_encoding
         html = res.text.replace("\n", "").replace("\r", "")
         
-        # 社名
         match_name = re.search(r'<title>(.*?)【', html)
         if match_name: data["name"] = match_name.group(1).strip()
             
-        # 現在値 (【修正】小数点の . を正規表現に追加)
         match_price = re.search(r'現在値</th>\s*<td[^>]*>([0-9,.]+)</td>', html)
         if match_price:
             data["price"] = float(match_price.group(1).replace(",", ""))
 
-        # 出来高
         match_vol = re.search(r'出来高</th>\s*<td[^>]*>([0-9,]+).*?株</td>', html)
         if match_vol:
             data["volume"] = float(match_vol.group(1).replace(",", ""))
 
-        # ファンダメンタルズ
         def extract_val(key, text):
             m = re.search(rf'{key}.*?>([0-9\.,\-]+)(?:</span>)?(?:倍|％)', text)
             return m.group(1) + "倍" if m else "-"
         data["per"] = extract_val("PER", html)
         data["pbr"] = extract_val("PBR", html)
 
-        # 時価総額
         match_cap = re.search(r'時価総額</th>.*?<td>([0-9,]+)<span>億円', html)
         if match_cap: data["cap"] = int(match_cap.group(1).replace(",", ""))
             
@@ -105,7 +142,7 @@ def get_stock_info_from_kabutan(code):
         return data
 
 def run_backtest(df):
-    """簡易バックテスト"""
+    """裏で動くバックテスト機能"""
     try:
         if len(df) < 40: return "データ不足"
         test_period = df.iloc[-35:-5]
@@ -161,7 +198,6 @@ def get_technical_summary(ticker):
         backtest_result = run_backtest(df)
         last_day = df.iloc[-1]
         
-        # 現在値と出来高の統合
         current_price = fund["price"] if fund["price"] else last_day['Close']
         current_vol = fund["volume"] if fund["volume"] else last_day['Volume']
         
@@ -183,7 +219,7 @@ def get_technical_summary(ticker):
         else:
             po_status = "レンジ"
 
-        # RSI整形（AIに渡す文字列を作成）
+        # RSI評価
         if rsi <= 30:
             score += 15
             rsi_str = f"🔵{rsi:.1f}"
@@ -196,7 +232,7 @@ def get_technical_summary(ticker):
         else:
             rsi_str = f"🟢{rsi:.1f}"
 
-        # 出来高倍率整形
+        # 出来高倍率
         vol_ratio = 0
         vol_str = "-"
         if vol_sma5 > 0:
@@ -205,10 +241,13 @@ def get_technical_summary(ticker):
             if vol_ratio >= 1.5: score += 15
             elif vol_ratio >= 1.0: score += 5
 
-        if "8" in backtest_result[:2] or "9" in backtest_result[:2]: score += 10
+        # バックテスト加点
+        if "8" in backtest_result[:2] or "9" in backtest_result[:2] or "100" in backtest_result:
+            score += 10
+
         score = max(0, min(100, score))
 
-        # 戦略とターゲット
+        # 戦略
         if "順張り" in po_status:
             strategy = "🔥順張り"
             buy_target_val = ma5
@@ -232,8 +271,14 @@ def get_technical_summary(ticker):
         buy_display = f"{buy_target_val:,.0f} ({diff_txt})"
         if strategy == "👀様子見": buy_display = "様子見推奨"
 
-        def fmt_t(val): return f"{val:,.0f}" if val > 0 else "-"
-        profit_display = f"半:{fmt_t(t_half)}<br>全:{fmt_t(t_full)}"
+        # --- 利確ターゲットの％表示ロジック（修正点） ---
+        def fmt_target(target, current):
+            if target == 0: return "-"
+            if target <= current: return "到達済"
+            pct = (target - current) / current * 100
+            return f"{target:,.0f} (+{pct:.1f}%)"
+
+        profit_display = f"半: {fmt_target(t_half, current_price)}<br>全: {fmt_target(t_full, current_price)}"
 
         return {
             "code": ticker,
@@ -241,10 +286,10 @@ def get_technical_summary(ticker):
             "price": current_price,
             "score": score,
             "strategy": strategy,
-            "rsi_raw": rsi,      # ソート用数値
-            "rsi_str": rsi_str,  # 表示用文字列
+            "rsi_raw": rsi,
+            "rsi_str": rsi_str,
             "vol_ratio": vol_ratio,
-            "vol_str": vol_str,  # 表示用文字列
+            "vol_str": vol_str,
             "cap": fund["cap"],
             "fund_str": f"{fund['per']}/{fund['pbr']}",
             "buy_display": buy_display, 
@@ -260,12 +305,11 @@ def generate_ranking_table(high_score_list, low_score_list):
     def list_to_text(lst):
         txt = ""
         for d in lst:
-            # AIには整形済みの文字列(rsi_str, vol_str)を渡して、そのまま表示させる
             txt += f"""
             [{d['code']} {d['name']}]
             - スコア:{d['score']}, 戦略:{d['strategy']}
-            - RSI(表示用):{d['rsi_str']}, 出来高(表示用):{d['vol_str']}
-            - 5MA勝率:{d['backtest']}
+            - RSI:{d['rsi_str']}, 出来高:{d['vol_str']}
+            - ★裏データ(バックテスト勝率): {d['backtest']}
             - 現在値:{d['price']:,.0f}円
             - 推奨買値(残):{d['buy_display']}
             - 利確目標:{d['profit_display']}
@@ -282,8 +326,9 @@ def generate_ranking_table(high_score_list, low_score_list):
     
     【出力データのルール】
     1. **表のみ出力**: 挨拶不要。
-    2. **そのまま表示**: データ内の「RSI(表示用)」「出来高(表示用)」「推奨買値(残)」「利確目標」は、**加工せずそのまま**表に入れてください。勝手に数値を丸めたりしないでください。
-    3. **アイの所感**: 80文字以内で、バックテスト結果やファンダメンタルズにも触れながらコメント。
+    2. **そのまま表示**: データ内の「RSI」「出来高」「推奨買値」「利確目標」は、**加工せずそのまま**表に入れてください。
+    3. **バックテスト活用**: データに含まれる「裏データ(バックテスト勝率)」は表には出さず、**アイの所感**を書く際の判断材料にしてください。勝率が高い銘柄は自信を持って勧めてください。
+    4. **アイの所感**: 80文字以内で、データに基づいた冷静なコメントを記述。
 
     【データ1: 注目ゾーン】
     {list_to_text(high_score_list)}
@@ -293,7 +338,7 @@ def generate_ranking_table(high_score_list, low_score_list):
     
     【出力構成】
     **【買い推奨・注目ゾーン】**
-    | 順位 | コード | 企業名 | スコア | 戦略 | RSI | 出来高<br>(5日比) | 5MA勝率 | 現在値 | 推奨買値(残) | 利確<br>(半益/全益) | 指標<br>(PER/PBR) | アイの所感 |
+    | 順位 | コード | 企業名 | スコア | 戦略 | RSI | 出来高<br>(5日比) | 現在値 | 推奨買値(残) | 利確<br>(半益/全益) | 指標<br>(PER/PBR) | アイの所感 |
     
     **【様子見・警戒ゾーン】**
     (同じ形式の表を作成)
