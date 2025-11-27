@@ -47,64 +47,51 @@ if api_key:
 
 def get_stock_info_from_kabutan(code):
     """
-    株探のHTMLを解析し、ファンダメンタルズ情報を一括取得する
+    株探から「社名」「PER」「PBR」に加え、「現在値」「出来高」も取得する完全版
     """
     url = f"https://kabutan.jp/stock/?code={code}"
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
     }
     
     data = {
-        "name": "不明", "market": "-", "industry": "-",
-        "per": "-", "pbr": "-", "yield": "-", 
-        "credit": "-", "cap": "-"
+        "name": "不明", "per": "-", "pbr": "-", 
+        "price": None, "volume": None  # 数値として取得
     }
     
     try:
         res = requests.get(url, headers=headers, timeout=5)
         res.encoding = res.apparent_encoding
-        # 解析しやすくするため、改行とタブを削除
-        html = res.text.replace("\n", "").replace("\t", "")
+        # HTMLの改行を削除して検索しやすくする
+        html = res.text.replace("\n", "").replace("\r", "")
         
-        # 1. 社名取得 (<title>タグから)
+        # 1. 社名取得
         match_name = re.search(r'<title>(.*?)【', html)
         if match_name:
             data["name"] = match_name.group(1).strip()
-
-        # 2. 市場・業種
-        match_market = re.search(r'<span class="market">(.*?)</span>', html)
-        if match_market: data["market"] = match_market.group(1)
-        
-        # 業種リンクから抽出 (例: >精密機器</a>)
-        match_ind = re.search(r'market=\d+">([^<]+)</a>', html)
-        if match_ind: data["industry"] = match_ind.group(1)
-
-        # 3. PER/PBR/利回り/信用倍率/時価総額
-        # id="stockinfo_i3" のテーブルを探す
-        table_match = re.search(r'<div id="stockinfo_i3">.*?<tbody>(.*?)</tbody>', html)
-        
-        if table_match:
-            tbody = table_match.group(1)
             
-            # HTMLタグを除去する関数
-            def clean_tag(s):
-                return re.sub(r'<[^>]+>', '', s).strip()
+        # 2. PER/PBR取得 (ヒストリカルやテーブル内を探索)
+        # より広範にヒットするよう調整
+        def extract_val(key, text):
+            # "PER" ... "20.6" ... "倍" のような並びを探す
+            m = re.search(rf'{key}.*?>([0-9\.,\-]+)(?:</span>)?(?:倍|％)', text)
+            return m.group(1) + "倍" if m else "-"
 
-            # 最初の <tr> 内の <td> を全て取得
-            # 順番: [0]PER, [1]PBR, [2]利回り, [3]信用倍率
-            tds = re.findall(r'<td>(.*?)</td>', tbody)
-            
-            if len(tds) >= 4:
-                data["per"] = clean_tag(tds[0])
-                data["pbr"] = clean_tag(tds[1])
-                data["yield"] = clean_tag(tds[2])
-                data["credit"] = clean_tag(tds[3])
-            
-            # 時価総額 (v_zika2クラス)
-            cap_match = re.search(r'class="v_zika2">(.*?)</td>', tbody)
-            if cap_match:
-                data["cap"] = clean_tag(cap_match.group(1))
+        data["per"] = extract_val("PER", html)
+        data["pbr"] = extract_val("PBR", html)
 
+        # 3. 【新機能】現在値の取得
+        # <th scope="row">現在値</th> ... <td>2,632</td>
+        match_price = re.search(r'現在値</th>\s*<td[^>]*>([0-9,]+)</td>', html)
+        if match_price:
+            data["price"] = float(match_price.group(1).replace(",", ""))
+
+        # 4. 【新機能】出来高の取得
+        # <th scope="row">出来高</th> ... <td>30,000&nbsp;株</td>
+        match_vol = re.search(r'出来高</th>\s*<td[^>]*>([0-9,]+).*?株</td>', html)
+        if match_vol:
+            data["volume"] = float(match_vol.group(1).replace(",", ""))
+            
         return data
         
     except Exception:
@@ -116,9 +103,10 @@ def get_technical_summary(ticker):
     if not ticker.isdigit(): return None, None, None
     stock_code = f"{ticker}.JP"
     
-    # 株探から詳細情報を取得
+    # 株探から最新データ（現在値・出来高含む）を取得
     fund = get_stock_info_from_kabutan(ticker)
     
+    # 過去データはStooqから取得
     csv_url = f"https://stooq.com/q/d/l/?s={stock_code}&i=d"
     
     try:
@@ -133,7 +121,7 @@ def get_technical_summary(ticker):
         start_date = datetime.datetime.now() - datetime.timedelta(days=180)
         df = df[df.index >= start_date]
         
-        # 移動平均線
+        # テクニカル指標計算（Stooqの過去データを使用）
         df['SMA5'] = df['Close'].rolling(window=5).mean()
         df['SMA25'] = df['Close'].rolling(window=25).mean()
         df['SMA75'] = df['Close'].rolling(window=75).mean()
@@ -148,35 +136,45 @@ def get_technical_summary(ticker):
         
         if len(df) < 14: return None, None, None
 
-        latest = df.iloc[-1]
-        price = latest['Close']
-        ma5, ma25, ma75 = latest['SMA5'], latest['SMA25'], latest['SMA75']
-        rsi_val = latest['RSI']
-        recent_high = df['High'].max()
+        # --- データの統合ロジック ---
+        # 株探で「現在値」が取れていればそれを採用、取れなければStooqの終値
+        current_price = fund["price"] if fund["price"] else df.iloc[-1]['Close']
+        
+        # 株探で「今日の出来高」が取れていればそれを採用
+        current_vol = fund["volume"] if fund["volume"] else df.iloc[-1]['Volume']
 
-        # 乖離率
+        # 過去の指標（昨日の時点）
+        ma5 = df.iloc[-1]['SMA5']
+        ma25 = df.iloc[-1]['SMA25']
+        ma75 = df.iloc[-1]['SMA75']
+        rsi_val = df.iloc[-1]['RSI']
+        recent_high = df['High'].max()
+        
+        # 出来高5日平均（Stooqのデータ）
+        vol_sma5 = df.iloc[-1]['Vol_SMA5']
+
+        # 乖離率（最新価格 vs 昨日のMA で計算）
         dev_str = "-"
         dev25_val = 0
         if not pd.isna(ma5):
-            dev5 = (price - ma5) / ma5 * 100
-            dev25 = (price - ma25) / ma25 * 100
-            dev75 = (price - ma75) / ma75 * 100
+            dev5 = (current_price - ma5) / ma5 * 100
+            dev25 = (current_price - ma25) / ma25 * 100
+            dev75 = (current_price - ma75) / ma75 * 100
             dev25_val = dev25
             dev_str = f"{dev5:+.1f}% / {dev25:+.1f}% / {dev75:+.1f}%"
 
-        # PO判定
+        # PO判定 (Stooqの形状で判定)
+        slope5_up = ma5 > df.iloc[-2]['SMA5']
+        slope25_up = ma25 > df.iloc[-2]['SMA25']
+        
         po_status = "なし"
-        if len(df) >= 2:
-            prev = df.iloc[-2]
-            slope5_up = ma5 > prev['SMA5']
-            slope25_up = ma25 > prev['SMA25']
-            if ma5 > ma25 and ma25 > ma75:
-                if slope5_up and slope25_up:
-                    po_status = "🔥上昇PO(完成)"
-                else:
-                    po_status = "上昇配列"
-            elif ma5 < ma25 and ma25 < ma75:
-                po_status = "▼下落PO"
+        if ma5 > ma25 and ma25 > ma75:
+            if slope5_up and slope25_up:
+                po_status = "🔥上昇PO(完成)"
+            else:
+                po_status = "上昇配列"
+        elif ma5 < ma25 and ma25 < ma75:
+            po_status = "▼下落PO"
 
         # 戦略判定
         strategy_type = "中立"
@@ -188,7 +186,7 @@ def get_technical_summary(ticker):
             strategy_type = "🔥順張り"
             target_half = ma25 * 1.10 
             target_full = ma25 * 1.20 
-            if recent_high > price and recent_high < target_half:
+            if recent_high > current_price and recent_high < target_half:
                 target_half = recent_high
         
         # B. 逆張り
@@ -197,28 +195,25 @@ def get_technical_summary(ticker):
             target_half = ma5
             target_full = ma25
 
-        # 出来高
+        # 出来高倍率 (今日の出来高 / 過去5日平均)
         vol_msg = "-"
-        if latest['Vol_SMA5'] > 0:
-            vol_ratio = latest['Volume'] / latest['Vol_SMA5']
+        if vol_sma5 > 0 and current_vol:
+            vol_ratio = current_vol / vol_sma5
             vol_msg = f"{vol_ratio:.1f}倍"
 
-        # AIに渡す全データ
         summary_text = f"""
-        【銘柄: {ticker} {fund['name']}】
-        - 属性: {fund['market']} / {fund['industry']}
-        - 現在値: {price:,.0f}円
-        - 時価総額: {fund['cap']}
-        - ファンダメンタルズ: PER {fund['per']} / PBR {fund['pbr']} / 配当利回り {fund['yield']} / 信用倍率 {fund['credit']}
+        【銘柄: {ticker} ({fund['name']})】
+        - [最新]現在値: {current_price:,.0f}円 (Source: 株探)
+        - [最新]出来高: {current_vol:,.0f}株 (5日平均比: {vol_msg})
+        - 割安度: PER {fund['per']} / PBR {fund['pbr']}
         
-        - テクニカル指標:
-          * 戦略タイプ: {strategy_type}
+        - テクニカル状況(日足ベース):
+          * 戦略: {strategy_type}
           * PO判定: {po_status}
           * RSI(14): {rsi_val:.1f}
-          * 出来高(5日比): {vol_msg}
           * MA乖離率: {dev_str}
         
-        [ターゲット価格(計算値)]
+        [ターゲット価格]
         * 5日線: {ma5:.0f}円
         * 25日線: {ma25:.0f}円
         * 半益目安: {target_half:.0f}円
@@ -246,11 +241,10 @@ def generate_ranking_table(summaries):
     提供されたデータに基づき、以下の要素を必ず全て網羅した表を作成してください。
     
     1. **戦略**: 「🔥順張り」か「🌊逆張り」か。
-    2. **RSI装飾**: RSIが30以下なら「🔵」、70以上なら「🔴」をつける。
-    3. **指標まとめ**: 「PER / PBR / 利回り」を1つのセルにまとめて記述（例: 15倍/1.2倍/3%）。
-    4. **時価総額・信用倍率**: 提供データをそのまま記載。
-    5. **利確戦略**: 計算された数値を必ず使うこと。
-    6. **アイの所感**: 40文字以内で、データに基づいた冷静なコメントを記述。
+    2. **RSI装飾**: RSIが**30以下なら「🔵(数値)」**、**70以上なら「🔴(数値)」**、それ以外はそのまま表示。
+    3. **割安度**: 提供データにある **「割安度: PER...」** の数値をそのまま記載すること。
+    4. **利確戦略**: 計算された「半益ターゲット」「全益ターゲット」の数値を必ず使うこと。
+    5. **アイの所感**: **40文字以内**で、データに基づいた冷静なコメントを記述（丁寧語）。
 
     【データ】
     {summaries}
@@ -259,11 +253,13 @@ def generate_ranking_table(summaries):
     1. 冒頭で、全体の地合いについて理知的な短評（2行）。
     2. 以下のカラム構成でMarkdown表を作成。
     
-    | 順位 | コード | 企業名 | 現在値 | 戦略 | RSI | 指標(PER/PBR/利回り) | 時価総額 | 信用倍率 | 推奨買値 | 利確(半益/全益) | アイの所感(40文字) |
+    | 順位 | コード | 企業名 | 現在値 | 戦略 | PO判定 | RSI | 出来高(5日比) | 推奨買値 | 利確戦略(半益/全益) | 割安度(PER/PBR) | アイの所感(40文字) |
+    
+    ※順位は「戦略の明確さ（強い順張り or 売られすぎ逆張り）」順。
     
     3. **【アイの独り言（投資家への警鐘）】**
-       - ここだけは「～だ」「～である」「～思う」という常体（独白調）。
-       - プロとして相場を俯瞰し、静かにリスクを懸念する内容を3行程度で記述。
+       - 最後にこのセクションを設け、ここだけは**「～だ」「～である」「～と思う」という常体（独白調）**に切り替えてください。
+       - プロとして相場を俯瞰し、静かにリスクを懸念する内容を3行程度で記述してください。
     """
     
     try:
