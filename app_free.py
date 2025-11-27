@@ -15,9 +15,78 @@ st.title("📈 教えて！AIさん 2")
 st.markdown("""
 <style>
     .big-font { font-size:18px !important; font-weight: bold; color: #4A4A4A; }
+    
+    /* --- 表のスタイル調整 (CSS) --- */
+    /* 全体のフォントサイズと配置 */
+    table { width: 100%; border-collapse: collapse; }
+    th, td { 
+        font-size: 14px; 
+        vertical-align: middle !important; 
+        padding: 8px !important;
+        line-height: 1.4 !important;
+    }
+    
+    /* 3列目: 企業名 (幅を広く、太字に) */
+    th:nth-child(3), td:nth-child(3) { 
+        min-width: 180px; 
+        font-weight: bold; 
+    }
+    
+    /* 4列目: スコア (改行禁止、幅固定) */
+    th:nth-child(4), td:nth-child(4) { 
+        white-space: nowrap; 
+        width: 60px; 
+        text-align: center; 
+    }
+
+    /* 7列目: 出来高 (ヘッダー2行対応) */
+    th:nth-child(7) { min-width: 80px; }
+
+    /* 10列目: 利確 (2行表示用に幅確保) */
+    th:nth-child(10), td:nth-child(10) { 
+        min-width: 140px; 
+        white-space: pre-wrap; /* 改行を有効化 */
+    }
+
+    /* 11列目: アイの所感 (幅を制限) */
+    th:nth-child(11), td:nth-child(11) { 
+        width: 25%; /* 全体の25%程度に抑える */
+        min-width: 200px;
+    }
 </style>
 <p class="big-font">あなたの提示した銘柄についてアイが分析して売買戦略を伝えます。</p>
 """, unsafe_allow_html=True)
+
+# ヘルプ（スコア説明）の復活
+with st.expander("ℹ️ スコア配分・判定ロジックの説明書を見る"):
+    st.markdown("""
+    ### 💯 AIスコア算出ルール (100点満点)
+    **基本点: 50点** からスタートし、以下の3要素で加点・減点を行います。
+    
+    #### 1. トレンド判定 (移動平均線の並び)
+    | 状態 | 変動 | 判定基準 |
+    | :--- | :--- | :--- |
+    | **🔥上昇PO** | **+20点** | 5日 > 25日 > 75日 かつ 5日線上向き (最強) |
+    | **上昇配列** | **+10点** | 並び順は良いが、勢いが少し弱い |
+    | **▼下落PO** | **-20点** | 5日 < 25日 < 75日 (完全な下落) |
+    | その他 | ±0点 | レンジ、調整局面など |
+
+    #### 2. RSI判定 (14日)
+    | RSI値 | 変動 | 判定 |
+    | :--- | :--- | :--- |
+    | **55 ～ 65** | **+15点** | **🟢🔥 理想的** (トレンド初動～中盤) |
+    | **30 以下** | **+10点** | **🔵 売られすぎ** (逆張りチャンス) |
+    | **65 ～ 70** | **+5点** | **🟢 強気** (まだ伸びる余地あり) |
+    | **30 ～ 55** | ±0点 | 🟢 中立 |
+    | **70 以上** | **-10点** | **🔴 買われすぎ** (高値掴み警戒) |
+
+    #### 3. 出来高判定 (対5日平均比)
+    | 倍率 | 変動 | 判定 |
+    | :--- | :--- | :--- |
+    | **1.5倍 以上** | **+15点** | **急増** (強い資金流入) |
+    | **1.0 ～ 1.5倍** | **+5点** | 増加傾向 |
+    | **1.0倍 未満** | ±0点 | 閑散・減少 |
+    """)
 
 # サイドバー設定
 if "GEMINI_API_KEY" in st.secrets:
@@ -53,12 +122,8 @@ if api_key:
 
 def get_stock_info_from_kabutan(code):
     url = f"https://kabutan.jp/stock/?code={code}"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    }
-    
+    headers = {"User-Agent": "Mozilla/5.0"}
     data = {"name": "不明", "per": "-", "pbr": "-", "price": None, "volume": None, "cap": 0}
-    
     try:
         res = requests.get(url, headers=headers, timeout=5)
         res.encoding = res.apparent_encoding
@@ -67,7 +132,6 @@ def get_stock_info_from_kabutan(code):
         match_name = re.search(r'<title>(.*?)【', html)
         if match_name: data["name"] = match_name.group(1).strip()
             
-        # 現在値
         match_price_header = re.search(r'class="kabuka">([0-9,]+)円<', html)
         if match_price_header:
             data["price"] = float(match_price_header.group(1).replace(",", ""))
@@ -75,18 +139,15 @@ def get_stock_info_from_kabutan(code):
             match_price_tbl = re.search(r'現在値</th>.*?<td>([0-9,]+)</td>', html)
             if match_price_tbl: data["price"] = float(match_price_tbl.group(1).replace(",", ""))
 
-        # 出来高
         match_vol = re.search(r'出来高</th>.*?<td>([0-9,]+).*?株</td>', html)
         if match_vol: data["volume"] = float(match_vol.group(1).replace(",", ""))
 
-        # PER/PBR
         def extract_val(key, text):
             m = re.search(rf'{key}.*?>([0-9\.,\-]+)(?:</span>)?(?:倍|％)', text)
             return m.group(1) + "倍" if m else "-"
         data["per"] = extract_val("PER", html)
         data["pbr"] = extract_val("PBR", html)
 
-        # 時価総額
         match_cap = re.search(r'時価総額</th>.*?<td>([0-9,]+)<span>億円', html)
         if match_cap: data["cap"] = int(match_cap.group(1).replace(",", ""))
             
@@ -96,15 +157,11 @@ def get_stock_info_from_kabutan(code):
 
 @st.cache_data(ttl=3600)
 def get_technical_summary(ticker):
-    # コードクリーニング（英数字許可）
     ticker = str(ticker).strip().replace(".T", "").replace(".t", "").upper()
     if not ticker.isalnum(): return None
     stock_code = f"{ticker}.JP"
     
-    # 1. リアルタイムデータ (株探)
     fund = get_stock_info_from_kabutan(ticker)
-    
-    # 2. 過去データ (Stooq)
     csv_url = f"https://stooq.com/q/d/l/?s={stock_code}&i=d"
     
     try:
@@ -118,7 +175,6 @@ def get_technical_summary(ticker):
         df = df.sort_index()
         df = df.tail(100) 
         
-        # テクニカル計算 (昨日の終値ベース)
         df['SMA5'] = df['Close'].rolling(window=5).mean()
         df['SMA25'] = df['Close'].rolling(window=25).mean()
         df['SMA75'] = df['Close'].rolling(window=75).mean()
@@ -132,12 +188,9 @@ def get_technical_summary(ticker):
         
         if len(df) < 25: return None
 
-        # 最終確定足（昨日）
         last_day = df.iloc[-1]
         
-        # --- データの統合 ---
         current_price = fund["price"] if fund["price"] else last_day['Close']
-        
         vol_sma5 = last_day['Vol_SMA5']
         current_vol = fund["volume"] if fund["volume"] else last_day['Volume']
         
@@ -146,10 +199,8 @@ def get_technical_summary(ticker):
         ma75 = last_day['SMA75']
         rsi = last_day['RSI']
         
-        # --- スコアリング ---
         score = 50 
         
-        # PO判定
         slope5_up = ma5 > df.iloc[-2]['SMA5']
         if ma5 > ma25 and ma25 > ma75:
             if slope5_up: 
@@ -164,7 +215,6 @@ def get_technical_summary(ticker):
         else:
             po_status = "レンジ"
 
-        # RSI判定
         rsi_mark = f"{rsi:.0f}"
         if rsi <= 30:
             score += 10
@@ -178,7 +228,6 @@ def get_technical_summary(ticker):
         else:
             rsi_mark = f"🟢{rsi:.0f}"
 
-        # 出来高判定
         vol_bonus = 0
         vol_ratio = 0
         if vol_sma5 > 0:
@@ -189,39 +238,26 @@ def get_technical_summary(ticker):
         
         score = max(0, min(100, score))
 
-        # --- ターゲット計算 ---
-        # 1. 買値 (Buy)
         if "順張り" in po_status or "上昇" in po_status:
             strategy = "🔥順張り"
-            # 順張りの買い指値は「5日移動平均線」
             buy_target_val = ma5
-            
-            # 利確ターゲット
             t_half_calc = max(current_price * 1.05, ma25 * 1.10)
             t_full_calc = max(current_price * 1.10, ma25 * 1.20)
         else:
             if rsi <= 35:
                 strategy = "🌊逆張り"
-                # 逆張りの買い指値は「現在値（即エントリー）」
                 buy_target_val = current_price 
-                
-                # 利確ターゲット (リバウンド)
                 t_half_calc = ma5 if ma5 > current_price else current_price * 1.03
                 t_full_calc = ma25 if ma25 > t_half_calc else t_half_calc * 1.03
             else:
                 strategy = "👀様子見"
-                buy_target_val = ma25 # 暫定
+                buy_target_val = ma25 
                 t_half_calc = 0
                 t_full_calc = 0
 
-        # 残り値幅の計算 (現在値 - 目標値)
-        # +: まだ高い（落ちてくるのを待つ）
-        # -: 目標より安い（チャンス/通過）
-        # 0: ジャスト
         diff = current_price - buy_target_val
         diff_txt = f"{diff:+,.0f}" if diff != 0 else "0"
         
-        # 買値表示用文字列
         if strategy == "👀様子見":
             buy_price_display = "様子見"
         else:
@@ -232,6 +268,10 @@ def get_technical_summary(ticker):
             if target <= current: return "到達済"
             pct = (target - current) / current * 100
             return f"{target:,.0f} (+{pct:.1f}%)"
+
+        # 2行表示用の利確ターゲット文字列を作成
+        # <br>タグを使うことでAIに改行を強制させる
+        profit_display = f"{fmt_target(t_half_calc, current_price)}<br>{fmt_target(t_full_calc, current_price)}"
 
         return {
             "code": ticker,
@@ -246,8 +286,7 @@ def get_technical_summary(ticker):
             "cap": fund["cap"],
             "fund_str": f"{fund['per']}/{fund['pbr']}",
             "buy_display": buy_price_display, 
-            "p_half": fmt_target(t_half_calc, current_price),
-            "p_full": fmt_target(t_full_calc, current_price)
+            "profit_display": profit_display # 2行化済み
         }
         
     except Exception:
@@ -265,7 +304,7 @@ def generate_ranking_table(high_score_list, low_score_list):
             - RSI: {d['rsi']:.1f}, 出来高倍率: {d['vol_ratio']:.2f}倍
             - 現在値: {d['price']:,.0f}円
             - 推奨買値(残): {d['buy_display']}
-            - 利確目標: 半益 {d['p_half']} / 全益 {d['p_full']}
+            - 利確(2行): {d['profit_display']}
             --------------------------------
             """
         return txt if txt else "なし"
@@ -277,9 +316,10 @@ def generate_ranking_table(high_score_list, low_score_list):
     - 常に冷静で、理知的な「です・ます」調を使ってください。
     
     【出力データのルール】
-    1. **表のみ出力**: 冒頭の挨拶、市場概況、末尾の独り言は一切不要です。いきなり表から作成してください。
-    2. **アイの所感**: **80文字程度**で、チャート形状や出来高の変化を踏まえた具体的な分析を記述。
-    3. **データ引用**: 提供された数値（推奨買値、利確目標など）を改変せずそのまま使うこと。
+    1. **表のみ出力**: 冒頭の挨拶、市場概況、末尾の独り言は一切不要。
+    2. **利確(半益/全益)**: データ内の `{d['profit_display']}` をそのままセルに入れてください。（`<br>`タグが含まれています）
+    3. **出来高**: ヘッダーは「出来高<br>(5日比)」としてください。中身は「1.20倍」のように記述。
+    4. **アイの所感**: 80文字程度で、具体的かつ冷静な分析を記述。
 
     【データ1: 買い推奨・注目ゾーン (スコア70以上)】
     {list_to_text(high_score_list)}
@@ -289,7 +329,7 @@ def generate_ranking_table(high_score_list, low_score_list):
     
     【出力構成】
     **【買い推奨・注目ゾーン】**
-    | 順位 | コード | 企業名 | スコア | 戦略 | RSI | 出来高(5日比) | 現在値 | 推奨買値(残) | 利確(半益/全益) | アイの所感 |
+    | 順位 | コード | 企業名 | スコア | 戦略 | RSI | 出来高<br>(5日比) | 現在値 | 推奨買値(残) | 利確<br>(半益/全益) | アイの所感 |
     
     **【様子見・警戒ゾーン】**
     (同じ形式の表を作成)
@@ -324,6 +364,7 @@ if st.button("🚀 分析開始 (アイに聞く)"):
             time.sleep(1.0) 
 
         if data_list:
+            # ソート処理
             if sort_option == "AIスコア順 (おすすめ)":
                 data_list.sort(key=lambda x: x['score'], reverse=True)
             elif sort_option == "RSI順 (低い順)":
@@ -346,9 +387,11 @@ if st.button("🚀 分析開始 (アイに聞く)"):
             
             st.success("分析完了")
             st.markdown("### 📊 アイ推奨ポートフォリオ")
-            st.markdown(result)
+            
+            # CSSを適用した状態でMarkdownを表示
+            st.markdown(result, unsafe_allow_html=True)
             
             with st.expander("詳細データリスト(確認用)"):
-                st.dataframe(pd.DataFrame(data_list)[['code', 'name', 'price', 'score', 'strategy', 'rsi', 'vol_ratio', 'p_half', 'p_full']])
+                st.dataframe(pd.DataFrame(data_list)[['code', 'name', 'price', 'score', 'strategy', 'rsi', 'vol_ratio']])
         else:
             st.error("有効なデータが取得できませんでした。")
