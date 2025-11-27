@@ -23,56 +23,56 @@ with col_title:
     <style>
         .big-font { font-size:18px !important; font-weight: bold; color: #4A4A4A; }
         
-        /* --- 表のスタイル調整 (幅の最適化) --- */
+        /* --- 表のスタイル調整 --- */
         table { width: 100%; border-collapse: collapse; }
         th, td { 
             font-size: 14px; 
             vertical-align: middle !important; 
-            padding: 6px 4px !important;
+            padding: 6px 4px !important; 
             line-height: 1.3 !important;
         }
         
-        /* 1-2列目: 順位, コード (狭く) */
+        /* 1-2列目: 順位, コード */
         th:nth-child(1), td:nth-child(1),
         th:nth-child(2), td:nth-child(2) { width: 40px; text-align: center; }
 
-        /* 3列目: 企業名 (少し狭く) */
+        /* 3列目: 企業名 */
         th:nth-child(3), td:nth-child(3) { 
-            min-width: 100px; 
-            max-width: 140px;
-            font-weight: bold;
-            font-size: 13px;
+            min-width: 100px; max-width: 140px;
+            font-weight: bold; font-size: 13px;
             overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
         }
 
-        /* 4列目: 時価総額 (しっかり表示) */
+        /* 4列目: 時価総額 (幅を縮小) */
         th:nth-child(4), td:nth-child(4) { 
-            min-width: 85px; 
-            font-size: 13px; 
+            width: 70px; /* 狭く */
+            font-size: 12px; 
             text-align: right; 
         }
 
-        /* 5-7列目: スコア, 戦略, RSI */
-        th:nth-child(5), td:nth-child(5) { width: 45px; text-align: center; }
-        th:nth-child(6), td:nth-child(6) { min-width: 60px; font-size: 12px; }
+        /* 5-8列目: スコア等 */
+        th:nth-child(5), td:nth-child(5) { width: 40px; text-align: center; }
+        th:nth-child(6), td:nth-child(6) { font-size: 12px; }
         th:nth-child(7), td:nth-child(7) { min-width: 50px; }
-
-        /* 8列目: 出来高 */
-        th:nth-child(8), td:nth-child(8) { min-width: 60px; font-size: 12px; }
+        th:nth-child(8), td:nth-child(8) { font-size: 12px; }
 
         /* 9列目: 現在値 */
         th:nth-child(9), td:nth-child(9) { white-space: nowrap; }
 
-        /* 10-11列目: 推奨買値, 利確 (重要なので幅確保) */
-        th:nth-child(10), td:nth-child(10) { min-width: 90px; font-size: 13px; }
-        th:nth-child(11), td:nth-child(11) { min-width: 110px; font-size: 13px; }
+        /* 10列目: 推奨買値 (幅を縮小) */
+        th:nth-child(10), td:nth-child(10) { 
+            width: 80px; /* 狭く */
+            font-size: 12px; 
+        }
+
+        /* 11列目: 利確 */
+        th:nth-child(11), td:nth-child(11) { min-width: 110px; font-size: 12px; }
 
         /* 12列目: 指標 */
-        th:nth-child(12), td:nth-child(12) { font-size: 11px; min-width: 80px; }
+        th:nth-child(12), td:nth-child(12) { font-size: 11px; width: 70px; }
 
-        /* 13列目: アイの所感 (少し狭く) */
+        /* 13列目: アイの所感 */
         th:nth-child(13), td:nth-child(13) { 
-            width: 20%; 
             min-width: 180px; 
             font-size: 13px;
         }
@@ -80,14 +80,25 @@ with col_title:
     <p class="big-font" style="margin-top: 0px;">あなたの提示した銘柄についてアイが分析して売買戦略を伝えます。</p>
     """, unsafe_allow_html=True)
 
-# ヘルプ
-with st.expander("ℹ️ ロジック解説 (時価総額別バックテスト)"):
+# ヘルプ (元の内容を復元＋バックテスト説明追加)
+with st.expander("ℹ️ スコア配分・機能説明"):
     st.markdown("""
-    ### 🛠 ダイナミック・バックテスト
-    銘柄の規模（時価総額）に合わせて、勝率判定の難易度を自動調整しています。
-    *   **大型株 (1兆円以上)**: **+3%** 上昇で「勝ち」と判定
-    *   **中型株 (1000億円以上)**: **+4%** 上昇で「勝ち」と判定
-    *   **小型株 (1000億円未満)**: **+5%** 上昇で「勝ち」と判定
+    ### 💯 AIスコア算出ルール (100点満点)
+    **基本点: 50点** からスタートし、以下の要素で加点・減点を行います。
+    1. **トレンド**: 🔥順張り(+20)、上昇配列(+10)、▼下落(-20)
+    2. **RSI**: 55-65(+25 理想的)、30以下(+15)、70以上(-10)
+    3. **出来高**: 急増で加点
+    4. **バックテスト (裏機能)**: 過去の検証で勝率が高い銘柄はさらに加点。
+
+    ### 🛠 ダイナミック・バックテスト (追加機能)
+    時価総額に合わせて、勝率判定の難易度を自動調整しています。
+    *   **大型株 (1兆円以上)**: **+3%** 上昇で「勝ち」
+    *   **中型株 (1000億円以上)**: **+4%** 上昇で「勝ち」
+    *   **小型株 (1000億円未満)**: **+5%** 上昇で「勝ち」
+
+    ### 🎯 利確ターゲット
+    *   順張り: 半益(Max[現在値+5%, 25MA+10%])、全益(Max[現在値+10%, 25MA+20%])
+    *   逆張り: 半益(5MA)、全益(25MA)
     """)
 
 # --- サイドバー設定 ---
@@ -117,50 +128,66 @@ if api_key:
         st.error(f"System Error: {e}")
 
 def get_stock_info_from_kabutan(code):
-    """株探から情報を取得 (1兆円超え対応・社名整形版)"""
+    """
+    株探から情報を取得 (強力なテキスト解析版)
+    HTMLタグを全削除してからテキスト検索を行うため、レイアウト変更に強い
+    """
     url = f"https://kabutan.jp/stock/?code={code}"
     headers = {"User-Agent": "Mozilla/5.0"}
     data = {"name": "不明", "per": "-", "pbr": "-", "price": None, "volume": None, "cap": 0}
     try:
         res = requests.get(url, headers=headers, timeout=5)
         res.encoding = res.apparent_encoding
-        html = res.text.replace("\n", "").replace("\r", "")
         
-        # 社名取得＆整形 (カッコ削除)
+        # 1. HTMLタグを除去してプレーンテキスト化
+        html = res.text.replace("\n", "").replace("\r", "")
+        # scriptやstyleタグの中身を消す
+        text_only = re.sub(r'<script.*?>.*?</script>', '', html)
+        text_only = re.sub(r'<style.*?>.*?</style>', '', text_only)
+        # タグをスペースに置換
+        text_only = re.sub(r'<[^>]+>', ' ', text_only)
+        # 連続するスペースを1つに
+        text_only = re.sub(r'\s+', ' ', text_only).strip()
+        
+        # 1. 社名 (HTMLから取得した方が確実)
         match_name = re.search(r'<title>(.*?)【', html)
         if match_name: 
             raw_name = match_name.group(1).strip()
-            # （...）や (...) を削除する正規表現
-            data["name"] = re.sub(r'[（\(].*?[）\)]', '', raw_name)
-            
-        match_price = re.search(r'現在値</th>\s*<td[^>]*>([0-9,.]+)</td>', html)
+            data["name"] = re.sub(r'[（\(].*?[）\)]', '', raw_name) # カッコ削除
+
+        # 2. 現在値 (テキスト解析)
+        # "現在値 2,632" のような並びを探す
+        match_price = re.search(r'現在値\s*([0-9,.]+)', text_only)
         if match_price:
             data["price"] = float(match_price.group(1).replace(",", ""))
 
-        match_vol = re.search(r'出来高</th>\s*<td[^>]*>([0-9,]+).*?株</td>', html)
+        # 3. 出来高
+        match_vol = re.search(r'出来高\s*([0-9,]+)\s*株', text_only)
         if match_vol:
             data["volume"] = float(match_vol.group(1).replace(",", ""))
 
-        def extract_val(key, text):
-            m = re.search(rf'{key}.*?>([0-9\.,\-]+)(?:</span>)?(?:倍|％)', text)
-            return m.group(1) + "倍" if m else "-"
-        data["per"] = extract_val("PER", html)
-        data["pbr"] = extract_val("PBR", html)
-
-        # 時価総額 (兆対応)
-        # <td>28兆6,605<span>億円</span></td> のような形に対応
-        match_cap_tag = re.search(r'時価総額</th>.*?<td>([^<]+)<span>億円', html)
-        if match_cap_tag:
-            raw_cap_text = match_cap_tag.group(1).replace(",", "")
-            if "兆" in raw_cap_text:
-                # "28兆6605" -> 286605
-                parts = raw_cap_text.split("兆")
+        # 4. 時価総額 (兆対応)
+        # "時価総額 28兆6,605 億円" のようなパターン
+        match_cap = re.search(r'時価総額\s*([0-9,兆]+)\s*億円', text_only)
+        if match_cap:
+            raw_cap = match_cap.group(1).replace(",", "")
+            if "兆" in raw_cap:
+                parts = raw_cap.split("兆")
                 trillion = int(parts[0])
+                # "605" のような億部分があれば足す
                 billion = int(parts[1]) if parts[1] else 0
                 data["cap"] = trillion * 10000 + billion
             else:
-                data["cap"] = int(raw_cap_text)
-            
+                data["cap"] = int(raw_cap)
+
+        # 5. PER / PBR
+        # "PER 13.1 倍" のようなパターン
+        match_per = re.search(r'PER\s*([0-9\.,\-]+)\s*倍', text_only)
+        if match_per: data["per"] = match_per.group(1) + "倍"
+        
+        match_pbr = re.search(r'PBR\s*([0-9\.,\-]+)\s*倍', text_only)
+        if match_pbr: data["pbr"] = match_pbr.group(1) + "倍"
+
         return data
     except Exception:
         return data
@@ -299,6 +326,7 @@ def get_technical_summary(ticker):
 
         diff = current_price - buy_target_val
         diff_txt = f"{diff:+,.0f}" if diff != 0 else "0"
+        
         buy_display = f"{buy_target_val:,.0f} ({diff_txt})"
         if strategy == "👀様子見": buy_display = "様子見推奨"
 
