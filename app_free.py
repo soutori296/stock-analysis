@@ -7,63 +7,74 @@ import requests
 import io
 import re
 
-# ページ設定
-st.set_page_config(page_title="教えて！AIさん 2", layout="wide")
+# アイコン画像のURL
+ICON_URL = "https://cdn-ak.f.st-hatena.com/images/fotolife/s/soutori/20250212/20250212130328.png"
 
-# タイトルエリア
-st.title("📈 教えて！AIさん 2")
-st.markdown("""
-<style>
-    .big-font { font-size:18px !important; font-weight: bold; color: #4A4A4A; }
-    
-    /* --- 表のスタイル調整 (CSS) --- */
-    table { width: 100%; border-collapse: collapse; table-layout: auto; }
-    th, td { 
-        font-size: 14px; 
-        vertical-align: middle !important; 
-        padding: 6px 4px !important;
-        line-height: 1.3 !important;
-    }
-    
-    /* 3列目: 企業名 */
-    th:nth-child(3), td:nth-child(3) { 
-        min-width: 130px; 
-        font-weight: bold; 
-    }
-    
-    /* 4列目: スコア */
-    th:nth-child(4), td:nth-child(4) { 
-        white-space: nowrap; 
-        width: 50px; 
-        text-align: center; 
-    }
+# ページ設定 (ブラウザのタブアイコンもこの画像にする)
+st.set_page_config(page_title="教えて！AIさん 2", page_icon=ICON_URL, layout="wide")
 
-    /* 7列目: 出来高 */
-    th:nth-child(7), td:nth-child(7) { 
-        min-width: 60px; 
-        font-size: 13px; 
-    }
+# --- タイトルエリア (画像とテキストを横並びにする) ---
+col_icon, col_title = st.columns([1, 8]) # 列の比率設定
 
-    /* 9列目: 推奨買値 */
-    th:nth-child(9), td:nth-child(9) {
-        white-space: nowrap;
-    }
+with col_icon:
+    # アイコン画像を表示
+    st.image(ICON_URL, width=110) 
 
-    /* 10列目: 利確 */
-    th:nth-child(10), td:nth-child(10) { 
-        min-width: 110px;
-        font-size: 13px;
-        white-space: pre-wrap; 
-    }
+with col_title:
+    # タイトル表示 (絵文字は削除)
+    st.title("教えて！AIさん 2")
+    st.markdown("""
+    <style>
+        .big-font { font-size:18px !important; font-weight: bold; color: #4A4A4A; }
+        
+        /* --- 表のスタイル調整 (CSS) --- */
+        table { width: 100%; border-collapse: collapse; table-layout: auto; }
+        th, td { 
+            font-size: 14px; 
+            vertical-align: middle !important; 
+            padding: 6px 4px !important;
+            line-height: 1.3 !important;
+        }
+        
+        /* 3列目: 企業名 */
+        th:nth-child(3), td:nth-child(3) { 
+            min-width: 130px; 
+            font-weight: bold; 
+        }
+        
+        /* 4列目: スコア */
+        th:nth-child(4), td:nth-child(4) { 
+            white-space: nowrap; 
+            width: 50px; 
+            text-align: center; 
+        }
 
-    /* 11列目: アイの所感 */
-    th:nth-child(11), td:nth-child(11) { 
-        width: 40%;
-        min-width: 300px;
-    }
-</style>
-<p class="big-font">あなたの提示した銘柄についてアイが分析して売買戦略を伝えます。</p>
-""", unsafe_allow_html=True)
+        /* 7列目: 出来高 */
+        th:nth-child(7), td:nth-child(7) { 
+            min-width: 60px; 
+            font-size: 13px; 
+        }
+
+        /* 9列目: 推奨買値 */
+        th:nth-child(9), td:nth-child(9) {
+            white-space: nowrap;
+        }
+
+        /* 10列目: 利確 */
+        th:nth-child(10), td:nth-child(10) { 
+            min-width: 110px;
+            font-size: 13px;
+            white-space: pre-wrap; 
+        }
+
+        /* 11列目: アイの所感 */
+        th:nth-child(11), td:nth-child(11) { 
+            width: 40%;
+            min-width: 300px;
+        }
+    </style>
+    <p class="big-font" style="margin-top: 0px;">あなたの提示した銘柄についてアイが分析して売買戦略を伝えます。</p>
+    """, unsafe_allow_html=True)
 
 # ヘルプ
 with st.expander("ℹ️ スコア配分・利確計算ロジックの説明書を見る"):
@@ -89,7 +100,7 @@ if "GEMINI_API_KEY" in st.secrets:
 else:
     api_key = st.sidebar.text_input("Gemini API Key", type="password")
 
-# 初期値 (タイトルに入力制限を明記)
+# 初期値
 tickers_input = st.text_area(
     "Analysing Targets (銘柄コードを入力 / 最大40件まで)", 
     value="", 
@@ -183,9 +194,7 @@ def get_technical_summary(ticker):
         if len(df) < 25: return None
 
         last_day = df.iloc[-1]
-        
         current_price = fund["price"] if fund["price"] else last_day['Close']
-        
         vol_sma5 = last_day['Vol_SMA5']
         current_vol = fund["volume"] if fund["volume"] else last_day['Volume']
         
@@ -352,7 +361,7 @@ if st.button("🚀 分析開始 (アイに聞く)"):
         normalized_input = tickers_input.replace("\n", ",").replace("、", ",").replace(" ", "")
         raw_tickers = list(set([t for t in normalized_input.split(",") if t]))
         
-        # 【重要】入力制限: 40件を超えたらエラーで止める
+        # 40件制限
         if len(raw_tickers) > 40:
             st.error(f"⛔ 銘柄数が多すぎます。一度に分析できるのは40件までです。（現在の入力: {len(raw_tickers)}件）")
         else:
@@ -366,7 +375,6 @@ if st.button("🚀 分析開始 (アイに聞く)"):
                 if data:
                     data_list.append(data)
                 progress_bar.progress((i + 1) / len(raw_tickers))
-                # 40件制限があるので、ウェイトは標準の1秒でOK
                 time.sleep(1.0) 
 
             if data_list:
@@ -382,11 +390,9 @@ if st.button("🚀 分析開始 (アイに聞く)"):
                 elif sort_option == "出来高急増順":
                     data_list.sort(key=lambda x: x['vol_ratio'], reverse=True)
 
-                # 順位付け
                 for idx, d in enumerate(data_list):
                     d['rank'] = idx + 1
                 
-                # データの分割
                 high_score_list = [d for d in data_list if d['score'] >= 70]
                 low_score_list = [d for d in data_list if d['score'] < 70]
 
