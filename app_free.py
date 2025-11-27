@@ -23,12 +23,59 @@ with col_title:
     <style>
         .big-font { font-size:18px !important; font-weight: bold; color: #4A4A4A; }
         
-        /* 表のデザイン調整 */
+        /* --- 表のスタイル調整 (幅の最適化) --- */
         table { width: 100%; border-collapse: collapse; }
-        th, td { font-size: 14px; vertical-align: middle !important; padding: 6px 4px !important; }
-        th:nth-child(3), td:nth-child(3) { font-weight: bold; min-width: 130px; } /* 企業名 */
-        th:nth-child(4), td:nth-child(4) { min-width: 80px; font-size: 13px; text-align: right; } /* 時価総額 */
-        th:nth-child(13), td:nth-child(13) { min-width: 250px; } /* 所感 */
+        th, td { 
+            font-size: 14px; 
+            vertical-align: middle !important; 
+            padding: 6px 4px !important;
+            line-height: 1.3 !important;
+        }
+        
+        /* 1-2列目: 順位, コード (狭く) */
+        th:nth-child(1), td:nth-child(1),
+        th:nth-child(2), td:nth-child(2) { width: 40px; text-align: center; }
+
+        /* 3列目: 企業名 (少し狭く) */
+        th:nth-child(3), td:nth-child(3) { 
+            min-width: 100px; 
+            max-width: 140px;
+            font-weight: bold;
+            font-size: 13px;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+
+        /* 4列目: 時価総額 (しっかり表示) */
+        th:nth-child(4), td:nth-child(4) { 
+            min-width: 85px; 
+            font-size: 13px; 
+            text-align: right; 
+        }
+
+        /* 5-7列目: スコア, 戦略, RSI */
+        th:nth-child(5), td:nth-child(5) { width: 45px; text-align: center; }
+        th:nth-child(6), td:nth-child(6) { min-width: 60px; font-size: 12px; }
+        th:nth-child(7), td:nth-child(7) { min-width: 50px; }
+
+        /* 8列目: 出来高 */
+        th:nth-child(8), td:nth-child(8) { min-width: 60px; font-size: 12px; }
+
+        /* 9列目: 現在値 */
+        th:nth-child(9), td:nth-child(9) { white-space: nowrap; }
+
+        /* 10-11列目: 推奨買値, 利確 (重要なので幅確保) */
+        th:nth-child(10), td:nth-child(10) { min-width: 90px; font-size: 13px; }
+        th:nth-child(11), td:nth-child(11) { min-width: 110px; font-size: 13px; }
+
+        /* 12列目: 指標 */
+        th:nth-child(12), td:nth-child(12) { font-size: 11px; min-width: 80px; }
+
+        /* 13列目: アイの所感 (少し狭く) */
+        th:nth-child(13), td:nth-child(13) { 
+            width: 20%; 
+            min-width: 180px; 
+            font-size: 13px;
+        }
     </style>
     <p class="big-font" style="margin-top: 0px;">あなたの提示した銘柄についてアイが分析して売買戦略を伝えます。</p>
     """, unsafe_allow_html=True)
@@ -38,13 +85,9 @@ with st.expander("ℹ️ ロジック解説 (時価総額別バックテスト)"
     st.markdown("""
     ### 🛠 ダイナミック・バックテスト
     銘柄の規模（時価総額）に合わせて、勝率判定の難易度を自動調整しています。
-    *   **大型株 (1兆円以上)**: **+3%** 上昇で「勝ち」と判定 (動きが重いため)
+    *   **大型株 (1兆円以上)**: **+3%** 上昇で「勝ち」と判定
     *   **中型株 (1000億円以上)**: **+4%** 上昇で「勝ち」と判定
-    *   **小型株 (1000億円未満)**: **+5%** 上昇で「勝ち」と判定 (ボラが高いため)
-    
-    ### 🎯 利確ターゲット
-    *   順張り: 半益(Max[現在値+5%, 25MA+10%])、全益(Max[現在値+10%, 25MA+20%])
-    *   逆張り: 半益(5MA)、全益(25MA)
+    *   **小型株 (1000億円未満)**: **+5%** 上昇で「勝ち」と判定
     """)
 
 # --- サイドバー設定 ---
@@ -74,7 +117,7 @@ if api_key:
         st.error(f"System Error: {e}")
 
 def get_stock_info_from_kabutan(code):
-    """株探から情報を取得"""
+    """株探から情報を取得 (1兆円超え対応・社名整形版)"""
     url = f"https://kabutan.jp/stock/?code={code}"
     headers = {"User-Agent": "Mozilla/5.0"}
     data = {"name": "不明", "per": "-", "pbr": "-", "price": None, "volume": None, "cap": 0}
@@ -83,8 +126,12 @@ def get_stock_info_from_kabutan(code):
         res.encoding = res.apparent_encoding
         html = res.text.replace("\n", "").replace("\r", "")
         
+        # 社名取得＆整形 (カッコ削除)
         match_name = re.search(r'<title>(.*?)【', html)
-        if match_name: data["name"] = match_name.group(1).strip()
+        if match_name: 
+            raw_name = match_name.group(1).strip()
+            # （...）や (...) を削除する正規表現
+            data["name"] = re.sub(r'[（\(].*?[）\)]', '', raw_name)
             
         match_price = re.search(r'現在値</th>\s*<td[^>]*>([0-9,.]+)</td>', html)
         if match_price:
@@ -100,55 +147,53 @@ def get_stock_info_from_kabutan(code):
         data["per"] = extract_val("PER", html)
         data["pbr"] = extract_val("PBR", html)
 
-        # 時価総額 (単位:億円)
-        match_cap = re.search(r'時価総額</th>.*?<td>([0-9,]+)<span>億円', html)
-        if match_cap: data["cap"] = int(match_cap.group(1).replace(",", ""))
+        # 時価総額 (兆対応)
+        # <td>28兆6,605<span>億円</span></td> のような形に対応
+        match_cap_tag = re.search(r'時価総額</th>.*?<td>([^<]+)<span>億円', html)
+        if match_cap_tag:
+            raw_cap_text = match_cap_tag.group(1).replace(",", "")
+            if "兆" in raw_cap_text:
+                # "28兆6605" -> 286605
+                parts = raw_cap_text.split("兆")
+                trillion = int(parts[0])
+                billion = int(parts[1]) if parts[1] else 0
+                data["cap"] = trillion * 10000 + billion
+            else:
+                data["cap"] = int(raw_cap_text)
             
         return data
     except Exception:
         return data
 
 def run_dynamic_backtest(df, market_cap):
-    """
-    時価総額に応じた難易度でバックテストを行う
-    Large: 3%, Mid: 4%, Small: 5%
-    """
+    """時価総額に応じたバックテスト"""
     try:
         if len(df) < 40: return "データ不足"
         
-        # 目標上昇率の決定
-        target_pct = 0.05 # デフォルト5%
-        cap_str = ""
-        
-        if market_cap >= 10000: # 1兆円以上
+        target_pct = 0.05
+        cap_str = "5%"
+        if market_cap >= 10000: # 1兆円
             target_pct = 0.03
-            cap_str = "3%抜"
-        elif market_cap >= 1000: # 1000億円以上
+            cap_str = "3%"
+        elif market_cap >= 1000: # 1000億円
             target_pct = 0.04
-            cap_str = "4%抜"
-        else: # 小型株
-            target_pct = 0.05
-            cap_str = "5%抜"
+            cap_str = "4%"
 
         test_period = df.iloc[-35:-5]
         wins = 0
         entries = 0
-        
         for i in range(len(test_period)):
             row = test_period.iloc[i]
             entry_price = row['SMA5']
             target_price = entry_price * (1 + target_pct)
-            
-            # 5MA以下でエントリー
             if row['Low'] <= entry_price:
                 entries += 1
-                # 5日以内に目標達成か？
                 future_high = df['High'].iloc[test_period.index.get_loc(row.name)+1 : test_period.index.get_loc(row.name)+6].max()
                 if future_high >= target_price: wins += 1
         
         if entries == 0: return "検証機会なし"
         win_rate = (wins / entries) * 100
-        return f"{win_rate:.0f}% ({wins}/{entries}) ※{cap_str}"
+        return f"{win_rate:.0f}% ({wins}/{entries}) {cap_str}抜"
     except:
         return "計算エラー"
 
@@ -185,9 +230,7 @@ def get_technical_summary(ticker):
         
         if len(df) < 25: return None
 
-        # ダイナミックバックテスト実行
         backtest_result = run_dynamic_backtest(df, fund["cap"])
-        
         last_day = df.iloc[-1]
         
         current_price = fund["price"] if fund["price"] else last_day['Close']
@@ -211,7 +254,6 @@ def get_technical_summary(ticker):
         else:
             po_status = "レンジ"
 
-        # RSI評価
         if rsi <= 30:
             score += 15
             rsi_str = f"🔵{rsi:.1f}"
@@ -224,7 +266,6 @@ def get_technical_summary(ticker):
         else:
             rsi_str = f"🟢{rsi:.1f}"
 
-        # 出来高倍率
         vol_ratio = 0
         vol_str = "-"
         if vol_sma5 > 0:
@@ -233,7 +274,6 @@ def get_technical_summary(ticker):
             if vol_ratio >= 1.5: score += 15
             elif vol_ratio >= 1.0: score += 5
 
-        # バックテスト加点
         if "8" in backtest_result[:2] or "9" in backtest_result[:2] or "100" in backtest_result:
             score += 10
 
@@ -259,20 +299,18 @@ def get_technical_summary(ticker):
 
         diff = current_price - buy_target_val
         diff_txt = f"{diff:+,.0f}" if diff != 0 else "0"
-        
         buy_display = f"{buy_target_val:,.0f} ({diff_txt})"
         if strategy == "👀様子見": buy_display = "様子見推奨"
 
-        def fmt_t(val): return f"{val:,.0f}" if val > 0 else "-"
-        # ％表示を利確ターゲットに含める
-        def fmt_pct(target, current):
-            if target <= 0: return ""
+        def fmt_target(target, current):
+            if target <= 0: return "-"
+            if target <= current: return "到達済"
             pct = (target - current) / current * 100
-            return f"(+{pct:.1f}%)"
+            return f"{target:,.0f} (+{pct:.1f}%)"
 
-        profit_display = f"半: {fmt_t(t_half)} {fmt_pct(t_half, current_price)}<br>全: {fmt_t(t_full)} {fmt_pct(t_full, current_price)}"
+        profit_display = f"半: {fmt_target(t_half, current_price)}<br>全: {fmt_target(t_full, current_price)}"
 
-        # 時価総額の整形 (10000 -> 1兆)
+        # 時価総額表示
         cap_disp = f"{fund['cap']:,}億円"
         if fund['cap'] >= 10000:
             cap_disp = f"{fund['cap']/10000:.1f}兆円"
@@ -288,7 +326,7 @@ def get_technical_summary(ticker):
             "vol_ratio": vol_ratio,
             "vol_str": vol_str,
             "cap": fund["cap"],
-            "cap_disp": cap_disp, # 表示用
+            "cap_disp": cap_disp,
             "fund_str": f"{fund['per']}/{fund['pbr']}",
             "buy_display": buy_display, 
             "profit_display": profit_display,
@@ -325,8 +363,8 @@ def generate_ranking_table(high_score_list, low_score_list):
     【出力データのルール】
     1. **表のみ出力**: 挨拶不要。
     2. **そのまま表示**: データ内の「RSI」「出来高」「推奨買値」「利確目標」は、**加工せずそのまま**表に入れてください。
-    3. **時価総額**: 「時価総額」の列を追加し、データの `cap_disp` (例: 2.8兆円) を表示してください。
-    4. **バックテスト**: 裏データ(バックテスト)の勝率が高い銘柄は、所感で肯定的に評価してください。
+    3. **時価総額**: 「時価総額」の列を追加し、データの `cap_disp` を表示してください。
+    4. **バックテスト**: 裏データの勝率が高い銘柄は所感で評価してください。
     5. **アイの所感**: 80文字以内で、データに基づいた冷静なコメントを記述。
 
     【データ1: 注目ゾーン】
