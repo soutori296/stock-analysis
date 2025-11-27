@@ -47,51 +47,68 @@ if api_key:
 
 def get_stock_info_from_kabutan(code):
     """
-    株探から「社名」「PER」「PBR」を柔軟に取得する関数
-    HTMLタグに依存せず、キーワード近辺の数値を探索するロジックに変更
+    株探のHTMLを解析し、ファンダメンタルズ情報を一括取得する
     """
     url = f"https://kabutan.jp/stock/?code={code}"
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
     }
     
-    info = {"name": "不明", "per": "-", "pbr": "-"}
+    data = {
+        "name": "不明", "market": "-", "industry": "-",
+        "per": "-", "pbr": "-", "yield": "-", 
+        "credit": "-", "cap": "-"
+    }
     
     try:
         res = requests.get(url, headers=headers, timeout=5)
         res.encoding = res.apparent_encoding
-        html = res.text
+        # 解析しやすくするため、改行とタブを削除
+        html = res.text.replace("\n", "").replace("\t", "")
         
-        # 1. 社名取得
+        # 1. 社名取得 (<title>タグから)
         match_name = re.search(r'<title>(.*?)【', html)
         if match_name:
-            info["name"] = match_name.group(1).strip()
-            
-        # ヘルパー関数: キーワード近辺の数値を抽出
-        def extract_value_nearby(keyword, text_content):
-            # キーワードを探す (連) -> (単) の順
-            idx = text_content.find(keyword + "(連)")
-            if idx == -1:
-                idx = text_content.find(keyword + "(単)")
-            
-            if idx != -1:
-                # キーワードの後ろ200文字くらいを切り出す
-                chunk = text_content[idx:idx+200]
-                # "数字 + 倍" のパターンを探す
-                # [0-9\.,\-]+ は「数字、ドット、カンマ、ハイフン」の連続
-                match = re.search(r'([0-9\.,\-]+)(?:</span>)?倍', chunk)
-                if match:
-                    return match.group(1) + "倍"
-            return "-"
+            data["name"] = match_name.group(1).strip()
 
-        # 2. PER/PBR取得
-        info["per"] = extract_value_nearby("PER", html)
-        info["pbr"] = extract_value_nearby("PBR", html)
+        # 2. 市場・業種
+        match_market = re.search(r'<span class="market">(.*?)</span>', html)
+        if match_market: data["market"] = match_market.group(1)
+        
+        # 業種リンクから抽出 (例: >精密機器</a>)
+        match_ind = re.search(r'market=\d+">([^<]+)</a>', html)
+        if match_ind: data["industry"] = match_ind.group(1)
+
+        # 3. PER/PBR/利回り/信用倍率/時価総額
+        # id="stockinfo_i3" のテーブルを探す
+        table_match = re.search(r'<div id="stockinfo_i3">.*?<tbody>(.*?)</tbody>', html)
+        
+        if table_match:
+            tbody = table_match.group(1)
             
-        return info
+            # HTMLタグを除去する関数
+            def clean_tag(s):
+                return re.sub(r'<[^>]+>', '', s).strip()
+
+            # 最初の <tr> 内の <td> を全て取得
+            # 順番: [0]PER, [1]PBR, [2]利回り, [3]信用倍率
+            tds = re.findall(r'<td>(.*?)</td>', tbody)
+            
+            if len(tds) >= 4:
+                data["per"] = clean_tag(tds[0])
+                data["pbr"] = clean_tag(tds[1])
+                data["yield"] = clean_tag(tds[2])
+                data["credit"] = clean_tag(tds[3])
+            
+            # 時価総額 (v_zika2クラス)
+            cap_match = re.search(r'class="v_zika2">(.*?)</td>', tbody)
+            if cap_match:
+                data["cap"] = clean_tag(cap_match.group(1))
+
+        return data
         
     except Exception:
-        return info
+        return data
 
 @st.cache_data(ttl=3600)
 def get_technical_summary(ticker):
@@ -99,11 +116,8 @@ def get_technical_summary(ticker):
     if not ticker.isdigit(): return None, None, None
     stock_code = f"{ticker}.JP"
     
-    # 株探からファンダメンタルズ情報を取得
-    fund_info = get_stock_info_from_kabutan(ticker)
-    company_name = fund_info["name"]
-    per_val = fund_info["per"]
-    pbr_val = fund_info["pbr"]
+    # 株探から詳細情報を取得
+    fund = get_stock_info_from_kabutan(ticker)
     
     csv_url = f"https://stooq.com/q/d/l/?s={stock_code}&i=d"
     
@@ -164,7 +178,7 @@ def get_technical_summary(ticker):
             elif ma5 < ma25 and ma25 < ma75:
                 po_status = "▼下落PO"
 
-        # 戦略判定 & ターゲット計算
+        # 戦略判定
         strategy_type = "中立"
         target_half = 0
         target_full = 0
@@ -172,8 +186,8 @@ def get_technical_summary(ticker):
         # A. 順張り
         if "上昇" in po_status:
             strategy_type = "🔥順張り"
-            target_half = ma25 * 1.10 # +10%
-            target_full = ma25 * 1.20 # +20%
+            target_half = ma25 * 1.10 
+            target_full = ma25 * 1.20 
             if recent_high > price and recent_high < target_half:
                 target_half = recent_high
         
@@ -183,29 +197,34 @@ def get_technical_summary(ticker):
             target_half = ma5
             target_full = ma25
 
-        # 出来高倍率
+        # 出来高
         vol_msg = "-"
         if latest['Vol_SMA5'] > 0:
             vol_ratio = latest['Volume'] / latest['Vol_SMA5']
             vol_msg = f"{vol_ratio:.1f}倍"
 
+        # AIに渡す全データ
         summary_text = f"""
-        【銘柄: {ticker} ({company_name})】
+        【銘柄: {ticker} {fund['name']}】
+        - 属性: {fund['market']} / {fund['industry']}
         - 現在値: {price:,.0f}円
-        - 戦略タイプ: {strategy_type}
-        - PO判定: {po_status}
-        - RSI(14): {rsi_val:.1f}
-        - 出来高(5日比): {vol_msg}
-        - MA乖離率: {dev_str}
-        - 割安度(株探): PER {per_val} / PBR {pbr_val}
+        - 時価総額: {fund['cap']}
+        - ファンダメンタルズ: PER {fund['per']} / PBR {fund['pbr']} / 配当利回り {fund['yield']} / 信用倍率 {fund['credit']}
         
-        [重要: 計算済みターゲット価格]
+        - テクニカル指標:
+          * 戦略タイプ: {strategy_type}
+          * PO判定: {po_status}
+          * RSI(14): {rsi_val:.1f}
+          * 出来高(5日比): {vol_msg}
+          * MA乖離率: {dev_str}
+        
+        [ターゲット価格(計算値)]
         * 5日線: {ma5:.0f}円
         * 25日線: {ma25:.0f}円
-        * 半益ターゲット(計算値): {target_half:.0f}円
-        * 全益ターゲット(計算値): {target_full:.0f}円
+        * 半益目安: {target_half:.0f}円
+        * 全益目安: {target_full:.0f}円
         """
-        return ticker, summary_text, company_name
+        return ticker, summary_text, fund['name']
         
     except Exception as e:
         return None, None, None
@@ -227,10 +246,11 @@ def generate_ranking_table(summaries):
     提供されたデータに基づき、以下の要素を必ず全て網羅した表を作成してください。
     
     1. **戦略**: 「🔥順張り」か「🌊逆張り」か。
-    2. **RSI装飾**: RSIが**30以下なら「🔵(数値)」**、**70以上なら「🔴(数値)」**、それ以外はそのまま表示。
-    3. **割安度**: 提供データにある **「割安度(株探): PER...」** の数値をそのまま記載すること。
-    4. **利確戦略**: 計算された「半益ターゲット」「全益ターゲット」の数値を必ず使うこと。
-    5. **アイの所感**: **40文字以内**で、データに基づいた冷静なコメントを記述（丁寧語）。
+    2. **RSI装飾**: RSIが30以下なら「🔵」、70以上なら「🔴」をつける。
+    3. **指標まとめ**: 「PER / PBR / 利回り」を1つのセルにまとめて記述（例: 15倍/1.2倍/3%）。
+    4. **時価総額・信用倍率**: 提供データをそのまま記載。
+    5. **利確戦略**: 計算された数値を必ず使うこと。
+    6. **アイの所感**: 40文字以内で、データに基づいた冷静なコメントを記述。
 
     【データ】
     {summaries}
@@ -239,11 +259,11 @@ def generate_ranking_table(summaries):
     1. 冒頭で、全体の地合いについて理知的な短評（2行）。
     2. 以下のカラム構成でMarkdown表を作成。
     
-    | 順位 | コード | 企業名 | 現在値 | 戦略 | PO判定 | RSI | 出来高(5日比) | 推奨買値 | 利確戦略(半益/全益) | 割安度(PER/PBR) | アイの所感(40文字) |
+    | 順位 | コード | 企業名 | 現在値 | 戦略 | RSI | 指標(PER/PBR/利回り) | 時価総額 | 信用倍率 | 推奨買値 | 利確(半益/全益) | アイの所感(40文字) |
     
     3. **【アイの独り言（投資家への警鐘）】**
-       - 最後にこのセクションを設け、ここだけは**「～だ」「～である」「～と思う」という常体（独白調）**に切り替えてください。
-       - プロとして相場を俯瞰し、静かにリスクを懸念する内容を3行程度で記述してください。
+       - ここだけは「～だ」「～である」「～思う」という常体（独白調）。
+       - プロとして相場を俯瞰し、静かにリスクを懸念する内容を3行程度で記述。
     """
     
     try:
