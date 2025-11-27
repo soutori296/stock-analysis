@@ -19,37 +19,6 @@ st.markdown("""
 <p class="big-font">あなたの提示した銘柄についてアイが分析して売買戦略を伝えます。</p>
 """, unsafe_allow_html=True)
 
-# --- ここに説明書を追加 ---
-with st.expander("ℹ️ スコア配分・判定ロジックの説明書を見る"):
-    st.markdown("""
-    ### 💯 AIスコア算出ルール (100点満点)
-    **基本点: 50点** からスタートし、以下の3要素で加点・減点を行います。
-    
-    #### 1. トレンド判定 (移動平均線の並び)
-    | 状態 | 変動 | 判定基準 |
-    | :--- | :--- | :--- |
-    | **🔥上昇PO** | **+20点** | 5日 > 25日 > 75日 かつ 5日線上向き (最強) |
-    | **上昇配列** | **+10点** | 並び順は良いが、勢いが少し弱い |
-    | **▼下落PO** | **-20点** | 5日 < 25日 < 75日 (完全な下落) |
-    | その他 | ±0点 | レンジ、調整局面など |
-
-    #### 2. RSI判定 (14日)
-    | RSI値 | 変動 | 判定 |
-    | :--- | :--- | :--- |
-    | **55 ～ 65** | **+15点** | **🟢🔥 理想的** (トレンド初動～中盤) |
-    | **30 以下** | **+10点** | **🔵 売られすぎ** (逆張りチャンス) |
-    | **65 ～ 70** | **+5点** | **🟢 強気** (まだ伸びる余地あり) |
-    | **30 ～ 55** | ±0点 | 🟢 中立 |
-    | **70 以上** | **-10点** | **🔴 買われすぎ** (高値掴み警戒) |
-
-    #### 3. 出来高判定 (対5日平均比)
-    | 倍率 | 変動 | 判定 |
-    | :--- | :--- | :--- |
-    | **1.5倍 以上** | **+15点** | **急増** (強い資金流入) |
-    | **1.0 ～ 1.5倍** | **+5点** | 増加傾向 |
-    | **1.0倍 未満** | ±0点 | 閑散・減少 |
-    """)
-
 # サイドバー設定
 if "GEMINI_API_KEY" in st.secrets:
     api_key = st.secrets["GEMINI_API_KEY"]
@@ -61,7 +30,7 @@ else:
 tickers_input = st.text_area(
     "Analysing Targets (銘柄コードを入力)", 
     value="", 
-    placeholder="例:\n7203\n8306\n9984\n(ここにコードを入力してください)",
+    placeholder="例:\n7203\n8306\n215A\n(ここにコードを入力してください)",
     height=150
 )
 
@@ -83,9 +52,13 @@ if api_key:
         st.error(f"System Error: {e}")
 
 def get_stock_info_from_kabutan(code):
-    """株探から現在値とファンダメンタルズを取得"""
+    """
+    株探から現在値とファンダメンタルズを取得（強化版）
+    """
     url = f"https://kabutan.jp/stock/?code={code}"
-    headers = {"User-Agent": "Mozilla/5.0"}
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
     
     data = {"name": "不明", "per": "-", "pbr": "-", "price": None, "volume": None, "cap": 0}
     
@@ -97,6 +70,7 @@ def get_stock_info_from_kabutan(code):
         match_name = re.search(r'<title>(.*?)【', html)
         if match_name: data["name"] = match_name.group(1).strip()
             
+        # 現在値 (class="kabuka")
         match_price_header = re.search(r'class="kabuka">([0-9,]+)円<', html)
         if match_price_header:
             data["price"] = float(match_price_header.group(1).replace(",", ""))
@@ -104,15 +78,18 @@ def get_stock_info_from_kabutan(code):
             match_price_tbl = re.search(r'現在値</th>.*?<td>([0-9,]+)</td>', html)
             if match_price_tbl: data["price"] = float(match_price_tbl.group(1).replace(",", ""))
 
+        # 出来高
         match_vol = re.search(r'出来高</th>.*?<td>([0-9,]+).*?株</td>', html)
         if match_vol: data["volume"] = float(match_vol.group(1).replace(",", ""))
 
+        # PER/PBR
         def extract_val(key, text):
             m = re.search(rf'{key}.*?>([0-9\.,\-]+)(?:</span>)?(?:倍|％)', text)
             return m.group(1) + "倍" if m else "-"
         data["per"] = extract_val("PER", html)
         data["pbr"] = extract_val("PBR", html)
 
+        # 時価総額
         match_cap = re.search(r'時価総額</th>.*?<td>([0-9,]+)<span>億円', html)
         if match_cap: data["cap"] = int(match_cap.group(1).replace(",", ""))
             
@@ -122,27 +99,35 @@ def get_stock_info_from_kabutan(code):
 
 @st.cache_data(ttl=3600)
 def get_technical_summary(ticker):
-    ticker = str(ticker).strip().replace(".T", "").replace(".t", "")
-    if not ticker.isdigit(): return None, None, None
+    # コードのクリーニング（英字対応・大文字化）
+    ticker = str(ticker).strip().replace(".T", "").replace(".t", "").upper()
+    
+    # 【修正点】isdigit() ではなく isalnum() を使い、英数字を許可する
+    if not ticker.isalnum(): return None
+    
     stock_code = f"{ticker}.JP"
     
     # 1. リアルタイムデータ (株探)
     fund = get_stock_info_from_kabutan(ticker)
     
     # 2. 過去データ (Stooq)
+    # ※注意: 新規上場の英字コード銘柄はStooqにデータがない場合があります
     csv_url = f"https://stooq.com/q/d/l/?s={stock_code}&i=d"
     
     try:
         headers = {"User-Agent": "Mozilla/5.0"}
         res = requests.get(csv_url, headers=headers, timeout=10)
-        if res.status_code != 200: return None, None, None
+        
+        # Stooqにデータがない場合（新規IPOなど）はスキップ
+        if res.status_code != 200: return None
         
         df = pd.read_csv(io.BytesIO(res.content), index_col="Date", parse_dates=True)
-        if df.empty: return None, None, None
+        if df.empty: return None
         
         df = df.sort_index()
         df = df.tail(100) 
         
+        # テクニカル計算
         df['SMA5'] = df['Close'].rolling(window=5).mean()
         df['SMA25'] = df['Close'].rolling(window=25).mean()
         df['SMA75'] = df['Close'].rolling(window=75).mean()
@@ -154,13 +139,13 @@ def get_technical_summary(ticker):
         rs = gain / loss
         df['RSI'] = 100 - (100 / (1 + rs))
         
-        if len(df) < 25: return None, None, None
+        if len(df) < 25: return None # データ不足ならスキップ
 
-        # 最終確定足（昨日）
         last_day = df.iloc[-1]
         
         # --- データの統合 ---
         current_price = fund["price"] if fund["price"] else last_day['Close']
+        source_label = "Realtime" if fund["price"] else "Close"
         
         vol_sma5 = last_day['Vol_SMA5']
         current_vol = fund["volume"] if fund["volume"] else last_day['Volume']
@@ -170,10 +155,9 @@ def get_technical_summary(ticker):
         ma75 = last_day['SMA75']
         rsi = last_day['RSI']
         
-        # --- スコアリング (100点満点) ---
+        # --- スコアリング ---
         score = 50 
         
-        # 1. PO判定
         slope5_up = ma5 > df.iloc[-2]['SMA5']
         if ma5 > ma25 and ma25 > ma75:
             if slope5_up: 
@@ -188,7 +172,6 @@ def get_technical_summary(ticker):
         else:
             po_status = "レンジ"
 
-        # 2. RSI判定
         rsi_mark = f"{rsi:.0f}"
         if rsi <= 30:
             score += 10
@@ -202,7 +185,6 @@ def get_technical_summary(ticker):
         else:
             rsi_mark = f"🟢{rsi:.0f}"
 
-        # 3. 出来高判定
         vol_bonus = 0
         vol_ratio = 0
         if vol_sma5 > 0:
@@ -248,6 +230,7 @@ def get_technical_summary(ticker):
             "code": ticker,
             "name": fund['name'],
             "price": current_price,
+            "source": source_label,
             "score": score,
             "strategy": strategy,
             "po": po_status,
@@ -274,7 +257,6 @@ def generate_ranking_table(high_score_list, low_score_list):
             [{d['code']} {d['name']}]
             - スコア: {d['score']}点, 戦略: {d['strategy']}
             - RSI: {d['rsi']:.1f}, 出来高倍率: {d['vol_ratio']:.2f}倍
-            - 現在値: {d['price']:,.0f}円
             - 推奨買値(残): {d['buy_display']}
             - 利確目標: 半益 {d['p_half']} / 全益 {d['p_full']}
             --------------------------------
@@ -302,7 +284,7 @@ def generate_ranking_table(high_score_list, low_score_list):
     1. 冒頭で、全体の地合いについて理知的な短評（2行）。
     
     2. **【買い推奨・注目ゾーン】** (該当がなければ「なし」と記述)
-    | 順位 | コード | 企業名 | スコア | 戦略 | RSI | 出来高(5日比) | 現在値 | 推奨買値(残) | 利確(半益/全益) | アイの所感 |
+    | 順位 | コード | 企業名 | スコア | 戦略 | RSI | 出来高(5日比) | 現在値 | 推奨買値(残) | 利確(半益/全益) | アイの所感(40文字) |
     
     3. **【様子見・警戒ゾーン】**
     (同じ形式の表を作成)
@@ -341,7 +323,6 @@ if st.button("🚀 分析開始 (アイに聞く)"):
             time.sleep(1.0) 
 
         if data_list:
-            # ソート処理
             if sort_option == "AIスコア順 (おすすめ)":
                 data_list.sort(key=lambda x: x['score'], reverse=True)
             elif sort_option == "RSI順 (低い順)":
@@ -367,6 +348,6 @@ if st.button("🚀 分析開始 (アイに聞く)"):
             st.markdown(result)
             
             with st.expander("詳細データリスト(確認用)"):
-                st.dataframe(pd.DataFrame(data_list)[['code', 'name', 'price', 'score', 'strategy', 'rsi', 'vol_ratio', 'p_half', 'p_full']])
+                st.dataframe(pd.DataFrame(data_list)[['code', 'name', 'price', 'source', 'score', 'strategy', 'rsi', 'vol_ratio', 'p_half', 'p_full']])
         else:
             st.error("有効なデータが取得できませんでした。")
