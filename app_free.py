@@ -86,7 +86,7 @@ with st.expander("ℹ️ スコア配分・機能説明"):
 
     ### 🛠 ダイナミック・バックテスト
     時価総額に合わせて勝率判定の難易度を自動調整。
-    (大型:3%, 中型:4%, 小型:5% 上昇で勝ち)
+    (大型:2%, 中型:3%, 小型:4% 上昇で勝ち)
     """)
 
 # --- サイドバー設定 ---
@@ -462,4 +462,5 @@ if st.button("🚀 分析開始 (アイに聞く)"):
                     st.dataframe(pd.DataFrame(data_list)[['code', 'name', 'price', 'cap_disp', 'score', 'rsi_str', 'vol_str', 'backtest']])
             else:
                 st.error("有効なデータが取得できませんでした。")
+
 
