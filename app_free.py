@@ -47,8 +47,8 @@ if api_key:
 
 def get_stock_info_from_kabutan(code):
     """
-    株探から「社名」「PER」「PBR」を強力な正規表現で取得する関数
-    (連)と(単)の両方に対応し、改行コードも無視して検索する
+    株探から「社名」「PER」「PBR」を柔軟に取得する関数
+    HTML構造の変化や改行コードに強いロジックに変更
     """
     url = f"https://kabutan.jp/stock/?code={code}"
     headers = {
@@ -60,28 +60,29 @@ def get_stock_info_from_kabutan(code):
     try:
         res = requests.get(url, headers=headers, timeout=5)
         res.encoding = res.apparent_encoding
-        html = res.text
+        # HTML内の改行や余計な空白を削除して1行にする（検索ミスを防ぐため）
+        html = res.text.replace("\n", "").replace("\r", "")
         
         # 1. 社名取得
         match_name = re.search(r'<title>(.*?)【', html)
         if match_name:
             info["name"] = match_name.group(1).strip()
             
-        # 2. PER取得 (連または単に対応、改行無視)
-        # 検索パターン: "PER" -> カッコ -> 閉じタグ -> 任意の空白 -> <td> -> <span> -> 数値
-        match_per = re.search(r'PER\((?:連|単)\).*?</td>\s*<td><span[^>]*>([0-9\.,\-]+)</span>', html, re.DOTALL)
+        # 2. PER取得
+        # パターン: "PER" -> "(連)または(単)" -> 任意のタグや文字 -> 数値 -> "倍"
+        # 例: <th>PER(連)</th><td><span class="...">15.3</span>倍</td>
+        match_per = re.search(r'PER\((?:連|単)\).*?>([0-9\.,\-]+)</span>', html)
         if match_per:
             info["per"] = match_per.group(1) + "倍"
 
         # 3. PBR取得
-        match_pbr = re.search(r'PBR\((?:連|単)\).*?</td>\s*<td><span[^>]*>([0-9\.,\-]+)</span>', html, re.DOTALL)
+        match_pbr = re.search(r'PBR\((?:連|単)\).*?>([0-9\.,\-]+)</span>', html)
         if match_pbr:
             info["pbr"] = match_pbr.group(1) + "倍"
             
         return info
         
     except Exception:
-        # エラー時はデフォルト値を返す
         return info
 
 @st.cache_data(ttl=3600)
@@ -219,7 +220,7 @@ def generate_ranking_table(summaries):
     
     1. **戦略**: 「🔥順張り」か「🌊逆張り」か。
     2. **RSI装飾**: RSIが**30以下なら「🔵(数値)」**、**70以上なら「🔴(数値)」**、それ以外はそのまま表示。
-    3. **割安度**: 提供データにある **「割安度(株探): PER...」** の数値をそのまま記載すること。"-"の場合はそのまま"-"と書く。
+    3. **割安度**: 提供データにある **「割安度(株探): PER...」** の数値をそのまま記載すること。
     4. **利確戦略**: 計算された「半益ターゲット」「全益ターゲット」の数値を必ず使うこと。
     5. **アイの所感**: **40文字以内**で、データに基づいた冷静なコメントを記述（丁寧語）。
 
@@ -230,7 +231,7 @@ def generate_ranking_table(summaries):
     1. 冒頭で、全体の地合いについて理知的な短評（2行）。
     2. 以下のカラム構成でMarkdown表を作成。
     
-    | 順位 | コード | 企業名 | 現在値 | 戦略 | RSI | 出来高(5日比) | 推奨買値 | 利確戦略(半益/全益) | 割安度(PER/PBR) | アイの所感(40文字) |
+    | 順位 | コード | 企業名 | 現在値 | 戦略 | PO判定 | RSI | 出来高(5日比) | 推奨買値 | 利確戦略(半益/全益) | 割安度(PER/PBR) | アイの所感(40文字) |
     
     ※順位は「戦略の明確さ（強い順張り or 売られすぎ逆張り）」順。
     
