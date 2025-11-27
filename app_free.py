@@ -36,20 +36,15 @@ with col_title:
         th:nth-child(1), td:nth-child(1),
         th:nth-child(2), td:nth-child(2) { width: 35px; text-align: center; }
 
-        /* 3列目: 企業名 (幅を拡大: +5文字分程度) */
+        /* 3列目: 企業名 */
         th:nth-child(3), td:nth-child(3) { 
-            min-width: 150px; /* ここを増やしました */
-            max-width: 200px;
+            min-width: 150px; max-width: 200px;
             font-weight: bold; font-size: 13px;
             overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
         }
 
         /* 4列目: 時価総額 */
-        th:nth-child(4), td:nth-child(4) { 
-            width: 60px; 
-            font-size: 11px; 
-            text-align: right; 
-        }
+        th:nth-child(4), td:nth-child(4) { width: 60px; font-size: 11px; text-align: right; }
 
         /* 5-8列目: スコア等 */
         th:nth-child(5), td:nth-child(5) { width: 40px; text-align: center; }
@@ -61,26 +56,20 @@ with col_title:
         th:nth-child(9), td:nth-child(9) { white-space: nowrap; }
 
         /* 10列目: 推奨買値 */
-        th:nth-child(10), td:nth-child(10) { 
-            width: 70px; 
-            font-size: 12px; 
-        }
+        th:nth-child(10), td:nth-child(10) { width: 70px; font-size: 12px; }
 
         /* 11列目: 利確 */
         th:nth-child(11), td:nth-child(11) { min-width: 100px; font-size: 12px; }
 
-        /* 12列目: 指標 (改行が入るので少し縦長になる) */
+        /* 12列目: 指標 (改行対応) */
         th:nth-child(12), td:nth-child(12) { 
             font-size: 11px; 
-            width: 60px; 
-            white-space: pre-wrap; /* 改行を有効化 */
+            min-width: 60px; 
+            line-height: 1.4 !important;
         }
 
-        /* 13列目: アイの所感 (幅を縮小: -5文字分程度) */
-        th:nth-child(13), td:nth-child(13) { 
-            min-width: 140px; /* ここを減らしました */
-            font-size: 13px;
-        }
+        /* 13列目: アイの所感 */
+        th:nth-child(13), td:nth-child(13) { min-width: 140px; font-size: 13px; }
     </style>
     <p class="big-font" style="margin-top: 0px;">あなたの提示した銘柄についてアイが分析して売買戦略を伝えます。</p>
     """, unsafe_allow_html=True)
@@ -95,15 +84,9 @@ with st.expander("ℹ️ スコア配分・機能説明"):
     3. **出来高**: 急増で加点
     4. **バックテスト (裏機能)**: 過去の検証で勝率が高い銘柄はさらに加点。
 
-    ### 🛠 ダイナミック・バックテスト (時価総額連動)
-    時価総額に合わせて、勝率判定の難易度を自動調整しています。
-    *   **大型株 (1兆円以上)**: **+3%** 上昇で「勝ち」
-    *   **中型株 (1000億円以上)**: **+4%** 上昇で「勝ち」
-    *   **小型株 (1000億円未満)**: **+5%** 上昇で「勝ち」
-
-    ### 🎯 利確ターゲット
-    *   順張り: 半益(Max[現在値+5%, 25MA+10%])、全益(Max[現在値+10%, 25MA+20%])
-    *   逆張り: 半益(5MA)、全益(25MA)
+    ### 🛠 ダイナミック・バックテスト
+    時価総額に合わせて勝率判定の難易度を自動調整。
+    (大型:3%, 中型:4%, 小型:5% 上昇で勝ち)
     """)
 
 # --- サイドバー設定 ---
@@ -134,7 +117,7 @@ if api_key:
 
 def get_stock_info_from_kabutan(code):
     """
-    株探から情報を取得 (強力解析版・指標取得強化)
+    株探から情報を取得 (位置指定スクレイピング強化版)
     """
     url = f"https://kabutan.jp/stock/?code={code}"
     headers = {"User-Agent": "Mozilla/5.0"}
@@ -143,63 +126,60 @@ def get_stock_info_from_kabutan(code):
     try:
         res = requests.get(url, headers=headers, timeout=5)
         res.encoding = res.apparent_encoding
-        
-        # HTMLタグ除去 & テキスト整形
-        text_content = re.sub(r'<[^>]+>', ' ', res.text)
-        text_content = re.sub(r'\s+', ' ', text_content) 
+        html = res.text.replace("\n", "").replace("\r", "")
         
         # 1. 社名
-        match_name = re.search(r'<title>(.*?)【', res.text)
+        match_name = re.search(r'<title>(.*?)【', html)
         if match_name: 
             raw_name = match_name.group(1).strip()
             data["name"] = re.sub(r'[（\(].*?[）\)]', '', raw_name)
 
-        # ヘルパー: キーワードの直後にある数値を厳密に探す
-        def find_value_strict(keyword, text):
-            # キーワードの後ろ50文字を取得
-            idx = text.find(keyword)
-            if idx == -1: return None
-            chunk = text[idx:idx+50]
-            # "PER (連) 13.1 倍" のようなスペース入りに対応
-            match = re.search(r'([0-9\.,\-]+)\s*倍', chunk)
-            return match
-
         # 2. 現在値
-        match_price = re.search(r'現在値\s*([0-9,.]+)', text_content)
+        match_price = re.search(r'現在値</th>\s*<td[^>]*>([0-9,.]+)</td>', html)
         if match_price:
-            try: data["price"] = float(match_price.group(1).replace(",", ""))
-            except: pass
+            data["price"] = float(match_price.group(1).replace(",", ""))
 
         # 3. 出来高
-        match_vol = re.search(r'出来高\s*([0-9,]+)\s*株', text_content)
+        match_vol = re.search(r'出来高</th>\s*<td[^>]*>([0-9,]+).*?株</td>', html)
         if match_vol:
-            try: data["volume"] = float(match_vol.group(1).replace(",", ""))
-            except: pass
+            data["volume"] = float(match_vol.group(1).replace(",", ""))
 
-        # 4. 時価総額
-        match_cap = re.search(r'時価総額\s*([0-9,]+(?:兆[0-9,]+)?)\s*億円', text_content)
-        if match_cap:
-            raw_cap = match_cap.group(1).replace(",", "")
-            if "兆" in raw_cap:
-                parts = raw_cap.split("兆")
+        # 4. 時価総額 (v_zika2クラスを狙い撃ち)
+        # <td ... class="v_zika2">28<span>兆</span>6,605<span>億円</span></td>
+        match_cap_area = re.search(r'class="v_zika2">(.*?)</td>', html)
+        if match_cap_area:
+            raw_cap_html = match_cap_area.group(1)
+            # タグを全削除 -> "28兆6,605億円"
+            cap_text = re.sub(r'<[^>]+>', '', raw_cap_html).replace(",", "").strip()
+            
+            if "兆" in cap_text:
+                parts = cap_text.replace("億円", "").split("兆")
                 trillion = int(parts[0])
                 billion = int(parts[1]) if parts[1] else 0
                 data["cap"] = trillion * 10000 + billion
             else:
-                try: data["cap"] = int(raw_cap)
-                except: data["cap"] = 0
+                try:
+                    data["cap"] = int(cap_text.replace("億円", ""))
+                except:
+                    data["cap"] = 0
 
-        # 5. PER / PBR (厳密検索)
-        # 以前は "PER" の後ろの数字を適当に拾っていたため、PBRの検索時にPERの数字を拾っていた可能性がある。
-        # 今回は "PER" と "PBR" それぞれのキーワードの「直後」を狙う。
-        
-        # PER検索
-        m_per = find_value_strict("PER", text_content)
-        if m_per: data["per"] = m_per.group(1) + "倍"
+        # 5. PER / PBR (stockinfo_i3 内のテーブル順序に依存して取得)
+        # stockinfo_i3 エリアを特定
+        i3_match = re.search(r'<div id="stockinfo_i3">.*?<tbody>(.*?)</tbody>', html)
+        if i3_match:
+            tbody = i3_match.group(1)
+            # <td>...</td> を順番に取得
+            # 1つ目: PER, 2つ目: PBR
+            tds = re.findall(r'<td[^>]*>(.*?)</td>', tbody)
+            
+            def clean_tag_val(val):
+                # <span>タグなどを消して "13.1倍" のようにする
+                val = re.sub(r'<[^>]+>', '', val).strip()
+                return val
 
-        # PBR検索
-        m_pbr = find_value_strict("PBR", text_content)
-        if m_pbr: data["pbr"] = m_pbr.group(1) + "倍"
+            if len(tds) >= 2:
+                data["per"] = clean_tag_val(tds[0])
+                data["pbr"] = clean_tag_val(tds[1])
 
         return data
     except Exception:
@@ -357,7 +337,7 @@ def get_technical_summary(ticker):
         if fund['cap'] >= 10000:
             cap_disp = f"{fund['cap']/10000:.1f}兆円"
 
-        # 指標表示 (改行対応)
+        # 指標表示 (改行コード挿入)
         fund_disp = f"{fund['per']}<br>{fund['pbr']}"
 
         return {
@@ -372,7 +352,7 @@ def get_technical_summary(ticker):
             "vol_str": vol_str,
             "cap": fund["cap"],
             "cap_disp": cap_disp,
-            "fund_disp": fund_disp, # 改行入り文字列
+            "fund_disp": fund_disp, 
             "buy_display": buy_display, 
             "profit_display": profit_display,
             "backtest": backtest_result
@@ -386,6 +366,9 @@ def generate_ranking_table(high_score_list, low_score_list):
     def list_to_text(lst):
         txt = ""
         for d in lst:
+            # AIには <br> をスラッシュに置換して渡す（テキスト解析用）
+            # ただし表の出力時にはそのまま書かせる
+            fund_txt = d['fund_disp'].replace("<br>", "/")
             txt += f"""
             [{d['code']} {d['name']}]
             - スコア:{d['score']}, 戦略:{d['strategy']}
@@ -394,7 +377,8 @@ def generate_ranking_table(high_score_list, low_score_list):
             - 現在値:{d['price']:,.0f}円
             - 推奨買値(残):{d['buy_display']}
             - 利確目標:{d['profit_display']}
-            - 指標:{d['fund_disp'].replace('<br>', '/')} 
+            - 指標:{fund_txt}
+            - 指標表示用文字列: {d['fund_disp']}
             --------------------------------
             """
         return txt if txt else "なし"
@@ -407,10 +391,11 @@ def generate_ranking_table(high_score_list, low_score_list):
     
     【出力データのルール】
     1. **表のみ出力**: 挨拶不要。
-    2. **そのまま表示**: データ内の「RSI」「出来高」「推奨買値」「利確目標」「指標」は、**加工せずそのまま**表に入れてください。
-    3. **時価総額**: 「時価総額」の列を追加し、データの `cap_disp` を表示してください。
-    4. **バックテスト**: 裏データの勝率が高い銘柄は所感で評価してください。
-    5. **アイの所感**: 80文字以内で、データに基づいた冷静なコメントを記述。
+    2. **そのまま表示**: データ内の「RSI」「出来高」「推奨買値」「利確目標」は加工せずそのまま。
+    3. **指標**: データ内の「指標表示用文字列」(`{d['fund_disp']}`)をそのまま出力して、セル内で2段にしてください。
+    4. **時価総額**: 「時価総額」の列を追加し、データの `cap_disp` を表示。
+    5. **バックテスト**: 裏データの勝率が高い銘柄は所感で評価。
+    6. **アイの所感**: 80文字以内。
 
     【データ1: 注目ゾーン】
     {list_to_text(high_score_list)}
@@ -420,7 +405,7 @@ def generate_ranking_table(high_score_list, low_score_list):
     
     【出力構成】
     **【買い推奨・注目ゾーン】**
-    | 順位 | コード | 企業名 | 時価総額 | スコア | 戦略 | RSI | 出来高<br>(5日比) | 現在値 | 推奨買値(残) | 利確<br>(半益/全益) | PER/<br>PBR | アイの所感 |
+    | 順位 | コード | 企業名 | 時価総額 | スコア | 戦略 | RSI | 出来高<br>(5日比) | 現在値 | 推奨買値(残) | 利確<br>(半益/全益) | 指標<br>(PER/PBR) | アイの所感 |
     
     **【様子見・警戒ゾーン】**
     (同じ形式の表を作成)
