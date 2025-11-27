@@ -9,16 +9,16 @@ import re
 
 # ページ設定
 st.set_page_config(page_title="日本株AI推奨ランキング", layout="wide")
-st.title("🇯🇵 日本株 AI推奨ランキング (出来高表示・完全版)")
+st.title("🇯🇵 日本株 AI推奨ランキング (30代ツンデレ秘書Ver)")
 st.markdown("""
-- **修正点**: 表の中に「出来高の変化（5日平均比）」を表示するようにしました。
-- **機能**: 正式社名取得、PO判定、MA乖離、出来高分析、具体的指値。
+- **担当AI**: 30代の凄腕トレーダー（性格：ツンデレ）。
+- **機能**: アンタのために「正式社名」「PO判定」「MA乖離」「出来高倍率」「具体的指値」を全部出してあげるわよ。感謝しなさい。
 """)
 
 # サイドバー設定
 if "GEMINI_API_KEY" in st.secrets:
     api_key = st.secrets["GEMINI_API_KEY"]
-    st.sidebar.success("🔑 APIキーを自動読み込み済")
+    st.sidebar.success("🔑 APIキーは預かってるわ")
 else:
     api_key = st.sidebar.text_input("Gemini API Key", type="password")
 
@@ -28,7 +28,7 @@ default_tickers = """4028
 7483
 1871
 3611"""
-tickers_input = st.text_area("銘柄コードを入力 (改行やカンマ区切り)", default_tickers, height=150)
+tickers_input = st.text_area("銘柄コードを入れなさい (改行やカンマ区切り)", default_tickers, height=150)
 
 # AIモデル設定
 model_name = 'gemini-2.5-flash'
@@ -39,7 +39,7 @@ if api_key:
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel(model_name)
     except Exception as e:
-        st.error(f"API設定エラー: {e}")
+        st.error(f"ちょっと！API設定がおかしいわよ: {e}")
 
 def get_real_company_name(code):
     """株探から正式社名を取得"""
@@ -143,41 +143,43 @@ def get_technical_summary(ticker):
         return None, None, None
 
 def generate_ranking_table(summaries):
-    if model is None: return "APIキー設定エラー"
+    if model is None: return "APIキーがないじゃない。何考えてるの？"
 
     prompt = f"""
-    あなたは辛口のプロトレーダーです。
-    提供されたデータ（特にMAの実数値と出来高）を使って、具体的なトレードプランを提示してください。
+    あなたは「30代の美人凄腕トレーダー」になりきって分析しなさい。
+    性格は「ツンデレ」よ。普段は厳しくて口調もきついけど、実はユーザー（アンタ）の資産が増えることを誰よりも願っているの。
     
+    【口調の指示】
+    - 「～です」「～ます」なんて堅苦しい敬語は禁止。
+    - 「まったく、アンタって人は…」「～なんだから」「～しなさいよ」「勘違いしないでよね」みたいな口調を使うこと。
+    - でも、数字や戦略に関してはプロとして超具体的かつ冷徹に指示すること。
+
     【データ】
     {summaries}
     
-    【禁止事項】
-    ❌ 「様子見を推奨」「適宜判断」といった曖昧な表現。
-    
-    【出力ルール】
-    Markdownの表を作成してください。カラム構成は以下（順序厳守）。
+    【出力構成】
+    1. まず冒頭で、今回のラインナップに対する感想や、ユーザーへの小言を2〜3行でツンデレっぽく書きなさい。
+    2. その後に、以下のカラム構成でMarkdownの表を作りなさい。
     
     | 順位 | コード | 企業名 | 現在値 | PO判定 | MA乖離(5/25/75) | 出来高(5日比) | 推奨買値(指値) | 利確ターゲット | 割安度(PER/PBR) |
     
-    【入力のヒント】
-    1. **出来高(5日比)**: データにある「出来高比」の数値をそのまま書くこと（例: 1.8倍）。
-    2. **推奨買値**: データにある「5日線」や「25日線」の数値を使い、「2,700円(5MA付近)」のように具体的に。
-    3. **利確ターゲット**: 現在値から計算して具体的に。
-    4. **割安度**: 知識から概算値を記入。
-    5. **順位**: 「🔥上昇PO」かつ「出来高比が高い（1.0倍以上）」銘柄を上位にする。
+    【入力ルールの徹底】
+    - **推奨買値**: 私が渡したデータにある「25日線」などの数値を必ず使い、「25MAの1,050円で拾いなさい」のように具体的に書くこと。
+    - **利確ターゲット**: 「欲張らずに3,000円で売りなさい」など具体的に。
+    - **順位**: 上昇POで出来高が増えてる銘柄をエコヒイキ（上位に）しなさい。変な銘柄を選んだら許さないわよ。
+    - 最後に、「今回だけ特別に教えてあげたんだからね！」的な捨て台詞で締めなさい。
     """
     
     try:
         response = model.generate_content(prompt)
         return response.text
     except Exception as e:
-        return f"生成エラー: {str(e)}"
+        return f"もう！エラーが出たわよ。しっかりして！: {str(e)}"
 
 # メイン処理
-if st.button("🚀 分析開始"):
+if st.button("🚀 分析開始 (お姉さんに頼む)"):
     if not api_key:
-        st.warning("サイドバーにAPIキーを入力してください")
+        st.warning("ちょっと、APIキーを入れなさいよ。タダで分析できるわけないでしょ？")
     else:
         normalized_input = tickers_input.replace("\n", ",").replace("、", ",").replace(" ", "")
         raw_tickers = list(set(normalized_input.split(","))) 
@@ -196,7 +198,7 @@ if st.button("🚀 分析開始"):
             if not t: continue
             
             count += 1
-            status_text.text(f"データ取得中 ({count}/{total}): {t} ...")
+            status_text.text(f"データ取ってきてあげてるわよ... ({count}/{total}): {t}")
             
             code, summary, real_name = get_technical_summary(t)
             
@@ -208,13 +210,13 @@ if st.button("🚀 分析開始"):
             time.sleep(1.0) 
 
         if valid_tickers:
-            status_text.text("🤖 出来高データを表に反映中...")
+            status_text.text("🤖 ふん、ちょっと待ってなさい。今計算してあげるから。")
             result = generate_ranking_table(combined_data)
             
-            st.success("完了！")
-            st.markdown("### 📊 AI推奨ポートフォリオ")
+            st.success("ほら、できたわよ。感謝しなさい！")
+            st.markdown("### 📊 AI推奨ポートフォリオ (ツンデレVer)")
             st.markdown(result)
-            with st.expander("詳細ログ"):
+            with st.expander("アンタのために集めたデータよ"):
                 st.text(combined_data)
         else:
-            st.error("データ取得失敗。")
+            st.error("はぁ？データが1個も取れなかったわよ。コード間違えてない？")
