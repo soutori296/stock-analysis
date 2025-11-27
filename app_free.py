@@ -23,59 +23,25 @@ with col_title:
     <style>
         .big-font { font-size:18px !important; font-weight: bold; color: #4A4A4A; }
         
-        /* --- 表のスタイル調整 --- */
-        table { width: 100%; border-collapse: collapse; table-layout: auto; }
-        th, td { 
-            font-size: 14px; 
-            vertical-align: middle !important; 
-            padding: 6px 4px !important;
-            line-height: 1.4 !important;
-        }
-        
-        /* 3列目: 企業名 */
-        th:nth-child(3), td:nth-child(3) { 
-            min-width: 130px; 
-            font-weight: bold; 
-        }
-        
-        /* 4列目: スコア */
-        th:nth-child(4), td:nth-child(4) { 
-            white-space: nowrap; 
-            width: 50px; 
-            text-align: center; 
-        }
-
-        /* 9列目: 推奨買値 */
-        th:nth-child(9), td:nth-child(9) {
-            white-space: nowrap;
-        }
-
-        /* 10列目: 利確 (％が入るので少し広げる) */
-        th:nth-child(10), td:nth-child(10) { 
-            min-width: 130px;
-            font-size: 13px;
-            white-space: pre-wrap; 
-        }
-
-        /* 12列目: アイの所感 */
-        th:nth-child(12), td:nth-child(12) { 
-            width: 40%;
-            min-width: 300px;
-        }
+        /* 表のデザイン調整 */
+        table { width: 100%; border-collapse: collapse; }
+        th, td { font-size: 14px; vertical-align: middle !important; padding: 6px 4px !important; }
+        th:nth-child(3), td:nth-child(3) { font-weight: bold; min-width: 130px; } /* 企業名 */
+        th:nth-child(4), td:nth-child(4) { min-width: 80px; font-size: 13px; text-align: right; } /* 時価総額 */
+        th:nth-child(13), td:nth-child(13) { min-width: 250px; } /* 所感 */
     </style>
     <p class="big-font" style="margin-top: 0px;">あなたの提示した銘柄についてアイが分析して売買戦略を伝えます。</p>
     """, unsafe_allow_html=True)
 
 # ヘルプ
-with st.expander("ℹ️ スコア配分・機能説明"):
+with st.expander("ℹ️ ロジック解説 (時価総額別バックテスト)"):
     st.markdown("""
-    ### 💯 AIスコア算出ルール (100点満点)
-    **基本点: 50点** からスタートし、以下の要素で加点・減点を行います。
-    1. **トレンド**: 🔥順張り(+20)、上昇配列(+10)、▼下落(-20)
-    2. **RSI**: 55-65(+25 理想的)、30以下(+15)、70以上(-10)
-    3. **出来高**: 急増で加点
-    4. **バックテスト (裏機能)**: 過去の5MA押し目買い勝率が高い銘柄は、さらに加点されます。
-
+    ### 🛠 ダイナミック・バックテスト
+    銘柄の規模（時価総額）に合わせて、勝率判定の難易度を自動調整しています。
+    *   **大型株 (1兆円以上)**: **+3%** 上昇で「勝ち」と判定 (動きが重いため)
+    *   **中型株 (1000億円以上)**: **+4%** 上昇で「勝ち」と判定
+    *   **小型株 (1000億円未満)**: **+5%** 上昇で「勝ち」と判定 (ボラが高いため)
+    
     ### 🎯 利確ターゲット
     *   順張り: 半益(Max[現在値+5%, 25MA+10%])、全益(Max[現在値+10%, 25MA+20%])
     *   逆張り: 半益(5MA)、全益(25MA)
@@ -134,6 +100,7 @@ def get_stock_info_from_kabutan(code):
         data["per"] = extract_val("PER", html)
         data["pbr"] = extract_val("PBR", html)
 
+        # 時価総額 (単位:億円)
         match_cap = re.search(r'時価総額</th>.*?<td>([0-9,]+)<span>億円', html)
         if match_cap: data["cap"] = int(match_cap.group(1).replace(",", ""))
             
@@ -141,24 +108,47 @@ def get_stock_info_from_kabutan(code):
     except Exception:
         return data
 
-def run_backtest(df):
-    """裏で動くバックテスト機能"""
+def run_dynamic_backtest(df, market_cap):
+    """
+    時価総額に応じた難易度でバックテストを行う
+    Large: 3%, Mid: 4%, Small: 5%
+    """
     try:
         if len(df) < 40: return "データ不足"
+        
+        # 目標上昇率の決定
+        target_pct = 0.05 # デフォルト5%
+        cap_str = ""
+        
+        if market_cap >= 10000: # 1兆円以上
+            target_pct = 0.03
+            cap_str = "3%抜"
+        elif market_cap >= 1000: # 1000億円以上
+            target_pct = 0.04
+            cap_str = "4%抜"
+        else: # 小型株
+            target_pct = 0.05
+            cap_str = "5%抜"
+
         test_period = df.iloc[-35:-5]
         wins = 0
         entries = 0
+        
         for i in range(len(test_period)):
             row = test_period.iloc[i]
             entry_price = row['SMA5']
-            target_price = entry_price * 1.05
+            target_price = entry_price * (1 + target_pct)
+            
+            # 5MA以下でエントリー
             if row['Low'] <= entry_price:
                 entries += 1
+                # 5日以内に目標達成か？
                 future_high = df['High'].iloc[test_period.index.get_loc(row.name)+1 : test_period.index.get_loc(row.name)+6].max()
                 if future_high >= target_price: wins += 1
+        
         if entries == 0: return "検証機会なし"
         win_rate = (wins / entries) * 100
-        return f"{win_rate:.0f}% ({wins}/{entries})"
+        return f"{win_rate:.0f}% ({wins}/{entries}) ※{cap_str}"
     except:
         return "計算エラー"
 
@@ -195,7 +185,9 @@ def get_technical_summary(ticker):
         
         if len(df) < 25: return None
 
-        backtest_result = run_backtest(df)
+        # ダイナミックバックテスト実行
+        backtest_result = run_dynamic_backtest(df, fund["cap"])
+        
         last_day = df.iloc[-1]
         
         current_price = fund["price"] if fund["price"] else last_day['Close']
@@ -271,14 +263,19 @@ def get_technical_summary(ticker):
         buy_display = f"{buy_target_val:,.0f} ({diff_txt})"
         if strategy == "👀様子見": buy_display = "様子見推奨"
 
-        # --- 利確ターゲットの％表示ロジック（修正点） ---
-        def fmt_target(target, current):
-            if target == 0: return "-"
-            if target <= current: return "到達済"
+        def fmt_t(val): return f"{val:,.0f}" if val > 0 else "-"
+        # ％表示を利確ターゲットに含める
+        def fmt_pct(target, current):
+            if target <= 0: return ""
             pct = (target - current) / current * 100
-            return f"{target:,.0f} (+{pct:.1f}%)"
+            return f"(+{pct:.1f}%)"
 
-        profit_display = f"半: {fmt_target(t_half, current_price)}<br>全: {fmt_target(t_full, current_price)}"
+        profit_display = f"半: {fmt_t(t_half)} {fmt_pct(t_half, current_price)}<br>全: {fmt_t(t_full)} {fmt_pct(t_full, current_price)}"
+
+        # 時価総額の整形 (10000 -> 1兆)
+        cap_disp = f"{fund['cap']:,}億円"
+        if fund['cap'] >= 10000:
+            cap_disp = f"{fund['cap']/10000:.1f}兆円"
 
         return {
             "code": ticker,
@@ -291,6 +288,7 @@ def get_technical_summary(ticker):
             "vol_ratio": vol_ratio,
             "vol_str": vol_str,
             "cap": fund["cap"],
+            "cap_disp": cap_disp, # 表示用
             "fund_str": f"{fund['per']}/{fund['pbr']}",
             "buy_display": buy_display, 
             "profit_display": profit_display,
@@ -308,8 +306,8 @@ def generate_ranking_table(high_score_list, low_score_list):
             txt += f"""
             [{d['code']} {d['name']}]
             - スコア:{d['score']}, 戦略:{d['strategy']}
-            - RSI:{d['rsi_str']}, 出来高:{d['vol_str']}
-            - ★裏データ(バックテスト勝率): {d['backtest']}
+            - 時価総額:{d['cap_disp']}, RSI:{d['rsi_str']}, 出来高:{d['vol_str']}
+            - ★裏データ(バックテスト): {d['backtest']}
             - 現在値:{d['price']:,.0f}円
             - 推奨買値(残):{d['buy_display']}
             - 利確目標:{d['profit_display']}
@@ -327,8 +325,9 @@ def generate_ranking_table(high_score_list, low_score_list):
     【出力データのルール】
     1. **表のみ出力**: 挨拶不要。
     2. **そのまま表示**: データ内の「RSI」「出来高」「推奨買値」「利確目標」は、**加工せずそのまま**表に入れてください。
-    3. **バックテスト活用**: データに含まれる「裏データ(バックテスト勝率)」は表には出さず、**アイの所感**を書く際の判断材料にしてください。勝率が高い銘柄は自信を持って勧めてください。
-    4. **アイの所感**: 80文字以内で、データに基づいた冷静なコメントを記述。
+    3. **時価総額**: 「時価総額」の列を追加し、データの `cap_disp` (例: 2.8兆円) を表示してください。
+    4. **バックテスト**: 裏データ(バックテスト)の勝率が高い銘柄は、所感で肯定的に評価してください。
+    5. **アイの所感**: 80文字以内で、データに基づいた冷静なコメントを記述。
 
     【データ1: 注目ゾーン】
     {list_to_text(high_score_list)}
@@ -338,7 +337,7 @@ def generate_ranking_table(high_score_list, low_score_list):
     
     【出力構成】
     **【買い推奨・注目ゾーン】**
-    | 順位 | コード | 企業名 | スコア | 戦略 | RSI | 出来高<br>(5日比) | 現在値 | 推奨買値(残) | 利確<br>(半益/全益) | 指標<br>(PER/PBR) | アイの所感 |
+    | 順位 | コード | 企業名 | 時価総額 | スコア | 戦略 | RSI | 出来高<br>(5日比) | 現在値 | 推奨買値(残) | 利確<br>(半益/全益) | 指標<br>(PER/PBR) | アイの所感 |
     
     **【様子見・警戒ゾーン】**
     (同じ形式の表を作成)
@@ -396,6 +395,6 @@ if st.button("🚀 分析開始 (アイに聞く)"):
                 st.markdown(result, unsafe_allow_html=True)
                 
                 with st.expander("詳細データリスト"):
-                    st.dataframe(pd.DataFrame(data_list)[['code', 'name', 'price', 'score', 'rsi_str', 'vol_str', 'backtest']])
+                    st.dataframe(pd.DataFrame(data_list)[['code', 'name', 'price', 'cap_disp', 'score', 'rsi_str', 'vol_str', 'backtest']])
             else:
                 st.error("有効なデータが取得できませんでした。")
