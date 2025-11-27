@@ -258,3 +258,154 @@ def get_technical_summary(ticker):
         score = max(0, min(100, score))
 
         # 戦略決定
+        if "順張り" in po_status:
+            strategy = "🔥順張り"
+            buy_target_val = ma5
+            t_half = max(current_price * 1.05, ma25 * 1.10)
+            t_full = max(current_price * 1.10, ma25 * 1.20)
+        else:
+            if rsi <= 35:
+                strategy = "🌊逆張り"
+                buy_target_val = current_price
+                t_half = ma5
+                t_full = ma25
+            else:
+                strategy = "👀様子見"
+                buy_target_val = ma25
+                t_half = 0
+                t_full = 0
+
+        diff = current_price - buy_target_val
+        diff_txt = f"{diff:+,.0f}" if diff != 0 else "0"
+        
+        buy_price_display = f"{buy_target_val:,.0f} ({diff_txt})"
+        if strategy == "👀様子見": buy_price_display = "様子見"
+
+        def fmt_target(val): return f"{val:,.0f}" if val > 0 else "-"
+        profit_display = f"{fmt_target(t_half)}<br>{fmt_target(t_full)}"
+
+        return {
+            "code": ticker,
+            "name": fund['name'],
+            "price": current_price,
+            "score": score,
+            "strategy": strategy,
+            "po": po_status,
+            "rsi": rsi,
+            "rsi_fmt": rsi_mark,
+            "vol_ratio": vol_ratio,
+            "cap": fund["cap"],
+            "fund_str": f"{fund['per']}/{fund['pbr']}",
+            "buy_display": buy_price_display, 
+            "profit_display": profit_display,
+            "backtest": backtest_result # バックテスト結果を追加
+        }
+    except Exception:
+        return None
+
+def generate_ranking_table(high_score_list, low_score_list):
+    if model is None: return "API Key Required."
+
+    def list_to_text(lst):
+        txt = ""
+        for d in lst:
+            txt += f"""
+            [{d['code']} {d['name']}]
+            - スコア:{d['score']}, 戦略:{d['strategy']}
+            - RSI:{d['rsi']:.1f}, 出来高:{d['vol_ratio']:.2f}倍
+            - ★過去1ヶ月の5MA押し目勝率: {d['backtest']}
+            - 現在値:{d['price']:,.0f}, 指値:{d['buy_display']}
+            --------------------------------
+            """
+        return txt if txt else "なし"
+
+    prompt = f"""
+    あなたは「アイ」という名前のプロトレーダー（30代女性）です。
+    今回は「過去の検証データ（バックテスト）」も踏まえて、より精度の高いアドバイスを行います。
+    
+    【口調の設定】
+    - 常に冷静で、理知的な「です・ます」調を使ってください。
+    
+    【データ活用指示】
+    - **バックテスト勝率**が高い銘柄（80%以上など）は、「過去の傾向からしても信頼性が高い」と強く推奨してください。
+    - 逆に勝率が低い、またはデータ不足の場合は「慎重に」と添えてください。
+    - RSIが55-65の銘柄は「理想的な押し目」として高く評価してください。
+
+    【出力データのルール】
+    1. **表のみ出力**: 挨拶などは不要。
+    2. **勝率**: 表の中に「5MA勝率」という列を作り、バックテスト結果（例: 80% (4/5)）を表示。
+    3. **RSI装飾**: 30以下「🔵」、55-65「🟢🔥」、70以上「🔴」。
+    4. **アイの所感**: 80文字程度で、バックテスト結果にも触れながらコメント。
+
+    【データ1: 注目ゾーン】
+    {list_to_text(high_score_list)}
+
+    【データ2: 警戒ゾーン】
+    {list_to_text(low_score_list)}
+    
+    【出力構成】
+    **【買い推奨・注目ゾーン】**
+    | 順位 | コード | 企業名 | スコア | 戦略 | RSI | 5MA勝率 | 現在値 | 推奨買値(残) | 利確<br>(半益/全益) | アイの所感 |
+    
+    **【様子見・警戒ゾーン】**
+    (同じ形式の表を作成)
+    """
+    
+    try:
+        response = model.generate_content(prompt)
+        return response.text
+    except Exception as e:
+        return f"AI Error: {str(e)}"
+
+# メイン処理
+if st.button("🚀 分析開始 (アイに聞く)"):
+    if not api_key:
+        st.warning("APIキーを入力してください。")
+    elif not tickers_input.strip():
+        st.warning("銘柄コードを入力してください。")
+    else:
+        normalized_input = tickers_input.replace("\n", ",").replace("、", ",").replace(" ", "")
+        raw_tickers = list(set([t for t in normalized_input.split(",") if t]))
+        
+        if len(raw_tickers) > 40:
+            st.error(f"⛔ 銘柄数が多すぎます(現在{len(raw_tickers)}件)。40件以下にしてください。")
+        else:
+            data_list = []
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            for i, t in enumerate(raw_tickers):
+                status_text.text(f"Processing ({i+1}/{len(raw_tickers)}): {t} ...")
+                data = get_technical_summary(t)
+                if data:
+                    data_list.append(data)
+                progress_bar.progress((i + 1) / len(raw_tickers))
+                time.sleep(1.0) 
+
+            if data_list:
+                # ソート: バックテスト勝率順も追加
+                if sort_option == "AIスコア順 (おすすめ)":
+                    data_list.sort(key=lambda x: x['score'], reverse=True)
+                elif sort_option == "バックテスト勝率順":
+                    # 文字列 "80% (4/5)" から 80 を取り出す
+                    data_list.sort(key=lambda x: int(x['backtest'][:2]) if x['backtest'][0].isdigit() else -1, reverse=True)
+                elif sort_option == "RSI順 (理想55-65優先)":
+                    # 55-65を最大値、それ以外を距離でソートするロジック
+                    data_list.sort(key=lambda x: -abs(x['rsi'] - 60)) 
+                elif sort_option == "時価総額順":
+                    data_list.sort(key=lambda x: x['cap'], reverse=True)
+
+                high_score_list = [d for d in data_list if d['score'] >= 70]
+                low_score_list = [d for d in data_list if d['score'] < 70]
+
+                status_text.text("🤖 アイがバックテスト結果を検証中...")
+                result = generate_ranking_table(high_score_list, low_score_list)
+                
+                st.success("分析完了")
+                st.markdown("### 📊 アイ推奨ポートフォリオ")
+                st.markdown(result, unsafe_allow_html=True)
+                
+                with st.expander("詳細データリスト"):
+                    st.dataframe(pd.DataFrame(data_list)[['code', 'name', 'price', 'score', 'rsi', 'backtest']])
+            else:
+                st.error("有効なデータが取得できませんでした。")
