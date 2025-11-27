@@ -28,35 +28,54 @@ with col_title:
         th, td { 
             font-size: 14px; 
             vertical-align: middle !important; 
-            padding: 6px 4px !important; 
+            padding: 6px 3px !important; /* パディングを少し詰める */
             line-height: 1.3 !important;
         }
         
-        /* 列幅の微調整 */
+        /* 1-2列目: 順位, コード */
         th:nth-child(1), td:nth-child(1),
-        th:nth-child(2), td:nth-child(2) { width: 40px; text-align: center; } /* 順位,コード */
-        
+        th:nth-child(2), td:nth-child(2) { width: 35px; text-align: center; }
+
+        /* 3列目: 企業名 */
         th:nth-child(3), td:nth-child(3) { 
-            min-width: 100px; max-width: 140px;
+            min-width: 90px; max-width: 130px;
             font-weight: bold; font-size: 13px;
             overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-        } /* 企業名 */
+        }
 
-        th:nth-child(4), td:nth-child(4) { width: 75px; font-size: 12px; text-align: right; } /* 時価総額 */
-        
-        th:nth-child(5), td:nth-child(5) { width: 40px; text-align: center; } /* スコア */
-        th:nth-child(6), td:nth-child(6) { font-size: 12px; min-width: 50px; } /* 戦略 */
-        th:nth-child(7), td:nth-child(7) { min-width: 50px; } /* RSI */
-        th:nth-child(8), td:nth-child(8) { font-size: 12px; } /* 出来高 */
-        
-        th:nth-child(9), td:nth-child(9) { white-space: nowrap; } /* 現在値 */
-        
-        th:nth-child(10), td:nth-child(10) { width: 85px; font-size: 12px; } /* 推奨買値 */
-        th:nth-child(11), td:nth-child(11) { min-width: 110px; font-size: 12px; } /* 利確 */
-        
-        th:nth-child(12), td:nth-child(12) { font-size: 11px; min-width: 80px; } /* 指標 */
-        
-        th:nth-child(13), td:nth-child(13) { min-width: 180px; font-size: 13px; } /* 所感 */
+        /* 4列目: 時価総額 (4文字分削除のご要望対応 -> 60pxへ) */
+        th:nth-child(4), td:nth-child(4) { 
+            width: 60px; 
+            font-size: 11px; 
+            text-align: right; 
+        }
+
+        /* 5-8列目: スコア等 */
+        th:nth-child(5), td:nth-child(5) { width: 40px; text-align: center; }
+        th:nth-child(6), td:nth-child(6) { font-size: 12px; }
+        th:nth-child(7), td:nth-child(7) { min-width: 45px; }
+        th:nth-child(8), td:nth-child(8) { font-size: 12px; }
+
+        /* 9列目: 現在値 */
+        th:nth-child(9), td:nth-child(9) { white-space: nowrap; }
+
+        /* 10列目: 推奨買値 (4文字分削除のご要望対応 -> 70pxへ) */
+        th:nth-child(10), td:nth-child(10) { 
+            width: 70px; 
+            font-size: 12px; 
+        }
+
+        /* 11列目: 利確 */
+        th:nth-child(11), td:nth-child(11) { min-width: 100px; font-size: 12px; }
+
+        /* 12列目: 指標 */
+        th:nth-child(12), td:nth-child(12) { font-size: 11px; width: 70px; }
+
+        /* 13列目: アイの所感 */
+        th:nth-child(13), td:nth-child(13) { 
+            min-width: 180px; 
+            font-size: 13px;
+        }
     </style>
     <p class="big-font" style="margin-top: 0px;">あなたの提示した銘柄についてアイが分析して売買戦略を伝えます。</p>
     """, unsafe_allow_html=True)
@@ -110,8 +129,9 @@ if api_key:
 
 def get_stock_info_from_kabutan(code):
     """
-    株探から情報を取得 (PER/PBR修正版)
-    タグ構造に依存せず、ID指定でエリアを絞ってからデータを抜く
+    株探から情報を取得 (最強テキスト解析版)
+    HTMLタグを完全に除去し、純粋なテキストからデータを抽出する。
+    これにより<span>タグなどの影響を一切受けなくなる。
     """
     url = f"https://kabutan.jp/stock/?code={code}"
     headers = {"User-Agent": "Mozilla/5.0"}
@@ -120,60 +140,55 @@ def get_stock_info_from_kabutan(code):
     try:
         res = requests.get(url, headers=headers, timeout=5)
         res.encoding = res.apparent_encoding
-        html = res.text.replace("\n", "").replace("\r", "") # 改行削除
+        
+        # HTML全体からタグを削除して、ただの文字列にする
+        # 空白や改行も詰めて、一続きの文字列にするのがコツ
+        # 例: "時価総額28兆6,605億円" と繋がる
+        text_content = re.sub(r'<[^>]+>', '', res.text)
+        text_content = re.sub(r'\s+', '', text_content) 
         
         # 1. 社名
-        match_name = re.search(r'<title>(.*?)【', html)
+        # HTMLから取ったほうが確実なのでここだけHTMLを使う
+        match_name = re.search(r'<title>(.*?)【', res.text)
         if match_name: 
             raw_name = match_name.group(1).strip()
             data["name"] = re.sub(r'[（\(].*?[）\)]', '', raw_name)
 
-        # 2. 現在値
-        match_price = re.search(r'現在値</th>\s*<td[^>]*>([0-9,.]+)</td>', html)
+        # 2. 現在値 (テキスト解析)
+        # "現在値" の後ろにある "数値" を探す
+        match_price = re.search(r'現在値([0-9,.]+)', text_content)
         if match_price:
-            data["price"] = float(match_price.group(1).replace(",", ""))
+            try: data["price"] = float(match_price.group(1).replace(",", ""))
+            except: pass
 
         # 3. 出来高
-        match_vol = re.search(r'出来高</th>\s*<td[^>]*>([0-9,]+).*?株</td>', html)
+        match_vol = re.search(r'出来高([0-9,]+)株', text_content)
         if match_vol:
-            data["volume"] = float(match_vol.group(1).replace(",", ""))
+            try: data["volume"] = float(match_vol.group(1).replace(",", ""))
+            except: pass
 
         # 4. 時価総額 (兆対応)
-        # spanタグを無視するために正規表現を工夫
-        # class="v_zika2">28<span>兆</span>6,605<span>億円</span>
-        # 簡易的にタグを除去してから探す
-        
-        # 時価総額エリアを特定
-        cap_area_match = re.search(r'時価総額</th>\s*<td[^>]*>(.*?)</td>', html)
-        if cap_area_match:
-            cap_html = cap_area_match.group(1)
-            # タグを全削除
-            cap_text = re.sub(r'<[^>]+>', '', cap_html).replace(",", "").strip()
-            # "28兆6605億円" または "4401億円"
-            if "兆" in cap_text:
-                parts = cap_text.replace("億円", "").split("兆")
+        # "時価総額28兆6,605億円" という並びを探す
+        match_cap = re.search(r'時価総額([0-9,]+(?:兆[0-9,]+)?)億円', text_content)
+        if match_cap:
+            raw_cap = match_cap.group(1).replace(",", "")
+            if "兆" in raw_cap:
+                parts = raw_cap.split("兆")
                 trillion = int(parts[0])
                 billion = int(parts[1]) if parts[1] else 0
                 data["cap"] = trillion * 10000 + billion
-            elif "億円" in cap_text:
-                data["cap"] = int(cap_text.replace("億円", ""))
+            else:
+                try: data["cap"] = int(raw_cap)
+                except: data["cap"] = 0
 
-        # 5. PER / PBR (修正版)
-        # id="stockinfo_i3" の中にあるテーブルを探す
-        i3_match = re.search(r'<div id="stockinfo_i3">.*?<tbody>(.*?)</tbody>', html)
-        if i3_match:
-            tbody = i3_match.group(1)
-            # <td>...</td> を全て取得
-            tds = re.findall(r'<td[^>]*>(.*?)</td>', tbody)
-            
-            def clean_val(text):
-                # <span class="fs9">倍</span> -> 倍
-                text = re.sub(r'<[^>]+>', '', text).strip()
-                return text
+        # 5. PER / PBR
+        # "PER(連)13.1倍" のような並びを探す
+        # 正規表現: PER + (任意の文字数) + 数値 + 倍
+        match_per = re.search(r'PER.*?([0-9\.,\-]+)倍', text_content)
+        if match_per: data["per"] = match_per.group(1) + "倍"
 
-            if len(tds) >= 2:
-                data["per"] = clean_val(tds[0])
-                data["pbr"] = clean_val(tds[1])
+        match_pbr = re.search(r'PBR.*?([0-9\.,\-]+)倍', text_content)
+        if match_pbr: data["pbr"] = match_pbr.group(1) + "倍"
 
         return data
     except Exception:
@@ -326,7 +341,7 @@ def get_technical_summary(ticker):
 
         profit_display = f"半: {fmt_target(t_half, current_price)}<br>全: {fmt_target(t_full, current_price)}"
 
-        # 時価総額表示
+        # 時価総額表示 (兆単位へ)
         cap_disp = f"{fund['cap']:,}億円"
         if fund['cap'] >= 10000:
             cap_disp = f"{fund['cap']/10000:.1f}兆円"
