@@ -61,7 +61,7 @@ with col_title:
         /* 11列目: 利確 */
         th:nth-child(11), td:nth-child(11) { min-width: 100px; font-size: 12px; }
 
-        /* 12列目: 指標 (改行対応) */
+        /* 12列目: 指標 */
         th:nth-child(12), td:nth-child(12) { 
             font-size: 11px; 
             min-width: 60px; 
@@ -145,11 +145,10 @@ def get_stock_info_from_kabutan(code):
             data["volume"] = float(match_vol.group(1).replace(",", ""))
 
         # 4. 時価総額 (v_zika2クラスを狙い撃ち)
-        # <td ... class="v_zika2">28<span>兆</span>6,605<span>億円</span></td>
         match_cap_area = re.search(r'class="v_zika2">(.*?)</td>', html)
         if match_cap_area:
             raw_cap_html = match_cap_area.group(1)
-            # タグを全削除 -> "28兆6,605億円"
+            # タグを全削除
             cap_text = re.sub(r'<[^>]+>', '', raw_cap_html).replace(",", "").strip()
             
             if "兆" in cap_text:
@@ -163,17 +162,13 @@ def get_stock_info_from_kabutan(code):
                 except:
                     data["cap"] = 0
 
-        # 5. PER / PBR (stockinfo_i3 内のテーブル順序に依存して取得)
-        # stockinfo_i3 エリアを特定
+        # 5. PER / PBR
         i3_match = re.search(r'<div id="stockinfo_i3">.*?<tbody>(.*?)</tbody>', html)
         if i3_match:
             tbody = i3_match.group(1)
-            # <td>...</td> を順番に取得
-            # 1つ目: PER, 2つ目: PBR
             tds = re.findall(r'<td[^>]*>(.*?)</td>', tbody)
             
             def clean_tag_val(val):
-                # <span>タグなどを消して "13.1倍" のようにする
                 val = re.sub(r'<[^>]+>', '', val).strip()
                 return val
 
@@ -366,8 +361,7 @@ def generate_ranking_table(high_score_list, low_score_list):
     def list_to_text(lst):
         txt = ""
         for d in lst:
-            # AIには <br> をスラッシュに置換して渡す（テキスト解析用）
-            # ただし表の出力時にはそのまま書かせる
+            # AIには <br> をスラッシュに置換して渡す
             fund_txt = d['fund_disp'].replace("<br>", "/")
             txt += f"""
             [{d['code']} {d['name']}]
@@ -391,11 +385,11 @@ def generate_ranking_table(high_score_list, low_score_list):
     
     【出力データのルール】
     1. **表のみ出力**: 挨拶不要。
-    2. **そのまま表示**: データ内の「RSI」「出来高」「推奨買値」「利確目標」は加工せずそのまま。
+    2. **そのまま表示**: データ内の「RSI」「出来高」「推奨買値」「利確目標」は、**加工せずそのまま**表に入れてください。
     3. **指標**: データ内の「指標表示用文字列」(`{d['fund_disp']}`)をそのまま出力して、セル内で2段にしてください。
     4. **時価総額**: 「時価総額」の列を追加し、データの `cap_disp` を表示。
     5. **バックテスト**: 裏データの勝率が高い銘柄は所感で評価。
-    6. **アイの所感**: 80文字以内。
+    6. **アイの所感**: 80文字以内で、データに基づいた冷静なコメントを記述。
 
     【データ1: 注目ゾーン】
     {list_to_text(high_score_list)}
@@ -405,7 +399,7 @@ def generate_ranking_table(high_score_list, low_score_list):
     
     【出力構成】
     **【買い推奨・注目ゾーン】**
-    | 順位 | コード | 企業名 | 時価総額 | スコア | 戦略 | RSI | 出来高<br>(5日比) | 現在値 | 推奨買値(残) | 利確<br>(半益/全益) | 指標<br>(PER/PBR) | アイの所感 |
+    | 順位 | コード | 企業名 | 時価総額 | スコア | 戦略 | RSI | 出来高<br>(5日比) | 現在値 | 推奨買値(残) | 利確<br>(半益/全益) | PER/<br>PBR | アイの所感 |
     
     **【様子見・警戒ゾーン】**
     (同じ形式の表を作成)
