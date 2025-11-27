@@ -7,21 +7,20 @@ import requests
 import io
 import re
 
-# アイコン画像のURL
-ICON_URL = "https://cdn-ak.f.st-hatena.com/images/fotolife/s/soutori/20250212/20250212130328.png"
+# --- アイコン設定 ---
+# GitHubにアップロードされた画像を直接読み込むURL
+ICON_URL = "https://raw.githubusercontent.com/soutori296/stock-analysis/main/aisan.png"
 
-# ページ設定 (ブラウザのタブアイコンもこの画像にする)
+# ページ設定
 st.set_page_config(page_title="教えて！AIさん 2", page_icon=ICON_URL, layout="wide")
 
-# --- タイトルエリア (画像とテキストを横並びにする) ---
-col_icon, col_title = st.columns([1, 8]) # 列の比率設定
+# --- タイトルエリア (画像とテキストを横並び) ---
+col_icon, col_title = st.columns([1, 8])
 
 with col_icon:
-    # アイコン画像を表示
-    st.image(ICON_URL, width=110) 
+    st.image(ICON_URL, width=110)
 
 with col_title:
-    # タイトル表示 (絵文字は削除)
     st.title("教えて！AIさん 2")
     st.markdown("""
     <style>
