@@ -76,18 +76,18 @@ with col_title:
     """, unsafe_allow_html=True)
 
 # ヘルプ
-with st.expander("ℹ️ スコア配分・利確計算ロジックの説明書を見る"):
+with st.expander("?? スコア配分・利確計算ロジックの説明書を見る"):
     st.markdown("""
-    ### 💯 AIスコア算出ルール (100点満点)
+    ### ?? AIスコア算出ルール (100点満点)
     **基本点: 50点** からスタートし、以下の3要素で加点・減点を行います。
-    1. **トレンド**: 🔥上昇PO(+20)、上昇配列(+10)、▼下落PO(-20)
+    1. **トレンド**: ??上昇PO(+20)、上昇配列(+10)、▼下落PO(-20)
     2. **RSI**: 55-65(+15)、30以下(+10)、70以上(-10)
     3. **出来高**: 1.5倍以上(+15)、1.0倍以上(+5)
     
-    ### 💰 大口検知シグナル
-    *   **出来高3.0倍以上** かつ **株価上昇** で「💰大口流入?」を表示。
+    ### ?? 大口検知シグナル
+    *   **出来高3.0倍以上** かつ **株価上昇** で「??大口流入?」を表示。
 
-    ### 🎯 利確ターゲット (現在値基準)
+    ### ?? 利確ターゲット (現在値基準)
     *   順張り: 半益(Max[現在値+5%, 25MA+10%])、全益(Max[現在値+10%, 25MA+20%])
     *   逆張り: 半益(5MA)、全益(25MA)
     """)
@@ -103,10 +103,10 @@ api_key = None
 # 優先順位: Secrets > Cookie > 手動入力
 if "GEMINI_API_KEY" in st.secrets:
     api_key = st.secrets["GEMINI_API_KEY"]
-    st.sidebar.success("🔑 Secretsからキーを読み込みました")
+    st.sidebar.success("?? Secretsからキーを読み込みました")
 elif cookie_key:
     api_key = cookie_key
-    st.sidebar.success("🔑 ブラウザからキーを読み込みました")
+    st.sidebar.success("?? ブラウザからキーを読み込みました")
     if st.sidebar.button("キーを削除 (ログアウト)"):
         cookie_manager.delete("gemini_api_key")
         st.rerun()
@@ -227,7 +227,7 @@ def get_technical_summary(ticker):
         if ma5 > ma25 and ma25 > ma75:
             if slope5_up: 
                 score += 20
-                po_status = "🔥順張り"
+                po_status = "??順張り"
             else: 
                 score += 10
                 po_status = "上昇配列"
@@ -240,15 +240,15 @@ def get_technical_summary(ticker):
         rsi_mark = f"{rsi:.0f}"
         if rsi <= 30:
             score += 10
-            rsi_mark = f"🔵{rsi:.0f}"
+            rsi_mark = f"??{rsi:.0f}"
         elif 55 <= rsi <= 65:
             score += 15
-            rsi_mark = f"🟢🔥{rsi:.0f}"
+            rsi_mark = f"????{rsi:.0f}"
         elif 70 <= rsi:
             score -= 10
-            rsi_mark = f"🔴{rsi:.0f}"
+            rsi_mark = f"??{rsi:.0f}"
         else:
-            rsi_mark = f"🟢{rsi:.0f}"
+            rsi_mark = f"??{rsi:.0f}"
 
         vol_bonus = 0
         vol_ratio = 0
@@ -266,28 +266,28 @@ def get_technical_summary(ticker):
         score = max(0, min(100, score))
 
         if "順張り" in po_status or "上昇" in po_status:
-            strategy = "🔥順張り"
+            strategy = "??順張り"
             buy_target_val = ma5
             t_half_calc = max(current_price * 1.05, ma25 * 1.10)
             t_full_calc = max(current_price * 1.10, ma25 * 1.20)
         else:
             if rsi <= 35:
-                strategy = "🌊逆張り"
+                strategy = "??逆張り"
                 buy_target_val = current_price 
                 t_half_calc = ma5 if ma5 > current_price else current_price * 1.03
                 t_full_calc = ma25 if ma25 > t_half_calc else t_half_calc * 1.03
             else:
-                strategy = "👀様子見"
+                strategy = "??様子見"
                 buy_target_val = ma25 
                 t_half_calc = 0
                 t_full_calc = 0
 
-        if is_big_money: strategy = "💰大口流入?"
+        if is_big_money: strategy = "??大口流入?"
 
         diff = current_price - buy_target_val
         diff_txt = f"{diff:+,.0f}" if diff != 0 else "0"
         
-        if strategy == "👀様子見":
+        if strategy == "??様子見":
             buy_price_display = "様子見推奨"
         else:
             buy_price_display = f"{buy_target_val:,.0f} ({diff_txt})"
@@ -347,7 +347,7 @@ def generate_ranking_table(high_score_list, low_score_list):
     3. **利確(半益/全益)**: データ内の `{d['profit_display']}` をそのまま出力。（`<br>`タグを含む）
     4. **出来高**: ヘッダーは「出来高<br>(5日比)」。中身は「1.20倍」のように記述。
     5. **アイの所感**: 80文字程度で、具体的かつ冷静な分析を記述。
-       - もし戦略が「💰大口流入?」なら、機関投資家の介入可能性について触れること。
+       - もし戦略が「??大口流入?」なら、機関投資家の介入可能性について触れること。
 
     【データ1: 買い推奨・注目ゾーン (スコア70以上)】
     {list_to_text(high_score_list)}
@@ -370,7 +370,7 @@ def generate_ranking_table(high_score_list, low_score_list):
         return f"AI Error: {str(e)}"
 
 # メイン処理
-if st.button("🚀 分析開始 (アイに聞く)"):
+if st.button("?? 分析開始 (アイに聞く)"):
     if not api_key:
         st.warning("APIキーを入力してください。")
     elif not tickers_input.strip():
@@ -381,7 +381,7 @@ if st.button("🚀 分析開始 (アイに聞く)"):
         
         # 40件制限
         if len(raw_tickers) > 40:
-            st.error(f"⛔ 銘柄数が多すぎます。一度に分析できるのは40件までです。（現在の入力: {len(raw_tickers)}件）")
+            st.error(f"? 銘柄数が多すぎます。一度に分析できるのは40件までです。（現在の入力: {len(raw_tickers)}件）")
         else:
             data_list = []
             progress_bar = st.progress(0)
@@ -414,11 +414,11 @@ if st.button("🚀 分析開始 (アイに聞く)"):
                 high_score_list = [d for d in data_list if d['score'] >= 70]
                 low_score_list = [d for d in data_list if d['score'] < 70]
 
-                status_text.text("🤖 アイが分析レポートを作成中...")
+                status_text.text("?? アイが分析レポートを作成中...")
                 result = generate_ranking_table(high_score_list, low_score_list)
                 
                 st.success("分析完了")
-                st.markdown("### 📊 アイ推奨ポートフォリオ")
+                st.markdown("### ?? アイ推奨ポートフォリオ")
                 
                 st.markdown(result, unsafe_allow_html=True)
                 
