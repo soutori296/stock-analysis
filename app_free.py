@@ -47,10 +47,13 @@ if api_key:
 
 def get_stock_info_from_kabutan(code):
     """
-    株探から「社名」「PER」「PBR」を正規表現でスクレイピングする関数
+    株探から「社名」「PER」「PBR」を強力な正規表現で取得する関数
+    (連)と(単)の両方に対応し、改行コードも無視して検索する
     """
     url = f"https://kabutan.jp/stock/?code={code}"
-    headers = {"User-Agent": "Mozilla/5.0"}
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
     
     info = {"name": "不明", "per": "-", "pbr": "-"}
     
@@ -64,21 +67,21 @@ def get_stock_info_from_kabutan(code):
         if match_name:
             info["name"] = match_name.group(1).strip()
             
-        # 2. PER(連)取得
-        # 株探のHTML構造: <th>PER(連)</th><td><span class="...">15.3</span>倍</td>
-        # 正規表現で数値部分を抜き出す
-        match_per = re.search(r'PER\(連\)</th>\s*<td><span[^>]*>([0-9\.,\-]+)</span>', html)
+        # 2. PER取得 (連または単に対応、改行無視)
+        # 検索パターン: "PER" -> カッコ -> 閉じタグ -> 任意の空白 -> <td> -> <span> -> 数値
+        match_per = re.search(r'PER\((?:連|単)\).*?</td>\s*<td><span[^>]*>([0-9\.,\-]+)</span>', html, re.DOTALL)
         if match_per:
             info["per"] = match_per.group(1) + "倍"
 
-        # 3. PBR(連)取得
-        match_pbr = re.search(r'PBR\(連\)</th>\s*<td><span[^>]*>([0-9\.,\-]+)</span>', html)
+        # 3. PBR取得
+        match_pbr = re.search(r'PBR\((?:連|単)\).*?</td>\s*<td><span[^>]*>([0-9\.,\-]+)</span>', html, re.DOTALL)
         if match_pbr:
             info["pbr"] = match_pbr.group(1) + "倍"
             
         return info
         
     except Exception:
+        # エラー時はデフォルト値を返す
         return info
 
 @st.cache_data(ttl=3600)
@@ -216,7 +219,7 @@ def generate_ranking_table(summaries):
     
     1. **戦略**: 「🔥順張り」か「🌊逆張り」か。
     2. **RSI装飾**: RSIが**30以下なら「🔵(数値)」**、**70以上なら「🔴(数値)」**、それ以外はそのまま表示。
-    3. **割安度**: 提供データにある **「割安度(株探): PER...」** の数値をそのまま記載すること。
+    3. **割安度**: 提供データにある **「割安度(株探): PER...」** の数値をそのまま記載すること。"-"の場合はそのまま"-"と書く。
     4. **利確戦略**: 計算された「半益ターゲット」「全益ターゲット」の数値を必ず使うこと。
     5. **アイの所感**: **40文字以内**で、データに基づいた冷静なコメントを記述（丁寧語）。
 
