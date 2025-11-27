@@ -16,7 +16,7 @@ st.markdown("""
 <style>
     .big-font { font-size:18px !important; font-weight: bold; color: #4A4A4A; }
     
-    /* --- 表のスタイル調整 (CSS) --- */
+    /* 表のスタイル */
     table { width: 100%; border-collapse: collapse; table-layout: auto; }
     th, td { 
         font-size: 14px; 
@@ -24,66 +24,31 @@ st.markdown("""
         padding: 6px 4px !important;
         line-height: 1.3 !important;
     }
-    
-    /* 3列目: 企業名 */
-    th:nth-child(3), td:nth-child(3) { 
-        min-width: 130px; 
-        font-weight: bold; 
-    }
-    
-    /* 4列目: スコア */
-    th:nth-child(4), td:nth-child(4) { 
-        white-space: nowrap; 
-        width: 50px; 
-        text-align: center; 
-    }
-
-    /* 7列目: 出来高 */
-    th:nth-child(7), td:nth-child(7) { 
-        min-width: 60px; 
-        font-size: 13px; 
-    }
-
-    /* 9列目: 推奨買値 */
-    th:nth-child(9), td:nth-child(9) {
-        white-space: nowrap;
-    }
-
-    /* 10列目: 利確 */
-    th:nth-child(10), td:nth-child(10) { 
-        min-width: 110px;
-        font-size: 13px;
-        white-space: pre-wrap; 
-    }
-
-    /* 11列目: アイの所感 */
-    th:nth-child(11), td:nth-child(11) { 
-        width: 40%;
-        min-width: 300px;
-    }
+    th:nth-child(3), td:nth-child(3) { min-width: 130px; font-weight: bold; }
+    th:nth-child(4), td:nth-child(4) { white-space: nowrap; width: 50px; text-align: center; }
+    th:nth-child(7), td:nth-child(7) { min-width: 60px; font-size: 13px; }
+    th:nth-child(9), td:nth-child(9) { white-space: nowrap; }
+    th:nth-child(10), td:nth-child(10) { min-width: 110px; font-size: 13px; white-space: pre-wrap; }
+    th:nth-child(11), td:nth-child(11) { width: 40%; min-width: 300px; }
 </style>
 <p class="big-font">あなたの提示した銘柄についてアイが分析して売買戦略を伝えます。</p>
 """, unsafe_allow_html=True)
 
 # ヘルプ
-with st.expander("ℹ️ スコア配分・利確計算・大口検知の説明書"):
+with st.expander("ℹ️ スコア配分・利確計算ロジックの説明書を見る"):
     st.markdown("""
     ### 💯 AIスコア算出ルール (100点満点)
-    **基本点: 50点** からスタートし、以下の要素で採点します。
-    
+    **基本点: 50点** からスタートし、以下の3要素で加点・減点を行います。
     1. **トレンド**: 🔥上昇PO(+20)、上昇配列(+10)、▼下落PO(-20)
     2. **RSI**: 55-65(+15)、30以下(+10)、70以上(-10)
     3. **出来高**: 1.5倍以上(+15)、1.0倍以上(+5)
     
     ### 💰 大口検知シグナル
-    以下の条件を満たす場合、戦略欄に「💰」アイコンが表示されます。
-    *   **出来高が5日平均の 3.0倍 以上**
-    *   かつ、**株価が上昇** している
-    ※これは機関投資家や仕手筋などの「大口」が買い集めている可能性が高い状態です。
+    *   **出来高3.0倍以上** かつ **株価上昇** で「💰大口流入?」を表示。
 
-    ### 🎯 利確ターゲット計算 (現在値基準)
-    *   **順張り**: 半益(現在値+5% or 25MA+10%乖離)、全益(現在値+10% or 25MA+20%乖離)
-    *   **逆張り**: 半益(5MA)、全益(25MA)
+    ### 🎯 利確ターゲット (現在値基準)
+    *   順張り: 半益(Max[現在値+5%, 25MA+10%])、全益(Max[現在値+10%, 25MA+20%])
+    *   逆張り: 半益(5MA)、全益(25MA)
     """)
 
 # サイドバー設定
@@ -187,7 +152,6 @@ def get_technical_summary(ticker):
         if len(df) < 25: return None
 
         last_day = df.iloc[-1]
-        
         current_price = fund["price"] if fund["price"] else last_day['Close']
         vol_sma5 = last_day['Vol_SMA5']
         current_vol = fund["volume"] if fund["volume"] else last_day['Volume']
@@ -228,23 +192,19 @@ def get_technical_summary(ticker):
 
         vol_bonus = 0
         vol_ratio = 0
-        is_big_money = False # 大口検知フラグ
+        is_big_money = False
 
         if vol_sma5 > 0:
             vol_ratio = current_vol / vol_sma5
-            if vol_ratio >= 1.5: 
-                vol_bonus = 15
-            elif vol_ratio >= 1.0: 
-                vol_bonus = 5
+            if vol_ratio >= 1.5: vol_bonus = 15
+            elif vol_ratio >= 1.0: vol_bonus = 5
             
-            # 大口検知: 3倍以上 かつ 株価上昇
             if vol_ratio >= 3.0 and current_price > last_day['Close']:
                 is_big_money = True
                 
         score += vol_bonus
         score = max(0, min(100, score))
 
-        # --- ターゲット計算 ---
         if "順張り" in po_status or "上昇" in po_status:
             strategy = "🔥順張り"
             buy_target_val = ma5
@@ -262,9 +222,7 @@ def get_technical_summary(ticker):
                 t_half_calc = 0
                 t_full_calc = 0
 
-        # 大口アイコンの付与
-        if is_big_money:
-            strategy = "💰大口流入?"
+        if is_big_money: strategy = "💰大口流入?"
 
         diff = current_price - buy_target_val
         diff_txt = f"{diff:+,.0f}" if diff != 0 else "0"
@@ -297,7 +255,6 @@ def get_technical_summary(ticker):
             "buy_display": buy_price_display, 
             "profit_display": profit_display
         }
-        
     except Exception:
         return None
 
@@ -311,9 +268,8 @@ def generate_ranking_table(high_score_list, low_score_list):
             [{d['code']} {d['name']}]
             - スコア: {d['score']}点, 戦略: {d['strategy']}
             - RSI: {d['rsi']:.1f}, 出来高倍率: {d['vol_ratio']:.2f}倍
-            - 現在値: {d['price']:,.0f}円
             - 推奨買値(残): {d['buy_display']}
-            - 利確(2行): {d['profit_display']}
+            - 利確目標: {d['profit_display']}
             --------------------------------
             """
         return txt if txt else "なし"
@@ -326,11 +282,11 @@ def generate_ranking_table(high_score_list, low_score_list):
     
     【出力データのルール】
     1. **表のみ出力**: 挨拶、市場概況、独り言は一切不要。
-    2. **推奨買値(残)**: 提供されたデータ内の「推奨買値(残)」の文字列を**そのまま**出力すること（計算禁止）。
-    3. **利確(半益/全益)**: データ内の文字列をそのまま出力。（`<br>`タグを含む）
+    2. **推奨買値(残)**: データ内の「{d['buy_display']}」を**カッコ内の数値も含めて**そのまま出力。
+    3. **利確(半益/全益)**: データ内の文字列をそのまま出力。
     4. **出来高**: ヘッダーは「出来高<br>(5日比)」。中身は「1.20倍」のように記述。
     5. **アイの所感**: 80文字程度で、具体的かつ冷静な分析を記述。
-       - **重要**: もし戦略が「💰大口流入?」となっている場合は、出来高の急増に触れ、「機関投資家の買い集めの可能性があります」とコメントすること。
+       - もし戦略が「💰大口流入?」なら、機関投資家の介入可能性について触れること。
 
     【データ1: 買い推奨・注目ゾーン (スコア70以上)】
     {list_to_text(high_score_list)}
@@ -366,16 +322,20 @@ if st.button("🚀 分析開始 (アイに聞く)"):
         progress_bar = st.progress(0)
         status_text = st.empty()
         
+        # 【安全対策】大量データ時のウェイト調整
+        wait_time = 1.5 if len(raw_tickers) > 10 else 1.0
+        
         for i, t in enumerate(raw_tickers):
             status_text.text(f"Processing ({i+1}/{len(raw_tickers)}): {t} ...")
             data = get_technical_summary(t)
             if data:
                 data_list.append(data)
             progress_bar.progress((i + 1) / len(raw_tickers))
-            time.sleep(1.0) 
+            # サーバー負荷軽減のため待機
+            time.sleep(wait_time)
 
         if data_list:
-            # ソート処理
+            # ソート
             if sort_option == "AIスコア順 (おすすめ)":
                 data_list.sort(key=lambda x: x['score'], reverse=True)
             elif sort_option == "RSI順 (低い順)":
@@ -387,21 +347,32 @@ if st.button("🚀 分析開始 (アイに聞く)"):
             elif sort_option == "出来高急増順":
                 data_list.sort(key=lambda x: x['vol_ratio'], reverse=True)
 
+            # 順位付け
             for idx, d in enumerate(data_list):
                 d['rank'] = idx + 1
             
+            # データの分割
             high_score_list = [d for d in data_list if d['score'] >= 70]
             low_score_list = [d for d in data_list if d['score'] < 70]
+            
+            # 【重要】AIに渡すデータ量を制限する（トークン対策）
+            # スコア上位30銘柄 + 下位10銘柄 だけ渡して、残りはカットする
+            # ※全部渡すとAIが止まるため
+            if len(high_score_list) > 30:
+                high_score_list = high_score_list[:30]
+                st.warning(f"※銘柄数が多いため、スコア上位30銘柄のみをAI分析します。")
+                
+            if len(low_score_list) > 10:
+                low_score_list = low_score_list[:10]
 
             status_text.text("🤖 アイが分析レポートを作成中...")
             result = generate_ranking_table(high_score_list, low_score_list)
             
             st.success("分析完了")
             st.markdown("### 📊 アイ推奨ポートフォリオ")
-            
             st.markdown(result, unsafe_allow_html=True)
             
-            with st.expander("詳細データリスト(確認用)"):
+            with st.expander("詳細データリスト(全銘柄確認用)"):
                 st.dataframe(pd.DataFrame(data_list)[['code', 'name', 'price', 'score', 'strategy', 'rsi', 'vol_ratio', 'buy_display']])
         else:
             st.error("有効なデータが取得できませんでした。")
