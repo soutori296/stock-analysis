@@ -16,7 +16,7 @@ st.markdown("""
 <style>
     .big-font { font-size:18px !important; font-weight: bold; color: #4A4A4A; }
     
-    /* 表のスタイル */
+    /* --- 表のスタイル調整 (CSS) --- */
     table { width: 100%; border-collapse: collapse; table-layout: auto; }
     th, td { 
         font-size: 14px; 
@@ -24,12 +24,43 @@ st.markdown("""
         padding: 6px 4px !important;
         line-height: 1.3 !important;
     }
-    th:nth-child(3), td:nth-child(3) { min-width: 130px; font-weight: bold; }
-    th:nth-child(4), td:nth-child(4) { white-space: nowrap; width: 50px; text-align: center; }
-    th:nth-child(7), td:nth-child(7) { min-width: 60px; font-size: 13px; }
-    th:nth-child(9), td:nth-child(9) { white-space: nowrap; }
-    th:nth-child(10), td:nth-child(10) { min-width: 110px; font-size: 13px; white-space: pre-wrap; }
-    th:nth-child(11), td:nth-child(11) { width: 40%; min-width: 300px; }
+    
+    /* 3列目: 企業名 */
+    th:nth-child(3), td:nth-child(3) { 
+        min-width: 130px; 
+        font-weight: bold; 
+    }
+    
+    /* 4列目: スコア */
+    th:nth-child(4), td:nth-child(4) { 
+        white-space: nowrap; 
+        width: 50px; 
+        text-align: center; 
+    }
+
+    /* 7列目: 出来高 */
+    th:nth-child(7), td:nth-child(7) { 
+        min-width: 60px; 
+        font-size: 13px; 
+    }
+
+    /* 9列目: 推奨買値 */
+    th:nth-child(9), td:nth-child(9) {
+        white-space: nowrap;
+    }
+
+    /* 10列目: 利確 */
+    th:nth-child(10), td:nth-child(10) { 
+        min-width: 110px;
+        font-size: 13px;
+        white-space: pre-wrap; 
+    }
+
+    /* 11列目: アイの所感 */
+    th:nth-child(11), td:nth-child(11) { 
+        width: 40%;
+        min-width: 300px;
+    }
 </style>
 <p class="big-font">あなたの提示した銘柄についてアイが分析して売買戦略を伝えます。</p>
 """, unsafe_allow_html=True)
@@ -58,9 +89,9 @@ if "GEMINI_API_KEY" in st.secrets:
 else:
     api_key = st.sidebar.text_input("Gemini API Key", type="password")
 
-# 初期値
+# 初期値 (タイトルに入力制限を明記)
 tickers_input = st.text_area(
-    "Analysing Targets (銘柄コードを入力)", 
+    "Analysing Targets (銘柄コードを入力 / 最大40件まで)", 
     value="", 
     placeholder="例:\n7203\n8306\n9984\n(ここにコードを入力してください)",
     height=150
@@ -152,7 +183,9 @@ def get_technical_summary(ticker):
         if len(df) < 25: return None
 
         last_day = df.iloc[-1]
+        
         current_price = fund["price"] if fund["price"] else last_day['Close']
+        
         vol_sma5 = last_day['Vol_SMA5']
         current_vol = fund["volume"] if fund["volume"] else last_day['Volume']
         
@@ -268,6 +301,7 @@ def generate_ranking_table(high_score_list, low_score_list):
             [{d['code']} {d['name']}]
             - スコア: {d['score']}点, 戦略: {d['strategy']}
             - RSI: {d['rsi']:.1f}, 出来高倍率: {d['vol_ratio']:.2f}倍
+            - 現在値: {d['price']:,.0f}円
             - 推奨買値(残): {d['buy_display']}
             - 利確目標: {d['profit_display']}
             --------------------------------
@@ -318,61 +352,53 @@ if st.button("🚀 分析開始 (アイに聞く)"):
         normalized_input = tickers_input.replace("\n", ",").replace("、", ",").replace(" ", "")
         raw_tickers = list(set([t for t in normalized_input.split(",") if t]))
         
-        data_list = []
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        
-        # 【安全対策】大量データ時のウェイト調整
-        wait_time = 1.5 if len(raw_tickers) > 10 else 1.0
-        
-        for i, t in enumerate(raw_tickers):
-            status_text.text(f"Processing ({i+1}/{len(raw_tickers)}): {t} ...")
-            data = get_technical_summary(t)
-            if data:
-                data_list.append(data)
-            progress_bar.progress((i + 1) / len(raw_tickers))
-            # サーバー負荷軽減のため待機
-            time.sleep(wait_time)
-
-        if data_list:
-            # ソート
-            if sort_option == "AIスコア順 (おすすめ)":
-                data_list.sort(key=lambda x: x['score'], reverse=True)
-            elif sort_option == "RSI順 (低い順)":
-                data_list.sort(key=lambda x: x['rsi'])
-            elif sort_option == "RSI順 (高い順)":
-                data_list.sort(key=lambda x: x['rsi'], reverse=True)
-            elif sort_option == "時価総額順":
-                data_list.sort(key=lambda x: x['cap'], reverse=True)
-            elif sort_option == "出来高急増順":
-                data_list.sort(key=lambda x: x['vol_ratio'], reverse=True)
-
-            # 順位付け
-            for idx, d in enumerate(data_list):
-                d['rank'] = idx + 1
-            
-            # データの分割
-            high_score_list = [d for d in data_list if d['score'] >= 70]
-            low_score_list = [d for d in data_list if d['score'] < 70]
-            
-            # 【重要】AIに渡すデータ量を制限する（トークン対策）
-            # スコア上位30銘柄 + 下位10銘柄 だけ渡して、残りはカットする
-            # ※全部渡すとAIが止まるため
-            if len(high_score_list) > 30:
-                high_score_list = high_score_list[:30]
-                st.warning(f"※銘柄数が多いため、スコア上位30銘柄のみをAI分析します。")
-                
-            if len(low_score_list) > 10:
-                low_score_list = low_score_list[:10]
-
-            status_text.text("🤖 アイが分析レポートを作成中...")
-            result = generate_ranking_table(high_score_list, low_score_list)
-            
-            st.success("分析完了")
-            st.markdown("### 📊 アイ推奨ポートフォリオ")
-            st.markdown(result, unsafe_allow_html=True)
-            
-            with st.expander("詳細データリスト(全銘柄確認用)"):
-                st.dataframe(pd.DataFrame(data_list)[['code', 'name', 'price', 'score', 'strategy', 'rsi', 'vol_ratio', 'buy_display']])
+        # 【重要】入力制限: 40件を超えたらエラーで止める
+        if len(raw_tickers) > 40:
+            st.error(f"⛔ 銘柄数が多すぎます。一度に分析できるのは40件までです。（現在の入力: {len(raw_tickers)}件）")
         else:
-            st.error("有効なデータが取得できませんでした。")
+            data_list = []
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            for i, t in enumerate(raw_tickers):
+                status_text.text(f"Processing ({i+1}/{len(raw_tickers)}): {t} ...")
+                data = get_technical_summary(t)
+                if data:
+                    data_list.append(data)
+                progress_bar.progress((i + 1) / len(raw_tickers))
+                # 40件制限があるので、ウェイトは標準の1秒でOK
+                time.sleep(1.0) 
+
+            if data_list:
+                # ソート
+                if sort_option == "AIスコア順 (おすすめ)":
+                    data_list.sort(key=lambda x: x['score'], reverse=True)
+                elif sort_option == "RSI順 (低い順)":
+                    data_list.sort(key=lambda x: x['rsi'])
+                elif sort_option == "RSI順 (高い順)":
+                    data_list.sort(key=lambda x: x['rsi'], reverse=True)
+                elif sort_option == "時価総額順":
+                    data_list.sort(key=lambda x: x['cap'], reverse=True)
+                elif sort_option == "出来高急増順":
+                    data_list.sort(key=lambda x: x['vol_ratio'], reverse=True)
+
+                # 順位付け
+                for idx, d in enumerate(data_list):
+                    d['rank'] = idx + 1
+                
+                # データの分割
+                high_score_list = [d for d in data_list if d['score'] >= 70]
+                low_score_list = [d for d in data_list if d['score'] < 70]
+
+                status_text.text("🤖 アイが分析レポートを作成中...")
+                result = generate_ranking_table(high_score_list, low_score_list)
+                
+                st.success("分析完了")
+                st.markdown("### 📊 アイ推奨ポートフォリオ")
+                
+                st.markdown(result, unsafe_allow_html=True)
+                
+                with st.expander("詳細データリスト(確認用)"):
+                    st.dataframe(pd.DataFrame(data_list)[['code', 'name', 'price', 'score', 'strategy', 'rsi', 'vol_ratio', 'buy_display']])
+            else:
+                st.error("有効なデータが取得できませんでした。")
