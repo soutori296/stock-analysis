@@ -52,48 +52,34 @@ if api_key:
         st.error(f"System Error: {e}")
 
 def get_stock_info_from_kabutan(code):
-    """
-    株探から現在値とファンダメンタルズを取得（強化版）
-    """
+    """株探から現在値とファンダメンタルズを取得"""
     url = f"https://kabutan.jp/stock/?code={code}"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    }
-    
+    headers = {"User-Agent": "Mozilla/5.0"}
     data = {"name": "不明", "per": "-", "pbr": "-", "price": None, "volume": None, "cap": 0}
-    
     try:
         res = requests.get(url, headers=headers, timeout=5)
         res.encoding = res.apparent_encoding
         html = res.text.replace("\n", "").replace("\r", "")
         
-        # 1. 社名
         match_name = re.search(r'<title>(.*?)【', html)
         if match_name: data["name"] = match_name.group(1).strip()
             
-        # 2. 現在値 (最優先: ヘッダーの大きな表示 class="kabuka")
-        # 例: <span class="kabuka">10,410円</span>
         match_price_header = re.search(r'class="kabuka">([0-9,]+)円<', html)
         if match_price_header:
             data["price"] = float(match_price_header.group(1).replace(",", ""))
         else:
-            # フォールバック: テーブル内の現在値
             match_price_tbl = re.search(r'現在値</th>.*?<td>([0-9,]+)</td>', html)
-            if match_price_tbl:
-                data["price"] = float(match_price_tbl.group(1).replace(",", ""))
+            if match_price_tbl: data["price"] = float(match_price_tbl.group(1).replace(",", ""))
 
-        # 3. 出来高
         match_vol = re.search(r'出来高</th>.*?<td>([0-9,]+).*?株</td>', html)
         if match_vol: data["volume"] = float(match_vol.group(1).replace(",", ""))
 
-        # 4. PER/PBR
         def extract_val(key, text):
             m = re.search(rf'{key}.*?>([0-9\.,\-]+)(?:</span>)?(?:倍|％)', text)
             return m.group(1) + "倍" if m else "-"
         data["per"] = extract_val("PER", html)
         data["pbr"] = extract_val("PBR", html)
 
-        # 5. 時価総額
         match_cap = re.search(r'時価総額</th>.*?<td>([0-9,]+)<span>億円', html)
         if match_cap: data["cap"] = int(match_cap.group(1).replace(",", ""))
             
@@ -107,10 +93,7 @@ def get_technical_summary(ticker):
     if not ticker.isdigit(): return None, None, None
     stock_code = f"{ticker}.JP"
     
-    # 1. リアルタイムデータ (株探)
     fund = get_stock_info_from_kabutan(ticker)
-    
-    # 2. 過去データ (Stooq)
     csv_url = f"https://stooq.com/q/d/l/?s={stock_code}&i=d"
     
     try:
@@ -122,16 +105,13 @@ def get_technical_summary(ticker):
         if df.empty: return None, None, None
         
         df = df.sort_index()
-        # 直近データ確保
         df = df.tail(100) 
         
-        # テクニカル計算 (Stooqベース)
         df['SMA5'] = df['Close'].rolling(window=5).mean()
         df['SMA25'] = df['Close'].rolling(window=25).mean()
         df['SMA75'] = df['Close'].rolling(window=75).mean()
         df['Vol_SMA5'] = df['Volume'].rolling(window=5).mean()
 
-        # RSI (14日)
         delta = df['Close'].diff()
         gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
         loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
@@ -140,28 +120,23 @@ def get_technical_summary(ticker):
         
         if len(df) < 25: return None, None, None
 
-        # 最終確定足（昨日）
         last_day = df.iloc[-1]
         
         # --- データの統合 ---
-        # 価格: 株探の現在値があれば優先、なければStooq終値
         current_price = fund["price"] if fund["price"] else last_day['Close']
-        source_label = "Realtime" if fund["price"] else "Close(昨日)"
+        source_label = "Realtime" if fund["price"] else "Close"
         
-        # 出来高: 株探(当日) / Stooq(5日平均)
         vol_sma5 = last_day['Vol_SMA5']
         current_vol = fund["volume"] if fund["volume"] else last_day['Volume']
         
-        # 指標 (MA等は昨日の確定値を使う)
         ma5 = last_day['SMA5']
         ma25 = last_day['SMA25']
         ma75 = last_day['SMA75']
         rsi = last_day['RSI']
         
-        # --- スコアリング (100点満点) ---
+        # --- スコアリング ---
         score = 50 
         
-        # 1. PO判定
         slope5_up = ma5 > df.iloc[-2]['SMA5']
         if ma5 > ma25 and ma25 > ma75:
             if slope5_up: 
@@ -174,10 +149,8 @@ def get_technical_summary(ticker):
             score -= 20
             po_status = "▼下落PO"
         else:
-            po_status = "レンジ/調整"
+            po_status = "レンジ"
 
-        # 2. RSI判定 (理想: 55-65)
-        # Markdownでは色指定ができないため、絵文字で表現
         rsi_mark = f"{rsi:.0f}"
         if rsi <= 30:
             score += 10
@@ -191,7 +164,6 @@ def get_technical_summary(ticker):
         else:
             rsi_mark = f"🟢{rsi:.0f}"
 
-        # 3. 出来高判定
         vol_bonus = 0
         vol_ratio = 0
         if vol_sma5 > 0:
@@ -202,42 +174,47 @@ def get_technical_summary(ticker):
         
         score = max(0, min(100, score))
 
-        # --- ターゲット価格 (現在値基準) ---
-        # 順張り
-        t_trend_half = max(current_price * 1.05, ma25 * 1.10)
-        t_trend_full = max(current_price * 1.10, ma25 * 1.20)
-        # 逆張り
-        t_rev_half = ma5
-        t_rev_full = ma25
-
-        def fmt_target(target, current):
-            if target <= current: return "到達済"
-            pct = (target - current) / current * 100
-            return f"{target:,.0f} (+{pct:.1f}%)"
-
-        # 戦略決定
+        # --- ターゲット価格 & 残り値幅の計算 ---
+        # 1. 推奨買値の決定
         if "上昇" in po_status:
             strategy = "🔥順張り"
-            buy_price = f"{ma5:,.0f}円(5MA)"
-            p_half = fmt_target(t_trend_half, current_price)
-            p_full = fmt_target(t_trend_full, current_price)
+            buy_target_val = ma5 # トレンドフォローは5MA押し目
+            t_half = max(current_price * 1.05, ma25 * 1.10)
+            t_full = max(current_price * 1.10, ma25 * 1.20)
         else:
             if rsi <= 35:
                 strategy = "🌊逆張り"
-                buy_price = f"{current_price:,.0f}円(現在値)"
-                p_half = fmt_target(t_rev_half, current_price)
-                p_full = fmt_target(t_rev_full, current_price)
+                buy_target_val = current_price # 逆張りは今すぐ
+                t_half = ma5
+                t_full = ma25
             else:
                 strategy = "👀様子見"
-                buy_price = "様子見推奨"
-                p_half = "-"
-                p_full = "-"
+                buy_target_val = ma25 # 様子見なら深く待つ
+                t_half = 0
+                t_full = 0
+
+        # 残り（Diff）の計算
+        # プラス: 現在値 > 買値 (落ちてくるのを待つ) -> "+15"
+        # マイナス: 現在値 < 買値 (行き過ぎ/チャンス) -> "-5"
+        diff = current_price - buy_target_val
+        diff_txt = f"{diff:+,.0f}" if diff != 0 else "0"
+        
+        # 表示用文字列
+        if strategy == "👀様子見":
+            buy_price_display = "様子見推奨"
+        else:
+            buy_price_display = f"{buy_target_val:,.0f} ({diff_txt})"
+
+        def fmt_target(target, current):
+            if target == 0: return "-"
+            if target <= current: return "到達済"
+            pct = (target - current) / current * 100
+            return f"{target:,.0f} (+{pct:.1f}%)"
 
         return {
             "code": ticker,
             "name": fund['name'],
             "price": current_price,
-            "source": source_label, # リアルタイムかどうかのフラグ
             "score": score,
             "strategy": strategy,
             "po": po_status,
@@ -246,9 +223,9 @@ def get_technical_summary(ticker):
             "vol_ratio": vol_ratio,
             "cap": fund["cap"],
             "fund_str": f"{fund['per']}/{fund['pbr']}",
-            "buy": buy_price,
-            "p_half": p_half,
-            "p_full": p_full
+            "buy_display": buy_price_display, # 計算済みの買値表示
+            "p_half": fmt_target(t_half, current_price),
+            "p_full": fmt_target(t_full, current_price)
         }
         
     except Exception:
@@ -261,11 +238,10 @@ def generate_ranking_table(data_list):
     for d in data_list:
         input_text += f"""
         [{d['code']} {d['name']}]
-        - 現在値: {d['price']:,.0f}円 ({d['source']})
+        - 現在値: {d['price']:,.0f}円
         - スコア: {d['score']}点, 戦略: {d['strategy']}
-        - 指標: {d['fund_str']}, 時価総額: {d['cap']}億円
         - RSI: {d['rsi']:.1f}, 出来高倍率: {d['vol_ratio']:.2f}倍
-        - 推奨買値: {d['buy']}
+        - 推奨買値(残): {d['buy_display']}
         - 利確目標: 半益 {d['p_half']} / 全益 {d['p_full']}
         --------------------------------
         """
@@ -273,30 +249,28 @@ def generate_ranking_table(data_list):
     prompt = f"""
     あなたは「アイ」という名前のプロトレーダー（30代女性）です。
     
-    【指示】
-    提供された「スコア順の銘柄リスト」を基に、Markdownの表を作成してください。
+    【口調の設定】
+    - 常に冷静で、理知的な「です・ます」調を使ってください。
     
-    【口調】
-    - 表の中：冷静で丁寧な「です・ます」調。
-    - 最後の独り言：常体（～だ、～である）。
-    
-    【出力構成】
-    1. **総合コメント**: リスト全体の地合いについて2行で。
-    2. **【買い推奨・注目ゾーン】**: スコア70点以上の銘柄（なければ「該当なし」）。
-    3. **【様子見・警戒ゾーン】**: スコア69点以下の銘柄。
-    
-    【表のカラム】
-    | 順位 | コード | 企業名 | スコア | 戦略 | RSI | 出来高(5日比) | 推奨買値 | 半益 / 全益 | アイの所感 |
-    
-    - **RSI**: データ内の絵文字付きRSI（例: 🟢🔥60）をそのまま使うこと。
-    - **出来高**: 「1.5倍」のように倍率で記載。
-    - **アイの所感**: なぜそのスコアなのか、RSIや出来高を見て40文字以内でコメント。
-    
-    4. **【アイの独り言】**: 
-       - 今回の平均RSI（{sum(d['rsi'] for d in data_list)/len(data_list):.1f}）などを踏まえ、投資家へ警鐘を鳴らす独り言を3行。
-    
+    【出力データのルール】
+    1. **推奨買値(残)**: データ内の「{d['buy_display']}」という文字列（例: "2650 (+15)"）をそのまま使うこと。
+    2. **RSI**: データ内の絵文字付きRSIを使う。
+    3. **アイの所感**: 40文字以内で、データに基づいた冷静なコメントを記述。
+
     【データ】
     {input_text}
+    
+    【出力構成】
+    1. 冒頭で、全体の地合いについて理知的な短評（2行）。
+    2. 以下のカラム構成でMarkdown表を作成。
+    
+    | 順位 | コード | 企業名 | スコア | 戦略 | RSI | 出来高(5日比) | 現在値 | 推奨買値(残) | 利確(半益/全益) | アイの所感(40文字) |
+    
+    ※順位は提供データの並び順通りに記載。
+    
+    3. **【アイの独り言（投資家への警鐘）】**
+       - ここだけは「～だ」「～である」「～と思う」という常体（独白調）。
+       - プロとして相場を俯瞰し、静かにリスクを懸念する内容を3行程度で記述。
     """
     
     try:
@@ -350,6 +324,6 @@ if st.button("🚀 分析開始 (アイに聞く)"):
             st.markdown(result)
             
             with st.expander("詳細データリスト(確認用)"):
-                st.dataframe(pd.DataFrame(data_list)[['code', 'name', 'price', 'source', 'score', 'strategy', 'rsi', 'vol_ratio', 'p_half', 'p_full']])
+                st.dataframe(pd.DataFrame(data_list)[['code', 'name', 'price', 'score', 'strategy', 'rsi', 'vol_ratio', 'buy_display']])
         else:
             st.error("有効なデータが取得できませんでした。")
