@@ -32,7 +32,7 @@ default_tickers = """4028
 7483
 1871
 3611"""
-tickers_input = st.text_area("銘柄コードを入力 (改行やカンマ区切り)", default_tickers, height=150)
+tickers_input = st.text_area("Analysing Targets (銘柄コードを入力)", default_tickers, height=150)
 
 # AIモデル設定
 model_name = 'gemini-2.5-flash'
@@ -173,10 +173,12 @@ def generate_ranking_table(summaries):
     if model is None: return "API Key Required."
 
     prompt = f"""
-    あなたは「優秀なプロトレーダー（30代女性、理知的でサバサバ系）」です。
+    あなたは「アイ」という名前のプロトレーダー（30代女性）です。
+    性格は理知的で、少し口が悪い（毒舌）ですが、ユーザーの資産を守るために厳しく接します。
     
     【絶対禁止事項】
-    ❌ 自己紹介や挨拶は不要。いきなり分析結果から記述。
+    ❌ 「私はアイです」等の自己紹介は不要。
+    ❌ 挨拶不要。いきなり分析結果から記述。
     ❌ 価格を範囲（～）で書くことは禁止。ピンポイントの価格を指定。
 
     【出力データのルール】
@@ -187,17 +189,17 @@ def generate_ranking_table(summaries):
        - 順張りなら「5日線」か「直近高値ブレイク」。
        - 逆張りなら「現在値」か「乖離-10%地点」。
     3. **利確戦略**: Pythonで計算された「半益ターゲット」「全益ターゲット」の数値を必ず使うこと。
-    4. **割安度**: 知識データベースからPER/PBRを補完。
-    5. **PO判定・RSI・出来高**: 提供データをそのまま表示。
+    4. **アイの所感**: **20文字以内**で、その銘柄に対する鋭いコメントやツッコミを入れてください。
+       - 例：「まだ高いわ。落ちるまで待ちなさい」「今買わなくていつ買うの？」
 
     【データ】
     {summaries}
     
     【出力構成】
-    1. 冒頭で、全体の地合いについての短評（2行）。
+    1. 冒頭で、全体の地合いについて辛口な短評（2行）。
     2. 以下のカラム構成でMarkdown表を作成。
     
-    | 順位 | コード | 企業名 | 現在値 | 戦略 | PO判定 | RSI | 出来高(5日比) | 推奨買値 | 利確戦略(半益/全益) | 割安度(PER/PBR) |
+    | 順位 | コード | 企業名 | 現在値 | 戦略 | PO判定 | RSI | 出来高(5日比) | 推奨買値 | 利確戦略(半益/全益) | 割安度 | アイの所感(20文字) |
     
     ※順位は「戦略の明確さ（強い順張り or 売られすぎ逆張り）」順。
     """
@@ -209,7 +211,7 @@ def generate_ranking_table(summaries):
         return f"AI Generation Error: {str(e)}"
 
 # メイン処理
-if st.button("🚀 分析開始"):
+if st.button("🚀 分析開始 (アイに聞く)"):
     if not api_key:
         st.warning("APIキーを入力してください。")
     else:
@@ -242,13 +244,13 @@ if st.button("🚀 分析開始"):
             time.sleep(1.0) 
 
         if valid_tickers:
-            status_text.text("🤖 AI Strategist is calculating optimal portfolio...")
+            status_text.text("🤖 アイが分析レポートを作成中...")
             result = generate_ranking_table(combined_data)
             
-            st.success("Analysis Complete.")
-            st.markdown("### 📊 Strategic Portfolio Report")
+            st.success("分析完了")
+            st.markdown("### 📊 AI推奨ポートフォリオ")
             st.markdown(result)
-            with st.expander("Show Raw Data"):
+            with st.expander("詳細データログ"):
                 st.text(combined_data)
         else:
-            st.error("No valid data found.")
+            st.error("有効なデータが取得できませんでした。コードを確認してください。")
