@@ -178,28 +178,29 @@ def get_technical_summary(ticker):
         # 1. 推奨買値の決定
         if "上昇" in po_status:
             strategy = "🔥順張り"
-            buy_target_val = ma5 # トレンドフォローは5MA押し目
-            t_half = max(current_price * 1.05, ma25 * 1.10)
-            t_full = max(current_price * 1.10, ma25 * 1.20)
+            buy_target_val = ma5 # 5MA押し目
+            # 利確ターゲット計算 (現在値より低い場合は補正)
+            t_half_calc = max(current_price * 1.05, ma25 * 1.10)
+            t_full_calc = max(current_price * 1.10, ma25 * 1.20)
         else:
             if rsi <= 35:
                 strategy = "🌊逆張り"
-                buy_target_val = current_price # 逆張りは今すぐ
-                t_half = ma5
-                t_full = ma25
+                buy_target_val = current_price # 即買い
+                # 利確ターゲット計算 (リバウンド狙い)
+                # 5日線を既に超えているなら、現在値+3%をとりあえずの目標に
+                t_half_calc = ma5 if ma5 > current_price else current_price * 1.03
+                # 25日線を既に超えているなら、現在値+6%
+                t_full_calc = ma25 if ma25 > t_half_calc else t_half_calc * 1.03
             else:
                 strategy = "👀様子見"
-                buy_target_val = ma25 # 様子見なら深く待つ
-                t_half = 0
-                t_full = 0
+                buy_target_val = ma25 
+                t_half_calc = 0
+                t_full_calc = 0
 
         # 残り（Diff）の計算
-        # プラス: 現在値 > 買値 (落ちてくるのを待つ) -> "+15"
-        # マイナス: 現在値 < 買値 (行き過ぎ/チャンス) -> "-5"
         diff = current_price - buy_target_val
         diff_txt = f"{diff:+,.0f}" if diff != 0 else "0"
         
-        # 表示用文字列
         if strategy == "👀様子見":
             buy_price_display = "様子見推奨"
         else:
@@ -207,7 +208,6 @@ def get_technical_summary(ticker):
 
         def fmt_target(target, current):
             if target == 0: return "-"
-            if target <= current: return "到達済"
             pct = (target - current) / current * 100
             return f"{target:,.0f} (+{pct:.1f}%)"
 
@@ -223,28 +223,30 @@ def get_technical_summary(ticker):
             "vol_ratio": vol_ratio,
             "cap": fund["cap"],
             "fund_str": f"{fund['per']}/{fund['pbr']}",
-            "buy_display": buy_price_display, # 計算済みの買値表示
-            "p_half": fmt_target(t_half, current_price),
-            "p_full": fmt_target(t_full, current_price)
+            "buy_display": buy_price_display, 
+            "p_half": fmt_target(t_half_calc, current_price),
+            "p_full": fmt_target(t_full_calc, current_price)
         }
         
     except Exception:
         return None
 
-def generate_ranking_table(data_list):
+def generate_ranking_table(high_score_list, low_score_list):
     if model is None: return "API Key Required."
 
-    input_text = ""
-    for d in data_list:
-        input_text += f"""
-        [{d['code']} {d['name']}]
-        - 現在値: {d['price']:,.0f}円
-        - スコア: {d['score']}点, 戦略: {d['strategy']}
-        - RSI: {d['rsi']:.1f}, 出来高倍率: {d['vol_ratio']:.2f}倍
-        - 推奨買値(残): {d['buy_display']}
-        - 利確目標: 半益 {d['p_half']} / 全益 {d['p_full']}
-        --------------------------------
-        """
+    def list_to_text(lst):
+        txt = ""
+        for d in lst:
+            txt += f"""
+            [{d['code']} {d['name']}]
+            - スコア: {d['score']}点, 戦略: {d['strategy']}
+            - RSI: {d['rsi']:.1f}, 出来高倍率: {d['vol_ratio']:.2f}倍
+            - 現在値: {d['price']:,.0f}円
+            - 推奨買値(残): {d['buy_display']}
+            - 利確目標: 半益 {d['p_half']} / 全益 {d['p_full']}
+            --------------------------------
+            """
+        return txt if txt else "該当なし"
 
     prompt = f"""
     あなたは「アイ」という名前のプロトレーダー（30代女性）です。
@@ -253,22 +255,27 @@ def generate_ranking_table(data_list):
     - 常に冷静で、理知的な「です・ます」調を使ってください。
     
     【出力データのルール】
-    1. **推奨買値(残)**: データ内の「{d['buy_display']}」という文字列（例: "2650 (+15)"）をそのまま使うこと。
-    2. **RSI**: データ内の絵文字付きRSIを使う。
-    3. **アイの所感**: 40文字以内で、データに基づいた冷静なコメントを記述。
+    1. 提供されたリストを使い、**「スコア70以上（推奨）」** と **「スコア70未満（様子見）」** の**2つの表**を作成してください。
+    2. **推奨買値(残)**: データ内の「{d['buy_display']}」という文字列をそのまま使う。
+    3. **利確(半益/全益)**: データ内の文字列をそのまま使う。
+    4. **アイの所感**: 40文字以内で、データに基づいた冷静なコメントを記述。
 
-    【データ】
-    {input_text}
+    【データ1: 買い推奨・注目ゾーン (スコア70以上)】
+    {list_to_text(high_score_list)}
+
+    【データ2: 様子見・警戒ゾーン (スコア70未満)】
+    {list_to_text(low_score_list)}
     
     【出力構成】
     1. 冒頭で、全体の地合いについて理知的な短評（2行）。
-    2. 以下のカラム構成でMarkdown表を作成。
     
-    | 順位 | コード | 企業名 | スコア | 戦略 | RSI | 出来高(5日比) | 現在値 | 推奨買値(残) | 利確(半益/全益) | アイの所感(40文字) |
+    2. **【買い推奨・注目ゾーン】** (該当がなければ「なし」と記述)
+    | 順位 | コード | 企業名 | スコア | 戦略 | RSI | 出来高(5日比) | 現在値 | 推奨買値(残) | 利確(半益/全益) | アイの所感 |
     
-    ※順位は提供データの並び順通りに記載。
+    3. **【様子見・警戒ゾーン】**
+    (同じ形式の表を作成)
     
-    3. **【アイの独り言（投資家への警鐘）】**
+    4. **【アイの独り言（投資家への警鐘）】**
        - ここだけは「～だ」「～である」「～と思う」という常体（独白調）。
        - プロとして相場を俯瞰し、静かにリスクを懸念する内容を3行程度で記述。
     """
@@ -302,6 +309,7 @@ if st.button("🚀 分析開始 (アイに聞く)"):
             time.sleep(1.0) 
 
         if data_list:
+            # ソート処理
             if sort_option == "AIスコア順 (おすすめ)":
                 data_list.sort(key=lambda x: x['score'], reverse=True)
             elif sort_option == "RSI順 (低い順)":
@@ -313,17 +321,22 @@ if st.button("🚀 分析開始 (アイに聞く)"):
             elif sort_option == "出来高急増順":
                 data_list.sort(key=lambda x: x['vol_ratio'], reverse=True)
 
+            # 順位付け
             for idx, d in enumerate(data_list):
                 d['rank'] = idx + 1
             
+            # データの分割 (スコア70で分ける)
+            high_score_list = [d for d in data_list if d['score'] >= 70]
+            low_score_list = [d for d in data_list if d['score'] < 70]
+
             status_text.text("🤖 アイが分析レポートを作成中...")
-            result = generate_ranking_table(data_list)
+            result = generate_ranking_table(high_score_list, low_score_list)
             
             st.success("分析完了")
             st.markdown("### 📊 アイ推奨ポートフォリオ")
             st.markdown(result)
             
             with st.expander("詳細データリスト(確認用)"):
-                st.dataframe(pd.DataFrame(data_list)[['code', 'name', 'price', 'score', 'strategy', 'rsi', 'vol_ratio', 'buy_display']])
+                st.dataframe(pd.DataFrame(data_list)[['code', 'name', 'price', 'score', 'strategy', 'rsi', 'vol_ratio', 'p_half', 'p_full']])
         else:
             st.error("有効なデータが取得できませんでした。")
