@@ -61,7 +61,7 @@ with col_title:
         /* 11列目: 利確 */
         th:nth-child(11), td:nth-child(11) { min-width: 100px; font-size: 12px; }
 
-        /* 12列目: 指標 */
+        /* 12列目: 指標 (改行対応) */
         th:nth-child(12), td:nth-child(12) { 
             font-size: 11px; 
             min-width: 60px; 
@@ -116,9 +116,7 @@ if api_key:
         st.error(f"System Error: {e}")
 
 def get_stock_info_from_kabutan(code):
-    """
-    株探から情報を取得 (位置指定スクレイピング強化版)
-    """
+    """株探から情報を取得 (強力解析版)"""
     url = f"https://kabutan.jp/stock/?code={code}"
     headers = {"User-Agent": "Mozilla/5.0"}
     data = {"name": "不明", "per": "-", "pbr": "-", "price": None, "volume": None, "cap": 0}
@@ -144,11 +142,10 @@ def get_stock_info_from_kabutan(code):
         if match_vol:
             data["volume"] = float(match_vol.group(1).replace(",", ""))
 
-        # 4. 時価総額 (v_zika2クラスを狙い撃ち)
+        # 4. 時価総額
         match_cap_area = re.search(r'class="v_zika2">(.*?)</td>', html)
         if match_cap_area:
             raw_cap_html = match_cap_area.group(1)
-            # タグを全削除
             cap_text = re.sub(r'<[^>]+>', '', raw_cap_html).replace(",", "").strip()
             
             if "兆" in cap_text:
@@ -157,10 +154,8 @@ def get_stock_info_from_kabutan(code):
                 billion = int(parts[1]) if parts[1] else 0
                 data["cap"] = trillion * 10000 + billion
             else:
-                try:
-                    data["cap"] = int(cap_text.replace("億円", ""))
-                except:
-                    data["cap"] = 0
+                try: data["cap"] = int(cap_text.replace("億円", ""))
+                except: data["cap"] = 0
 
         # 5. PER / PBR
         i3_match = re.search(r'<div id="stockinfo_i3">.*?<tbody>(.*?)</tbody>', html)
@@ -169,8 +164,7 @@ def get_stock_info_from_kabutan(code):
             tds = re.findall(r'<td[^>]*>(.*?)</td>', tbody)
             
             def clean_tag_val(val):
-                val = re.sub(r'<[^>]+>', '', val).strip()
-                return val
+                return re.sub(r'<[^>]+>', '', val).strip()
 
             if len(tds) >= 2:
                 data["per"] = clean_tag_val(tds[0])
@@ -386,7 +380,7 @@ def generate_ranking_table(high_score_list, low_score_list):
     【出力データのルール】
     1. **表のみ出力**: 挨拶不要。
     2. **そのまま表示**: データ内の「RSI」「出来高」「推奨買値」「利確目標」は、**加工せずそのまま**表に入れてください。
-    3. **指標**: データ内の「指標表示用文字列」(`{d['fund_disp']}`)をそのまま出力して、セル内で2段にしてください。
+    3. **指標**: データ内の「指標表示用文字列」をそのまま出力して、セル内で2段にしてください。
     4. **時価総額**: 「時価総額」の列を追加し、データの `cap_disp` を表示。
     5. **バックテスト**: 裏データの勝率が高い銘柄は所感で評価。
     6. **アイの所感**: 80文字以内で、データに基づいた冷静なコメントを記述。
