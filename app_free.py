@@ -16,7 +16,7 @@ st.markdown("""
 <style>
     .big-font { font-size:18px !important; font-weight: bold; color: #4A4A4A; }
 </style>
-<p class="big-font">あなたの提示した銘柄についてアイが分析して伝えます。</p>
+<p class="big-font">あなたの提示した銘柄についてアイが分析して売買戦略を伝えます。</p>
 """, unsafe_allow_html=True)
 
 # サイドバー設定
@@ -26,13 +26,13 @@ if "GEMINI_API_KEY" in st.secrets:
 else:
     api_key = st.sidebar.text_input("Gemini API Key", type="password")
 
-# 初期値
-default_tickers = """4028
-3941
-7483
-1871
-3611"""
-tickers_input = st.text_area("Analysing Targets (銘柄コードを入力)", default_tickers, height=150)
+# 初期値（空欄にする）
+tickers_input = st.text_area(
+    "Analysing Targets (銘柄コードを入力)", 
+    value="", 
+    placeholder="例:\n7203\n8306\n9984\n(ここにコードを入力してください)",
+    height=150
+)
 
 # AIモデル設定
 model_name = 'gemini-2.5-flash'
@@ -174,8 +174,9 @@ def generate_ranking_table(summaries):
     prompt = f"""
     あなたは「アイ」という名前のプロトレーダー（30代女性）です。
     
-    【分析スタイル】
-    - 表の中のコメント（所感）は、理知的で独白調で書いてください。
+    【口調の設定】
+    - 常に冷静で、理知的な「です・ます」調を使ってください。
+    - 感情的になったり、乱暴な言葉（～だわ、～よ）は使いません。
     
     【絶対禁止事項】
     ❌ 自己紹介や挨拶は不要。いきなり分析結果から記述。
@@ -185,11 +186,12 @@ def generate_ranking_table(summaries):
     提供されたデータに基づき、以下の要素を必ず全て網羅した表を作成してください。
     
     1. **戦略**: 「🔥順張り」か「🌊逆張り」か。
-    2. **推奨買値**: 
+    2. **RSI装飾**: RSIが**30以下なら「🔵(数値)」**、**70以上なら「🔴(数値)」**、それ以外はそのまま表示してください。
+    3. **推奨買値**: 
        - 順張りなら「5日線」か「直近高値ブレイク」。
        - 逆張りなら「現在値」か「乖離-10%地点」。
-    3. **利確戦略**: Pythonで計算された「半益ターゲット」「全益ターゲット」の数値を必ず使うこと。
-    4. **アイの所感**: 40文字以内で、データに基づいた冷静なコメントを記述（丁寧語）。
+    4. **利確戦略**: Pythonで計算された「半益ターゲット」「全益ターゲット」の数値を必ず使うこと。
+    5. **アイの所感**: **40文字以内**で、データに基づいた冷静なコメントを記述（丁寧語）。
 
     【データ】
     {summaries}
@@ -198,13 +200,11 @@ def generate_ranking_table(summaries):
     1. 冒頭で、全体の地合いについて理知的な短評（2行）。
     2. 以下のカラム構成でMarkdown表を作成。
     
-    | 順位 | コード | 企業名 | 現在値 | 戦略 | PO判定 | RSI | 出来高(5日比) | 推奨買値 | 利確戦略(半益/全益) | 割安度 | アイの所感 |
+    | 順位 | コード | 企業名 | 現在値 | 戦略 | PO判定 | RSI | 出来高(5日比) | 推奨買値 | 利確戦略(半益/全益) | 割安度(PER/PBR) | アイの所感(40文字) |
     
     3. **【アイの独り言（投資家への警鐘）】**
        - 最後にこのセクションを設け、ここだけは**「～だ」「～である」「～と思う」という常体（独白調）**に切り替えてください。
-       - 「～です」「～ます」は禁止です。
        - プロとして相場を俯瞰し、静かにリスクを懸念する内容を3行程度で記述してください。
-       - 例：「最近の相場は少し浮かれすぎているように**思う**。足元をすくわれないよう、警戒が必要だ。」
     """
     
     try:
@@ -217,6 +217,8 @@ def generate_ranking_table(summaries):
 if st.button("🚀 分析開始 (アイに聞く)"):
     if not api_key:
         st.warning("APIキーを入力してください。")
+    elif not tickers_input.strip():
+        st.warning("銘柄コードを入力してください。")
     else:
         normalized_input = tickers_input.replace("\n", ",").replace("、", ",").replace(" ", "")
         raw_tickers = list(set(normalized_input.split(","))) 
