@@ -121,7 +121,7 @@ with col_title:
         
         /* 11.利確 (幅増 110->150, ヘッダー中央, データ左) */
         th:nth-child(11) {{ text-align: center; }}
-        td:nth-child(11) {{ width: 150px; font-size: 11px; text-align: left; }} 
+        td:nth-child(11) {{ width: 120px; font-size: 11px; text-align: left; }} 
         
         /* 12.バックテスト (ヘッダー中央, データ中央) */
         th:nth-child(12), td:nth-child(12) {{ 
@@ -634,3 +634,4 @@ if st.session_state.analyzed_data:
     
     with st.expander("詳細データリスト"):
         st.dataframe(pd.DataFrame(data_list)[['code', 'name', 'price', 'cap_disp', 'score', 'rsi_str', 'vol_str', 'backtest']])
+
