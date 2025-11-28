@@ -85,11 +85,12 @@ with st.expander("ℹ️ スコア配分・機能説明"):
     4. **出来高**: 急増で加点
     5. **バックテスト**: 勝率が高ければ参考加点。
 
-    ### 🛠 ダイナミック・バックテスト (3ヶ月検証)
-    過去3ヶ月(約60営業日)のチャートで「5MA押し目買い」をシミュレーション。
-    *   **大型株 (1兆円以上)**: **+2%** 上昇で「勝ち」
-    *   **中型株 (1000億円以上)**: **+3%** 上昇で「勝ち」
-    *   **小型株 (1000億円未満)**: **+4%** 上昇で「勝ち」
+    ### 🛠 ダイナミック・バックテスト (3ヶ月検証・単利運用)
+    過去3ヶ月で「5MA押し目買い」をシミュレーション。
+    **「一度買ったら、勝つか5日経過するまでは次のエントリーをしない」** ルールで検証。
+    *   **大型株**: **+2%** で勝ち
+    *   **中型株**: **+3%** で勝ち
+    *   **小型株**: **+4%** で勝ち
     """)
 
 # --- サイドバー設定 ---
@@ -120,7 +121,7 @@ if api_key:
 
 def get_stock_info_from_kabutan(code):
     """
-    株探から情報を取得 (時価総額・指標取得強化版)
+    株探から情報を取得 (時価総額取得強化版)
     """
     url = f"https://kabutan.jp/stock/?code={code}"
     headers = {"User-Agent": "Mozilla/5.0"}
@@ -151,31 +152,45 @@ def get_stock_info_from_kabutan(code):
         if match_vol:
             data["volume"] = float(match_vol.group(1).replace(",", ""))
 
-        # 4. 時価総額 (単位未満も拾えるように修正)
-        # "時価総額" と "億円" の間の文字をすべて拾う
-        match_cap = re.search(r'時価総額\s*([^億]+)億円', text_content)
-        if match_cap:
-            raw_cap = match_cap.group(1).replace(",", "").strip()
-            # "28兆6605" や "95" など
-            if "兆" in raw_cap:
-                parts = raw_cap.split("兆")
-                trillion = int(parts[0])
-                billion = int(parts[1]) if parts[1] else 0
-                data["cap"] = trillion * 10000 + billion
-            else:
-                try:
-                    data["cap"] = int(raw_cap)
-                except:
-                    data["cap"] = 0
+        # 4. 時価総額 (二段構えで取得)
+        # パターンA: v_zika2クラスから取得
+        match_cap_area = re.search(r'class="v_zika2"[^>]*>(.*?)</td>', html)
+        cap_found = False
+        if match_cap_area:
+            raw_cap_html = match_cap_area.group(1)
+            cap_text = re.sub(r'<[^>]+>', '', raw_cap_html).replace(",", "").strip()
+            if cap_text:
+                if "兆" in cap_text:
+                    parts = cap_text.replace("億円", "").split("兆")
+                    trillion = int(parts[0])
+                    billion = int(parts[1]) if parts[1] else 0
+                    data["cap"] = trillion * 10000 + billion
+                else:
+                    try:
+                        data["cap"] = int(cap_text.replace("億円", ""))
+                    except: pass
+                cap_found = True
 
-        # 5. PER / PBR (テーブル構造から取得)
+        # パターンB: テキスト検索 (Aがダメだった場合)
+        if not cap_found or data["cap"] == 0:
+            match_cap_text = re.search(r'時価総額\s*([0-9,]+(?:兆[0-9,]+)?)\s*億円', text_content)
+            if match_cap_text:
+                raw_cap = match_cap_text.group(1).replace(",", "")
+                if "兆" in raw_cap:
+                    parts = raw_cap.split("兆")
+                    trillion = int(parts[0])
+                    billion = int(parts[1]) if parts[1] else 0
+                    data["cap"] = trillion * 10000 + billion
+                else:
+                    try: data["cap"] = int(raw_cap)
+                    except: pass
+
+        # 5. PER / PBR
         i3_match = re.search(r'<div id="stockinfo_i3">.*?<tbody>(.*?)</tbody>', html)
         if i3_match:
             tbody = i3_match.group(1)
             tds = re.findall(r'<td[^>]*>(.*?)</td>', tbody)
-            
             def clean_val(s): return re.sub(r'<[^>]+>', '', s).strip()
-
             if len(tds) >= 2:
                 data["per"] = clean_val(tds[0])
                 data["pbr"] = clean_val(tds[1])
@@ -186,12 +201,13 @@ def get_stock_info_from_kabutan(code):
 
 def run_dynamic_backtest(df, market_cap):
     """
-    時価総額に応じたバックテスト (3ヶ月版)
-    検証期間を60日(約3ヶ月)に拡大
+    時価総額に応じたバックテスト (保有期間考慮・リアル版)
+    一度エントリーしたら、勝つか5日経過するまでは次のエントリーをしない
     """
     try:
         if len(df) < 70: return "データ不足"
         
+        # デフォルトは小型株設定
         target_pct = 0.04 
         cap_str = "4%"
         if market_cap > 0:
@@ -205,24 +221,52 @@ def run_dynamic_backtest(df, market_cap):
                 target_pct = 0.04
                 cap_str = "4%"
         
-        # 直近65日(約3ヶ月)〜5日前までを検証
-        test_period = df.iloc[-65:-5]
+        # 検証期間: 直近65日〜5日前
+        # (indexが大きい方が新しい日付)
+        
+        # データフレームを走査するためのインデックス範囲
+        start_idx = len(df) - 65
+        end_idx = len(df) - 5
+        
         wins = 0
         entries = 0
-        for i in range(len(test_period)):
-            row = test_period.iloc[i]
+        i = start_idx
+        
+        while i < end_idx:
+            row = df.iloc[i]
             entry_price = row['SMA5']
-            target_price = entry_price * (1 + target_pct)
             
-            # 5MA以下でエントリー
+            # エントリー条件: 安値が5MA以下
             if row['Low'] <= entry_price:
                 entries += 1
-                # 5日以内に目標達成か？
-                future_high = df['High'].iloc[test_period.index.get_loc(row.name)+1 : test_period.index.get_loc(row.name)+6].max()
-                if future_high >= target_price: wins += 1
+                target_price = entry_price * (1 + target_pct)
+                
+                # エントリー後5日間を検証
+                is_win = False
+                days_held = 0
+                
+                for day in range(1, 6):
+                    if i + day >= len(df): break
+                    
+                    # その日の高値がターゲットを超えたら勝ち
+                    future_high = df.iloc[i + day]['High']
+                    if future_high >= target_price:
+                        wins += 1
+                        is_win = True
+                        days_held = day
+                        break
+                
+                if is_win:
+                    # 勝ったら、利確した翌日から再エントリー可能とみなす
+                    i += days_held
+                else:
+                    # 5日間持ってダメだった場合は、5日経過後に再エントリー可能
+                    i += 5
+            else:
+                # エントリーしなかったら翌日へ
+                i += 1
         
         if entries == 0: 
-            # エントリーチャンスがない＝5MAを割らないほど強い
             return "押し目なし(強トレンド)"
             
         win_rate = (wins / entries) * 100
