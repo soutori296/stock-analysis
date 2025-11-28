@@ -54,88 +54,91 @@ with col_title:
             border-radius: 4px; font-size: 14px; font-weight: bold; vertical-align: middle;
         }}
         
+        /* テーブル全体 */
         table {{ 
             width: 100%; 
             border-collapse: collapse; 
-            table-layout: fixed; 
+            table-layout: fixed; /* 列幅固定モード */
             font-family: "Meiryo", sans-serif;
         }}
         
-        /* ヘッダー設定 */
+        /* ヘッダー */
         th {{ 
             background-color: #dcdcdc !important; 
             color: #000000 !important;
             font-weight: bold; 
-            text-align: center !important; /* ヘッダーは基本中央揃え */
+            text-align: center !important; 
             border: 1px solid #bbbbbb;
             padding: 8px 2px !important;
             font-size: 12px;
-            white-space: normal;
+            vertical-align: middle !important;
         }}
         
-        /* データセル設定 */
+        /* データセル */
         td {{ 
             font-size: 13px; 
             vertical-align: middle !important; 
-            padding: 6px 4px !important; 
+            padding: 6px 3px !important; 
             line-height: 1.4 !important;
             word-wrap: break-word; 
             border: 1px solid #cccccc;
             color: inherit;
         }}
 
-        /* --- 列幅・配置の完全調整 --- */
+        /* --- 列幅の徹底調整 (合計を抑えて所感に回す) --- */
         
         /* 1.順位 */
-        th:nth-child(1), td:nth-child(1) {{ width: 35px; text-align: center; }} 
+        th:nth-child(1), td:nth-child(1) {{ width: 30px; text-align: center; }} 
         
         /* 2.コード */
-        th:nth-child(2), td:nth-child(2) {{ width: 55px; text-align: center; }} 
+        th:nth-child(2), td:nth-child(2) {{ width: 45px; text-align: center; }} 
         
-        /* 3.企業名 (幅大幅減 160->110) */
+        /* 3.企業名 (左揃え, 115pxに制限) */
         th:nth-child(3) {{ text-align: center; }}
-        td:nth-child(3) {{ width: 130px; font-weight: bold; font-size: 13px; text-align: left; }} 
+        td:nth-child(3) {{ width: 115px; font-weight: bold; font-size: 13px; text-align: left; }} 
         
-        /* 4.時価総額 (幅微減 95->80, ヘッダー中央) */
+        /* 4.時価総額 (70pxに縮小) */
         th:nth-child(4) {{ text-align: center; }}
-        td:nth-child(4) {{ width: 80px; text-align: right; font-size: 12px; }} 
+        td:nth-child(4) {{ width: 70px; text-align: right; font-size: 11px; }} 
         
-        /* 5.スコア (幅増 45->60) */
-        th:nth-child(5), td:nth-child(5) {{ width: 60px; text-align: center; }} 
+        /* 5.スコア */
+        th:nth-child(5), td:nth-child(5) {{ width: 40px; text-align: center; }} 
         
         /* 6.戦略 */
-        th:nth-child(6), td:nth-child(6) {{ width: 70px; font-size: 12px; text-align: center; }} 
+        th:nth-child(6), td:nth-child(6) {{ width: 60px; font-size: 12px; text-align: center; }} 
         
         /* 7.RSI */
-        th:nth-child(7), td:nth-child(7) {{ width: 70px; text-align: center; }} 
+        th:nth-child(7), td:nth-child(7) {{ width: 55px; text-align: center; }} 
         
-        /* 8.出来高 (ヘッダー中央) */
+        /* 8.出来高 (50pxまで詰める) */
         th:nth-child(8) {{ text-align: center; }}
-        td:nth-child(8) {{ width: 70px; font-size: 12px; text-align: right; }} 
+        td:nth-child(8) {{ width: 50px; font-size: 11px; text-align: right; }} 
         
-        /* 9.現在値 */
-        th:nth-child(9), td:nth-child(9) {{ width: 80px; text-align: right; font-weight: bold; }} 
+        /* 9.現在値 (65pxまで詰める) */
+        th:nth-child(9) {{ text-align: center; }}
+        td:nth-child(9) {{ width: 65px; text-align: right; font-weight: bold; }} 
         
-        /* 10.推奨買値 */
-        th:nth-child(10), td:nth-child(10) {{ width: 100px; font-size: 12px; text-align: right; }} 
+        /* 10.推奨買値 (90px) */
+        th:nth-child(10) {{ text-align: center; }}
+        td:nth-child(10) {{ width: 90px; font-size: 12px; text-align: right; }} 
         
-        /* 11.利確 (幅増 110->150, ヘッダー中央, データ左) */
+        /* 11.利確 (125px確保, 左揃え) */
         th:nth-child(11) {{ text-align: center; }}
-        td:nth-child(11) {{ width: 90px; font-size: 11px; text-align: left; }} 
+        td:nth-child(11) {{ width: 125px; font-size: 11px; text-align: left; }} 
         
-        /* 12.バックテスト (ヘッダー中央, データ中央) */
+        /* 12.バックテスト (70px) */
         th:nth-child(12), td:nth-child(12) {{ 
-            width: 75px; 
+            width: 70px; 
             font-size: 11px; 
             color: #0056b3; 
             font-weight: bold; 
             text-align: center;
         }} 
         
-        /* 13.PER/PBR (ヘッダー中央) */
-        th:nth-child(13), td:nth-child(13) {{ width: 70px; font-size: 11px; text-align: center; }} 
+        /* 13.PER/PBR (60px) */
+        th:nth-child(13), td:nth-child(13) {{ width: 60px; font-size: 11px; text-align: center; }} 
         
-        /* 14.所感 (残り幅全て) */
+        /* 14.所感 (残り全て自動) */
         th:nth-child(14) {{ text-align: center; }}
         td:nth-child(14) {{ width: auto; font-size: 12px; text-align: left; }} 
         
@@ -217,7 +220,6 @@ tickers_input = st.text_area(
     height=150
 )
 
-# 並べ替えオプション
 sort_option = st.sidebar.selectbox("並べ替え順", [
     "AIスコア順 (おすすめ)", 
     "バックテスト成績順 (勝率重視)", 
@@ -497,7 +499,7 @@ def get_technical_summary(ticker):
             "backtest": backtest_result_str,
             "momentum": momentum_str,
             "up_days": up_days_count,
-            "real_vol": current_vol # リアルタイム出来高（AIへの情報提供用）
+            "real_vol": current_vol
         }
     except Exception:
         return None
@@ -531,18 +533,17 @@ def generate_ranking_table(high_score_list, low_score_list):
     
     【重要：表のフォーマット】
     - 以下の**全14列**のMarkdown表を作成してください。
-    - 「買い推奨・注目ゾーン」と「様子見・警戒ゾーン」の2つの表を必ず作成してください。
     - データがない場合でも、表のヘッダーだけは表示してください。
     
     【出力構成】
     **【買い推奨・注目ゾーン】**
     | 順位 | コード | 企業名 | 時価総額 | スコア | 戦略 | RSI | 出来高<br>(前日比) | 現在値 | 推奨買値<br>(残) | 利確<br>(半/全) | バック<br>テスト | PER<br>PBR | アイの所感 |
-    |:---:|:---:|:---|---:|:---:|:---:|:---:|---:|---:|---:|---:|---:|---:|:---|
+    |:---:|:---:|:---|---:|:---:|:---:|:---:|---:|---:|---:|:---|:---:|---:|:---|
     | ... | ... | ... | ... | ... | ... | ... | ... | ... | ... | ... | ... | ... | ... |
 
     **【様子見・警戒ゾーン】**
     | 順位 | コード | 企業名 | 時価総額 | スコア | 戦略 | RSI | 出来高<br>(前日比) | 現在値 | 推奨買値<br>(残) | 利確<br>(半/全) | バック<br>テスト | PER<br>PBR | アイの所感 |
-    |:---:|:---:|:---|---:|:---:|:---:|:---:|---:|---:|---:|---:|---:|---:|:---|
+    |:---:|:---:|:---|---:|:---:|:---:|:---:|---:|---:|---:|:---|:---:|---:|:---|
     | ... | ... | ... | ... | ... | ... | ... | ... | ... | ... | ... | ... | ... | ... |
 
     ※「バックテスト」列には、データにある `6勝2敗<br>(4%抜)` のような文字列をそのまま入れてください。
@@ -573,7 +574,6 @@ if st.button("🚀 分析開始 (アイに聞く)"):
     elif not tickers_input.strip():
         st.warning("銘柄コードを入力してください。")
     else:
-        # 新しいリクエスト時はデータをリセットして取得し直す
         st.session_state.analyzed_data = [] 
         
         normalized_input = tickers_input.replace("\n", ",").replace("、", ",").replace(" ", "")
@@ -634,5 +634,3 @@ if st.session_state.analyzed_data:
     
     with st.expander("詳細データリスト"):
         st.dataframe(pd.DataFrame(data_list)[['code', 'name', 'price', 'cap_disp', 'score', 'rsi_str', 'vol_str', 'backtest']])
-
-
