@@ -36,23 +36,37 @@ with col_title:
     <p class="big-font" style="margin-top: 0px;">あなたの提示した銘柄についてアイが分析して売買戦略を伝えます。</p>
     """, unsafe_allow_html=True)
 
-# ヘルプ
-with st.expander("ℹ️ バックテストのロジック詳細 (修正版)"):
+# --- 完全取扱説明書 (Expander) ---
+with st.expander("📘 完全取扱説明書 (ロジック・仕様) を読む"):
     st.markdown("""
-    ### 🛠 バックテスト仕様 (過去75営業日)
-    強い銘柄が一時的に下落した「押し目」を狙うシミュレーションです。
+    ### 1. データ取得の仕組み
+    本アプリは情報の正確性を保つため、2つのデータソースを併用しています。
+    - **現在値・出来高・指標**: **株探 (リアルタイム)** から取得。
+    - **テクニカル指標(MA, RSI)**: **Stooq (前日終値)** で確定した足を基準に計算。
+    - ※ザラ場中の「未確定足」で判定するとダマシが多いため、トレンド判定は必ず前日基準で行います。
+
+    ### 2. 分析ロジック詳細
+    #### ① 戦略判定
+    - **🔥 順張り (Trend)**: 移動平均線が上昇トレンド (5日 > 25日 > 75日) の銘柄。押し目を狙います。
+    - **🌊 逆張り (Rebound)**: RSIが30以下、または25MA乖離率が-10%以下の銘柄。リバウンドを狙います。
     
-    1.  **エントリー条件**: 
-        - 基本トレンドが上昇中であること (`5MA > 25MA`)
-        - その日の安値が `5日線` 以下になること (**5MA指値**で刺さるか)
-    2.  **ポジション管理**:
-        - 一度買ったら、**勝敗がつくまで(最大10日間)は新規エントリーしません**。
-        - これにより「ヨコヨコ相場で毎日カウントされる」異常値を防ぎます。
-    3.  **勝利条件**:
-        - 買値(5MA)から **+3%～+5%** 上昇したら勝ち。
-        - 10日経過しても未達なら引き分け/負け扱い。
-    
-    ※「機会なし」と出る場合、その銘柄は「強すぎて5MAまで落ちてこない」超強気トレンドの可能性があります。
+    #### ② RSIヒートマップ
+    - 🔵 **30以下**: 売られすぎ (逆張り機)
+    - ⚪ **30-50**: 弱気
+    - 🟢 **50-55**: 上昇予兆
+    - 🟢🔥 **55-65**: **理想的な上昇トレンド (押し目買いゾーン)**
+    - 🟢 **65-70**: 強い上昇
+    - 🔴 **70以上**: 買われすぎ (過熱)
+
+    #### ③ バックテスト (過去75日)
+    - **条件**: 「上昇トレンド中(5MA>25MA)」かつ「安値が5MAにタッチ」した日。
+    - **除外**: ポジション保有中(最大10日)は新規エントリーしません（連続カウント防止）。
+    - **勝利**: エントリーから10日以内に目標利益(+2%～+4%)到達で勝ち。
+
+    #### ④ ターゲット価格計算
+    - **推奨買値**: 順張りなら「5日線」、逆張りなら「現在値」。
+    - **半益 (Half Profit)**: 順張りなら「25MA+10%」、逆張りなら「5日線回復」。
+    - **全益 (Full Profit)**: 順張りなら「25MA+20%」、逆張りなら「25日線回帰」。
     """)
 
 # --- サイドバー設定 ---
@@ -82,7 +96,7 @@ if api_key:
         st.error(f"System Error: {e}")
 
 def get_stock_info_from_kabutan(code):
-    """ 株探から情報を取得 """
+    """ 株探から情報を取得 (時価総額 小数点対応版) """
     url = f"https://kabutan.jp/stock/?code={code}"
     headers = {"User-Agent": "Mozilla/5.0"}
     data = {"name": "不明", "per": "-", "pbr": "-", "price": None, "volume": None, "cap": 0}
@@ -92,33 +106,49 @@ def get_stock_info_from_kabutan(code):
         res.encoding = res.apparent_encoding
         html = res.text.replace("\n", "").replace("\r", "")
         
+        # 1. 社名
         match_name = re.search(r'<title>(.*?)【', html)
         if match_name: 
             raw_name = match_name.group(1).strip()
             data["name"] = re.sub(r'[（\(].*?[）\)]', '', raw_name)
 
+        # 2. 現在値
         match_price = re.search(r'現在値</th>\s*<td[^>]*>([0-9,.]+)</td>', html)
         if match_price:
             data["price"] = float(match_price.group(1).replace(",", ""))
 
+        # 3. 出来高
         match_vol = re.search(r'出来高</th>\s*<td[^>]*>([0-9,]+).*?株</td>', html)
         if match_vol:
             data["volume"] = float(match_vol.group(1).replace(",", ""))
 
+        # 4. 時価総額 (修正: 小数点や「兆」なしに対応)
         match_cap_area = re.search(r'class="v_zika2"[^>]*>(.*?)</td>', html)
         if match_cap_area:
             raw_cap_html = match_cap_area.group(1)
+            # タグ削除 & カンマ削除
             cap_text = re.sub(r'<[^>]+>', '', raw_cap_html).replace(",", "").strip()
-            if "兆" in cap_text:
-                parts = cap_text.replace("億円", "").split("兆")
-                trillion = int(parts[0])
-                billion = int(parts[1]) if parts[1] else 0
-                data["cap"] = trillion * 10000 + billion
-            elif "億円" in cap_text:
-                data["cap"] = int(cap_text.replace("億円", ""))
-            else:
+            
+            # 計算ロジック
+            try:
+                trillion = 0
+                billion = 0
+                
+                if "兆" in cap_text:
+                    parts = cap_text.split("兆")
+                    trillion = float(parts[0])
+                    if len(parts) > 1 and "億円" in parts[1]:
+                        billion = float(parts[1].replace("億円", ""))
+                elif "億円" in cap_text:
+                    billion = float(cap_text.replace("億円", ""))
+                
+                # 単位を「億円」に統一して保存
+                data["cap"] = (trillion * 10000) + billion
+                
+            except:
                 data["cap"] = 0
 
+        # 5. PER / PBR
         i3_match = re.search(r'<div id="stockinfo_i3">.*?<tbody>(.*?)</tbody>', html)
         if i3_match:
             tbody = i3_match.group(1)
@@ -134,53 +164,39 @@ def get_stock_info_from_kabutan(code):
 
 def run_dynamic_backtest(df, market_cap):
     """
-    バックテスト (実戦的ロジック修正版)
-    - 期間: 過去75日
-    - 連続エントリー防止: ポジション保有期間(最大10日)は次のエントリーをしない
+    バックテスト (実戦的ロジック)
     """
     try:
-        # データが少なすぎる場合はスキップ
         if len(df) < 80: return "データ不足", 0
         
-        # ターゲット利益率 (大型は動きが鈍いので低めに)
         target_pct = 0.04 
         cap_str = "4%"
+        # 時価総額による期待値調整 (単位は億円)
         if market_cap > 0:
-            if market_cap >= 10000: # 1兆円以上
+            if market_cap >= 10000: # 1兆円
                 target_pct = 0.02
                 cap_str = "2%"
-            elif market_cap >= 1000: # 1000億円以上
+            elif market_cap >= 1000: # 1000億円
                 target_pct = 0.03
                 cap_str = "3%"
         
-        # 検証期間: 最新の日から5日前まで（直近の結果確定分まで）の過去75日間
-        # dfは日付昇順（古い→新しい）
         check_start_idx = len(df) - 80 
         check_end_idx = len(df) - 5
         
         wins = 0
         entries = 0
-        
-        # ポジション保有中のスキップ用フラグ
         skip_until = -1
         
         for i in range(check_start_idx, check_end_idx):
-            # 保有中ならスキップ
-            if i < skip_until:
-                continue
-                
+            if i < skip_until: continue
             row = df.iloc[i]
             
-            # 【条件1】上昇トレンド中 (5MA > 25MA)
+            # 条件: 上昇トレンド中の押し目
             if row['SMA5'] > row['SMA25']:
                 entry_price = row['SMA5']
-                
-                # 【条件2】安値が5MA以下 (指値が刺さる)
                 if row['Low'] <= entry_price:
                     entries += 1
                     target_price = entry_price * (1 + target_pct)
-                    
-                    # 向こう10日間の高値をチェック
                     win_flg = False
                     search_limit = min(i + 11, len(df))
                     
@@ -188,20 +204,15 @@ def run_dynamic_backtest(df, market_cap):
                         if df.iloc[j]['High'] >= target_price:
                             wins += 1
                             win_flg = True
-                            # 勝ったらそこでポジション解消（次の日からエントリー可）
                             skip_until = j + 1
                             break
-                    
-                    # 10日間で勝てなかった場合も、10日間は資金拘束されたとみなしてスキップ
                     if not win_flg:
                         skip_until = i + 10
         
-        if entries == 0:
-            return "機会なし", 0
-            
+        if entries == 0: return "機会なし", 0
         win_rate = (wins / entries) * 100
         return f"{win_rate:.0f}% ({wins}/{entries}) {cap_str}抜", win_rate
-    except Exception as e:
+    except Exception:
         return "計算エラー", 0
 
 @st.cache_data(ttl=3600)
@@ -222,7 +233,6 @@ def get_technical_summary(ticker):
         if df.empty: return None
         
         df = df.sort_index()
-        # 十分な過去データを確保
         df = df.tail(150) 
         
         df['SMA5'] = df['Close'].rolling(window=5).mean()
@@ -236,14 +246,12 @@ def get_technical_summary(ticker):
         rs = gain / loss
         df['RSI'] = 100 - (100 / (1 + rs))
         
-        if len(df) < 80: return None # バックテスト用にデータが必要
+        if len(df) < 80: return None
 
-        # バックテスト実行
         backtest_result_str, win_rate = run_dynamic_backtest(df, fund["cap"])
         
         last_day = df.iloc[-1]
         
-        # リアルタイムデータ統合
         current_price = fund["price"] if fund["price"] else last_day['Close']
         current_vol = fund["volume"] if fund["volume"] else 0
         
@@ -253,7 +261,6 @@ def get_technical_summary(ticker):
         rsi = last_day['RSI']
         vol_sma5 = last_day['Vol_SMA5']
         
-        # モメンタム
         recent_changes = df['Close'].diff().tail(5)
         up_days_count = (recent_changes > 0).sum()
         momentum_str = f"{up_days_count}勝{5-up_days_count}敗"
@@ -280,7 +287,7 @@ def get_technical_summary(ticker):
             score += 10
             rsi_str = f"🟢{rsi:.1f}"
         elif 55 <= rsi <= 65:
-            score += 25 # 理想的
+            score += 25
             rsi_str = f"🟢🔥{rsi:.1f}"
         elif 65 < rsi < 70:
             score += 10
@@ -296,7 +303,6 @@ def get_technical_summary(ticker):
             vol_str = f"{vol_ratio:.2f}倍"
             if vol_ratio >= 1.0: score += 10
 
-        # バックテスト加点（勝率が高く、かつ機会がある場合）
         if "機会なし" not in backtest_result_str:
             if win_rate >= 80: score += 15
             elif win_rate >= 60: score += 5
@@ -334,10 +340,11 @@ def get_technical_summary(ticker):
 
         profit_display = f"半:{fmt_target(t_half, current_price)}<br>全:{fmt_target(t_full, current_price)}"
 
+        # 時価総額表示
         if fund['cap'] >= 10000:
             cap_disp = f"{fund['cap']/10000:.1f}兆円"
         elif fund['cap'] > 0:
-            cap_disp = f"{fund['cap']:,}億円"
+            cap_disp = f"{fund['cap']:,.1f}億円" # 小数点対応
         else:
             cap_disp = "-"
 
