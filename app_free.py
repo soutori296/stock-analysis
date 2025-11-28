@@ -22,40 +22,42 @@ def get_market_status():
     jst_now = datetime.datetime.utcnow() + datetime.timedelta(hours=9)
     current_time = jst_now.time()
     if jst_now.weekday() >= 5: return "休日(確定値)"
-    # 東証終了15:30 + 20分遅延 = 15:50
-    if datetime.time(9, 0) <= current_time <= datetime.time(15, 50):
-        return "ザラ場(進行中/20分遅延)"
+    if datetime.time(9, 0) <= current_time <= datetime.time(15, 20):
+        return "ザラ場(進行中)"
     return "引け後(確定値)"
 
 status_label = get_market_status()
 status_color = "#d32f2f" if "進行中" in status_label else "#1976d2"
 
-# --- CSSスタイル ---
+# --- CSSスタイル (干渉回避版) ---
 st.markdown(f"""
 <style>
-    body, p, div, td, th, span, h1, h2, h3 {{ font-family: "Meiryo", sans-serif !important; }}
-    .big-font {{ font-size:18px !important; font-weight: bold; color: #4A4A4A; }}
+    /* Streamlit標準のフォント設定を邪魔しないように限定的に適用 */
+    .big-font {{ font-size:18px !important; font-weight: bold; color: #4A4A4A; font-family: "Meiryo", sans-serif; }}
     .status-badge {{ background-color: {status_color}; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; vertical-align: middle; }}
     
-    .center-text {{ text-align: center; }}
+    .center-text {{ text-align: center; font-family: "Meiryo", sans-serif; }}
     .table-container {{ width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; margin-bottom: 20px; }}
     
-    /* テーブル共通設定 (白背景・黒文字) */
+    /* 自作テーブルのみにスタイルを適用 (.ai-table配下のみ) */
     .ai-table {{ 
         width: 100%; border-collapse: collapse; min-width: 1200px; 
-        background-color: #ffffff !important; color: #000000 !important;
+        background-color: #ffffff; color: #000000;
+        font-family: "Meiryo", sans-serif;
+        font-size: 13px;
     }}
     .ai-table th {{ 
-        background-color: #e0e0e0 !important; color: #000000 !important;
+        background-color: #e0e0e0; color: #000000;
         border: 1px solid #999; padding: 8px 4px; 
         text-align: center; vertical-align: middle; font-weight: bold; white-space: nowrap; 
     }}
     .ai-table td {{ 
-        background-color: #ffffff !important; color: #000000 !important;
-        border: 1px solid #ccc; padding: 6px 5px; vertical-align: middle; line-height: 1.4; font-size: 13px;
+        background-color: #ffffff; color: #000000;
+        border: 1px solid #ccc; padding: 6px 5px; vertical-align: middle; line-height: 1.4;
     }}
 
-    .desc-table {{ width: 90%; margin: 0 auto; border-collapse: collapse; background-color: #fff; color: #000; }}
+    /* 説明書用テーブル */
+    .desc-table {{ width: 90%; margin: 0 auto; border-collapse: collapse; background-color: #fff; color: #000; font-family: "Meiryo", sans-serif; }}
     .desc-table th {{ background-color: #d0d0d0; border: 1px solid #999; padding: 8px; text-align: center !important; }}
     .desc-table td {{ border: 1px solid #ccc; padding: 8px; text-align: center !important; }}
 
@@ -65,7 +67,7 @@ st.markdown(f"""
     .td-right {{ text-align: right; }}
     .td-left {{ text-align: left; }}
     .td-bold {{ font-weight: bold; }}
-    .td-blue {{ color: #0056b3 !important; font-weight: bold; }}
+    .td-blue {{ color: #0056b3; font-weight: bold; }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -92,7 +94,7 @@ with st.expander("📘 取扱説明書 (データ仕様・判定基準)"):
       </tr>
       <tr>
         <td>テクニカル</td><td><b>Stooq</b></td><td><b>前日確定</b></td>
-        <td>移動平均線、RSI、モメンタムなどは<br>「前日終値」基準で判定します。</td>
+        <td>移動平均線、RSIなどは<br>「前日終値」基準で判定します。</td>
       </tr>
     </table>
     <br>
@@ -112,7 +114,7 @@ with st.expander("📘 取扱説明書 (データ仕様・判定基準)"):
 
     <table class="desc-table">
         <tr><th colspan="2">② 各種指標</th></tr>
-        <tr><td><b>モメンタム</b></td><td>直近5日間の「前日比プラス」の日数。(例: 4勝1敗＝強い)</td></tr>
+        <tr><td><b>直近勝率</b></td><td>直近5営業日のうち、前日比プラスだった割合。<br>(例: 80% = 5日中4日上昇)</td></tr>
         <tr><td><b>RSI</b></td><td>🔵30以下(売られすぎ) / 🟢55-65(上昇トレンド) / 🔴70以上(過熱)</td></tr>
     </table>
     </div>
@@ -166,6 +168,7 @@ def fmt_market_cap(val):
         return "-"
 
 def get_stock_info(code):
+    """ 株情報サイトから情報を取得 (構造指定でPER/PBRを分離) """
     url = f"https://kabutan.jp/stock/?code={code}"
     headers = {"User-Agent": "Mozilla/5.0"}
     data = {"name": "不明", "per": "-", "pbr": "-", "price": None, "volume": None, "cap": 0}
@@ -179,20 +182,15 @@ def get_stock_info(code):
             raw_name = m_name.group(1).strip()
             data["name"] = re.sub(r'[（\(].*?[）\)]', '', raw_name)
 
-        # PER/PBRを個別に厳密に取得
-        # PER(連) または PER(単) の後ろにある数字を探す
-        match_per = re.search(r'PER\((?:連|単)\).*?>([0-9\.,\-]+)(?:</span>)?(?:倍|％)', html)
-        if match_per: data["per"] = match_per.group(1) + "倍"
-
-        match_pbr = re.search(r'PBR\((?:連|単)\).*?>([0-9\.,\-]+)(?:</span>)?(?:倍|％)', html)
-        if match_pbr: data["pbr"] = match_pbr.group(1) + "倍"
-
+        # 現在値
         m_price = re.search(r'現在値</th>\s*<td[^>]*>([0-9,]+)</td>', html)
         if m_price: data["price"] = float(m_price.group(1).replace(",", ""))
 
+        # 出来高
         m_vol = re.search(r'出来高</th>\s*<td[^>]*>([0-9,]+).*?株</td>', html)
         if m_vol: data["volume"] = float(m_vol.group(1).replace(",", ""))
 
+        # 時価総額
         m_cap = re.search(r'時価総額</th>\s*<td[^>]*>(.*?)</td>', html)
         if m_cap:
             cap_str = re.sub(r'<[^>]+>', '', m_cap.group(1)).strip()
@@ -209,12 +207,27 @@ def get_stock_info(code):
                 b_match = re.search(r'([0-9,]+)', cap_str)
                 if b_match: val = float(b_match.group(1).replace(",", ""))
             data["cap"] = val
+
+        # PER/PBR (id="stockinfo_i3" テーブル内の配置順で取得)
+        # 通常、1つ目のtdがPER、2つ目がPBR
+        i3_match = re.search(r'<div id="stockinfo_i3">.*?<tbody>(.*?)</tbody>', html)
+        if i3_match:
+            tbody = i3_match.group(1)
+            # tdタグの中身を全てリスト化
+            tds = re.findall(r'<td.*?>(.*?)</td>', tbody)
+            
+            def clean_tag(s): return re.sub(r'<[^>]+>', '', s).strip()
+            
+            if len(tds) >= 2:
+                data["per"] = clean_tag(tds[0]) # 1つ目
+                data["pbr"] = clean_tag(tds[1]) # 2つ目
+
         return data
     except:
         return data
 
 def run_backtest(df, market_cap):
-    """ 実戦的バックテスト (重複エントリーなし) """
+    """ 実戦的バックテスト """
     try:
         if len(df) < 80: return "データ不足", 0
         target_pct = 0.04 
@@ -230,18 +243,15 @@ def run_backtest(df, market_cap):
         i = 0
         n = len(test_data)
         
-        while i < n - 5: # 最後の5日は判定不能
+        while i < n - 5: 
             row = test_data.iloc[i]
-            
-            # エントリー: 上昇中(5>25) & 押し目(Low<=5MA)
             if row['SMA5'] > row['SMA25'] and row['Low'] <= row['SMA5']:
                 entry_price = row['SMA5']
                 target_price = entry_price * (1 + target_pct)
-                
                 is_win = False
                 hold_days = 0
                 
-                for j in range(1, 11): # 最大10日保有
+                for j in range(1, 11):
                     if i + j >= n: break
                     future = test_data.iloc[i + j]
                     hold_days = j
@@ -251,8 +261,7 @@ def run_backtest(df, market_cap):
                 
                 if is_win: wins += 1
                 else: losses += 1
-                
-                i += hold_days # 保有中はスキップ
+                i += hold_days
             i += 1
         
         if wins + losses == 0: return "機会なし", 0
@@ -284,10 +293,11 @@ def get_stock_data(ticker):
         rs = gain / loss
         df['RSI'] = 100 - (100 / (1 + rs))
         
-        # モメンタム (直近5日の上昇日数)
-        recent_changes = df['Close'].diff().tail(5)
-        up_days = (recent_changes > 0).sum()
-        momentum_str = f"{up_days}勝{5-up_days}敗"
+        # モメンタム (直近5日の勝率)
+        recent = df['Close'].diff().tail(5)
+        up_days = (recent > 0).sum()
+        win_rate_pct = (up_days / 5) * 100
+        momentum_str = f"{win_rate_pct:.0f}%"
 
         # バックテスト
         bt_str, bt_cnt = run_backtest(df, info["cap"])
@@ -327,7 +337,7 @@ def get_stock_data(ticker):
         if "逆張り" in strategy: score += 15
         if 55 <= rsi_val <= 65: score += 10
         if vol_ratio > 1.5: score += 10
-        if up_days >= 4: score += 5 # モメンタム加点
+        if up_days >= 4: score += 5
         score = min(100, score)
 
         return {
@@ -368,7 +378,7 @@ def batch_analyze_with_ai(data_list):
     
     【最後に】
     リストの最後に「END_OF_LIST」と書き、その後に続けて「アイの独り言（常体・独白調）」を3行程度で書いてください。
-    ※見出しは不要。
+    ※見出し不要。
     独り言の内容：
     ご自身の徹底した調査とリスク許容度に基づいて行ってください。特に、安易な高値掴みや、損失を確定できないまま持ち続けるといった行動は、長期的な資産形成を大きく阻害します。冷静な判断と規律あるトレードを心がけ、感情に流されない投資を実践していくことが、市場で生き残るために最も重要だと考えます。
     """
@@ -418,24 +428,22 @@ if st.button("🚀 分析開始 (アイに聞く)"):
 if st.session_state.analyzed_data:
     data = st.session_state.analyzed_data
     
-    # データを分割 (推奨 vs 様子見)
+    # リスト分け
     rec_data = [d for d in data if d['strategy'] != "様子見"]
     watch_data = [d for d in data if d['strategy'] == "様子見"]
 
-    if "スコア" in sort_option:
-        rec_data.sort(key=lambda x: x.get('score', 0), reverse=True)
-        watch_data.sort(key=lambda x: x.get('score', 0), reverse=True)
-    elif "時価総額" in sort_option:
-        rec_data.sort(key=lambda x: x.get('cap_val', 0), reverse=True)
-        watch_data.sort(key=lambda x: x.get('cap_val', 0), reverse=True)
-    elif "RSI順 (低い" in sort_option:
-        rec_data.sort(key=lambda x: x.get('rsi', 50))
-        watch_data.sort(key=lambda x: x.get('rsi', 50))
-    else:
-        rec_data.sort(key=lambda x: x.get('code', ''))
-        watch_data.sort(key=lambda x: x.get('code', ''))
+    # ソート
+    def sort_data(lst):
+        if "スコア" in sort_option: lst.sort(key=lambda x: x.get('score', 0), reverse=True)
+        elif "時価総額" in sort_option: lst.sort(key=lambda x: x.get('cap_val', 0), reverse=True)
+        elif "RSI順 (低い" in sort_option: lst.sort(key=lambda x: x.get('rsi', 50))
+        elif "RSI順 (高い" in sort_option: lst.sort(key=lambda x: x.get('rsi', 50), reverse=True)
+        else: lst.sort(key=lambda x: x.get('code', ''))
+    
+    sort_data(rec_data)
+    sort_data(watch_data)
 
-    def create_table_html(d_list, title):
+    def create_table(d_list, title):
         if not d_list: return f"<h4>{title}: 該当なし</h4>"
         
         rows = ""
@@ -455,15 +463,14 @@ if st.session_state.analyzed_data:
         <h4>{title}</h4>
         <div class="table-container"><table class="ai-table">
         <thead><tr>
-        <th style="width:25px;">No</th><th style="width:45px;">コード</th><th class="th-left" style="width:130px;">企業名</th><th style="width:80px;">時価総額</th><th style="width:35px;">点</th><th style="width:60px;">戦略</th><th style="width:50px;">勢い</th><th style="width:50px;">RSI</th><th style="width:50px;">出来高<br>(前比)</th><th style="width:60px;">現在値</th><th style="width:70px;">推奨買値<br>(乖離)</th><th style="width:90px;">利確目標</th><th style="width:85px;">勝敗数</th><th style="width:50px;">PER<br>PBR</th><th class="th-left" style="min-width:200px;">アイの所感</th>
+        <th style="width:25px;">No</th><th style="width:45px;">コード</th><th class="th-left" style="width:130px;">企業名</th><th style="width:80px;">時価総額</th><th style="width:35px;">点</th><th style="width:60px;">戦略</th><th style="width:50px;">直近<br>勝率</th><th style="width:50px;">RSI</th><th style="width:50px;">出来高<br>(前比)</th><th style="width:60px;">現在値</th><th style="width:70px;">推奨買値<br>(乖離)</th><th style="width:90px;">利確目標</th><th style="width:85px;">勝敗数</th><th style="width:50px;">PER<br>PBR</th><th class="th-left" style="min-width:200px;">アイの所感</th>
         </tr></thead>
         <tbody>{rows}</tbody>
         </table></div>'''
 
-    # 分割して表示
     st.markdown("### 📊 アイ推奨ポートフォリオ")
-    st.markdown(create_table_html(rec_data, "🔥 推奨銘柄 (順張り / 逆張り)"), unsafe_allow_html=True)
-    st.markdown(create_table_html(watch_data, "👀 様子見銘柄"), unsafe_allow_html=True)
+    st.markdown(create_table(rec_data, "🔥 推奨銘柄 (順張り / 逆張り)"), unsafe_allow_html=True)
+    st.markdown(create_table(watch_data, "👀 様子見銘柄"), unsafe_allow_html=True)
     
     st.markdown("---")
     st.markdown(f"**【アイの独り言】**")
