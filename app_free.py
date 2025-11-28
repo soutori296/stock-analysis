@@ -54,42 +54,100 @@ with col_title:
             border-radius: 4px; font-size: 14px; font-weight: bold; vertical-align: middle;
         }}
         
-        /* HTMLテーブル用のスタイル定義 */
-        .ai-table {{
-            width: 100%;
-            border-collapse: collapse;
+        /* テーブル全体の設定 */
+        table {{ 
+            width: 100%; 
+            border-collapse: collapse; 
+            table-layout: fixed !important; 
             font-family: "Meiryo", sans-serif;
-            table-layout: fixed; /* 列幅固定を強制 */
         }}
         
-        .ai-table th {{
-            background-color: #dcdcdc; /* ヘッダー背景：グレー */
-            color: #000000; /* ヘッダー文字：黒 */
-            font-weight: bold;
-            text-align: center;
-            border: 1px solid #999;
-            padding: 4px 2px;
-            font-size: 11px;
-            vertical-align: middle;
-            overflow: hidden;
+        /* ヘッダー */
+        th {{ 
+            background-color: #dcdcdc !important; 
+            color: #000000 !important;
+            font-weight: bold; 
+            text-align: center !important; /* ヘッダーは強制中央揃え */
+            border: 1px solid #bbbbbb;
+            padding: 4px 1px !important; 
+            font-size: 11px !important; 
+            vertical-align: middle !important;
+            line-height: 1.2 !important;
         }}
         
-        .ai-table td {{
-            font-size: 11px;
-            vertical-align: middle;
-            padding: 5px 3px;
-            border: 1px solid #ccc;
-            line-height: 1.3;
+        /* データセル */
+        td {{ 
+            font-size: 11px !important; 
+            vertical-align: middle !important; 
+            padding: 4px 2px !important; 
+            line-height: 1.3 !important;
+            border: 1px solid #cccccc;
             color: inherit;
-            word-wrap: break-word; /* 強制折り返し */
-        }}
-        
-        /* 所感の列だけ文字を少し大きく */
-        .ai-table td:last-child {{
-            font-size: 12px;
-            text-align: left;
+            word-wrap: break-word !important;
+            overflow-wrap: break-word !important;
+            white-space: normal !important;
         }}
 
+        /* --- 列幅・配置の完全調整 --- */
+        
+        /* 1.順位 */
+        th:nth-child(1), td:nth-child(1) {{ width: 25px; text-align: center; }} 
+        
+        /* 2.コード */
+        th:nth-child(2), td:nth-child(2) {{ width: 40px; text-align: center; }} 
+        
+        /* 3.企業名 (150px, 左) */
+        th:nth-child(3) {{ text-align: center; }}
+        td:nth-child(3) {{ width: 150px; font-weight: bold; font-size: 12px !important; text-align: left; }} 
+        
+        /* 4.時価総額 (90pxに拡大, ヘッダー中央, データ右) */
+        th:nth-child(4) {{ text-align: center; }}
+        td:nth-child(4) {{ width: 90px; text-align: right; }} 
+        
+        /* 5.スコア (35px, 中央) */
+        th:nth-child(5), td:nth-child(5) {{ width: 35px; text-align: center; }} 
+        
+        /* 6.戦略 (55px, 中央) */
+        th:nth-child(6), td:nth-child(6) {{ width: 55px; text-align: center; }} 
+        
+        /* 7.RSI (50px, 中央) */
+        th:nth-child(7), td:nth-child(7) {{ width: 50px; text-align: center; }} 
+        
+        /* 8.出来高 (50px, ヘッダー中央, データ右) */
+        th:nth-child(8) {{ text-align: center; }}
+        td:nth-child(8) {{ width: 50px; text-align: right; }} 
+        
+        /* 9.現在値 (60px, ヘッダー中央, データ右) */
+        th:nth-child(9) {{ text-align: center; }}
+        td:nth-child(9) {{ width: 60px; text-align: right; font-weight: bold; }} 
+        
+        /* 10.推奨買値 (75px, ヘッダー中央, データ右) */
+        th:nth-child(10) {{ text-align: center; }}
+        td:nth-child(10) {{ width: 75px; text-align: right; }} 
+        
+        /* 11.利確 (100px, ヘッダー中央, データ左) */
+        th:nth-child(11) {{ text-align: center; }}
+        td:nth-child(11) {{ width: 100px; text-align: left; }} 
+        
+        /* 12.バックテスト (70px, 中央) */
+        th:nth-child(12), td:nth-child(12) {{ 
+            width: 70px; 
+            color: #0056b3; 
+            font-weight: bold; 
+            text-align: center;
+        }} 
+        
+        /* 13.PER/PBR (55px, 中央) */
+        th:nth-child(13), td:nth-child(13) {{ width: 55px; text-align: center; }} 
+        
+        /* 14.所感 (残り全て, 左) */
+        th:nth-child(14) {{ text-align: center; }}
+        td:nth-child(14) {{ 
+            width: auto; 
+            text-align: left; 
+            font-size: 12px !important;
+        }} 
+        
     </style>
     <p class="big-font" style="margin-top: 0px;">
         あなたの提示した銘柄についてアイが分析して売買戦略を伝えます。<br>
@@ -101,27 +159,27 @@ with col_title:
 with st.expander("📘 完全取扱説明書 (データソース・ロジック・スコア計算) を読む"):
     st.markdown(f"""
     ### 1. データ取得と時間の仕組み
-    <table class="ai-table">
+    <table style="width: 100%; text-align: left; border-collapse: collapse; font-size: 14px;">
       <thead>
-        <tr>
-          <th style="width: 15%;">項目</th>
-          <th style="width: 10%;">取得元</th>
-          <th style="width: 20%;">状態</th>
-          <th style="width: 55%;">解説</th>
+        <tr style="background-color: #dcdcdc; color: #000000;">
+          <th style="padding: 10px; border: 1px solid #bbbbbb; width: 15%; text-align: left;">項目</th>
+          <th style="padding: 10px; border: 1px solid #bbbbbb; width: 10%; text-align: left;">取得元</th>
+          <th style="padding: 10px; border: 1px solid #bbbbbb; width: 20%; text-align: left;">状態</th>
+          <th style="padding: 10px; border: 1px solid #bbbbbb; width: 55%; text-align: left;">解説</th>
         </tr>
       </thead>
       <tbody>
         <tr>
-          <td><b>現在値・出来高</b></td>
-          <td><b>株探</b></td>
-          <td><b>{status_label}</b></td>
-          <td>15:50までは「途中経過」。15:50以降は「確定値」となります。(東証15:30終了+20分遅延)</td>
+          <td style="padding: 8px; border: 1px solid #bbbbbb;"><b>現在値・出来高</b></td>
+          <td style="padding: 8px; border: 1px solid #bbbbbb;"><b>株探</b></td>
+          <td style="padding: 8px; border: 1px solid #bbbbbb;"><b>{status_label}</b></td>
+          <td style="padding: 8px; border: 1px solid #bbbbbb;">15:50までは「途中経過」。15:50以降は「確定値」となります。(東証15:30終了+20分遅延)</td>
         </tr>
         <tr>
-          <td><b>テクニカル</b></td>
-          <td><b>Stooq</b></td>
-          <td><b>前日確定</b></td>
-          <td>トレンド判定やバックテストは、ダマシを防ぐため「前日終値」基準で行います。</td>
+          <td style="padding: 8px; border: 1px solid #bbbbbb;"><b>テクニカル</b></td>
+          <td style="padding: 8px; border: 1px solid #bbbbbb;"><b>Stooq</b></td>
+          <td style="padding: 8px; border: 1px solid #bbbbbb;"><b>前日確定</b></td>
+          <td style="padding: 8px; border: 1px solid #bbbbbb;">トレンド判定やバックテストは、ダマシを防ぐため「前日終値」基準で行います。</td>
         </tr>
       </tbody>
     </table>
@@ -481,7 +539,7 @@ def generate_ranking_table(high_score_list, low_score_list):
     
     【重要：出力形式】
     - Markdownの表ではなく、**HTMLの `<tr>` タグのみ** を出力してください。
-    - `<table>` タグや `<thead>` タグは不要です。中身の行だけを生成してください。
+    - `<table>` タグや `<thead>` タグは不要です。
     - 各行のフォーマットは以下に従ってください：
     
     ```html
@@ -510,8 +568,8 @@ def generate_ranking_table(high_score_list, low_score_list):
     {list_to_text(low_score_list)}
     
     **【アイの独り言（投資家への警鐘）】**
-    - HTMLテーブルの後に、`<h3>【アイの独り言】</h3>` として記述してください。
-    - 口調は「～だ」「～である」「～と思う」という常体（独白調）。
+    - `<!--SPLIT-->` という区切り文字を必ず入れてください。
+    - その後に `<h3>【アイの独り言】</h3>` から始まる独白を記述してください。
     """
     
     try:
@@ -580,27 +638,28 @@ if st.session_state.analyzed_data:
     for idx, d in enumerate(low_score_list): d['rank'] = idx + 1
 
     with st.spinner("🤖 アイが分析レポートを作成中... (並べ替え反映)"):
-        # AIにHTMLの行を作らせる
         ai_output = generate_ranking_table(high_score_list, low_score_list)
         
-        # 独り言部分を分離
-        if "【アイの独り言】" in ai_output:
-            parts = ai_output.split("<h3>【アイの独り言】</h3>")
-            table_rows = parts[0]
-            monologue = "<h3>【アイの独り言】</h3>" + parts[1]
+        # 独り言との分離
+        monologue = ""
+        table_rows = ai_output
+        if "<!--SPLIT-->" in ai_output:
+            parts = ai_output.split("<!--SPLIT-->")
+            table_rows = parts[0].replace("```html", "").replace("```", "").strip()
+            monologue = parts[1].strip()
         else:
-            table_rows = ai_output
-            monologue = ""
+            # 区切りがない場合のフォールバック（独り言がない場合など）
+            table_rows = ai_output.replace("```html", "").replace("```", "").strip()
 
-        # HTMLテーブルをPython側で組み立てる（ヘッダー幅完全固定）
+        # HTMLテーブル構築 (ヘッダー幅完全固定)
         final_html = f"""
         <table class="ai-table">
           <thead>
             <tr style="background-color: #dcdcdc; color: #000000; border: 1px solid #bbbbbb;">
               <th style="width: 30px;">順位</th>
               <th style="width: 45px;">コード</th>
-              <th style="width: 140px; text-align:left;">企業名</th>
-              <th style="width: 65px; text-align:right;">時価総額</th>
+              <th style="width: 150px; text-align:left;">企業名</th>
+              <th style="width: 90px; text-align:right;">時価総額</th>
               <th style="width: 40px;">スコア</th>
               <th style="width: 60px;">戦略</th>
               <th style="width: 55px;">RSI</th>
