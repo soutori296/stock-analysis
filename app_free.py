@@ -27,31 +27,76 @@ with col_title:
         th, td { 
             font-size: 13px; 
             vertical-align: middle !important; 
-            padding: 6px 4px !important; 
-            line-height: 1.4 !important;
+            padding: 8px 5px !important; 
+            line-height: 1.5 !important;
         }
-        th:nth-child(3), td:nth-child(3) { font-weight: bold; max-width: 140px; } 
-        th:nth-child(11), td:nth-child(11) { font-weight: bold; color: #0056b3; } /* バックテスト列強調 */
-        th:nth-child(14), td:nth-child(14) { min-width: 220px; font-size: 13px; } /* 所感 */
+        th:nth-child(3), td:nth-child(3) { font-weight: bold; max-width: 130px; } /* 企業名 */
+        th:nth-child(11), td:nth-child(11) { min-width: 90px; } /* 利確 */
+        th:nth-child(12), td:nth-child(12) { font-weight: bold; color: #0056b3; } /* BT */
+        /* 所感カラム: 文字数増加に合わせて幅を広げ、読みやすく */
+        th:nth-child(14), td:nth-child(14) { 
+            min-width: 350px; 
+            font-size: 13px; 
+            line-height: 1.6 !important;
+            text-align: left;
+        } 
     </style>
     <p class="big-font" style="margin-top: 0px;">あなたの提示した銘柄についてアイが分析して売買戦略を伝えます。</p>
     """, unsafe_allow_html=True)
 
-# ヘルプ
-with st.expander("ℹ️ バックテスト(BT)のロジック詳細"):
+# --- 完全取扱説明書 ---
+with st.expander("📘 完全取扱説明書 (データソース・ロジック・スコア計算) を読む"):
     st.markdown("""
-    ### 🛠 5MA押し目買いバックテスト (過去75営業日)
-    過去3ヶ月半の間、**「上昇トレンド中に5日線で待ち伏せ買い」**をしていたらどうなっていたかを検証しています。
+    ### 1. データ取得の仕組み（ハイブリッド方式）
+    本アプリは、情報の正確性を保つために2つのデータソースを厳密に使い分けています。
     
-    1.  **エントリー条件**: 
-        - 基本トレンドが上昇中である (`5MA > 25MA`)
-        - その日の安値が `5日線` 以下にタッチ (指値約定)
-    2.  **利益確定条件**:
-        - 買値(5MA)から **+3%～+4%** (時価総額により変動) 上昇したら「勝ち」
-    3.  **判定**:
-        - 「何回チャンスがあって、何回勝てたか」を表示します。
+    | 項目 | 取得元 | 更新タイミング | 理由 |
+    | :--- | :--- | :--- | :--- |
+    | **現在値・出来高** | **株探 (Kabutan)** | **リアルタイム** | 今の板状況を反映するため。 |
+    | **指標(PER/PBR)** | **株探 (Kabutan)** | 最新決算反映 | 正確なファンダメンタルズ把握のため。 |
+    | **テクニカル判定** | **Stooq** | **前日終値** | ダマシを防ぎ、確定したローソク足でトレンド判定を行うため。 |
+
+    ---
+
+    ### 2. 分析ロジックの詳細
+    #### ① 戦略判定 (Trend vs Rebound)
+    - **🔥 順張り**: 移動平均線が「5日 ＞ 25日 ＞ 75日」の上昇トレンドにある銘柄。押し目を狙います。
+    - **🌊 逆張り**: 「RSIが30以下」または「25MA乖離率が-10%以下」の売られすぎ銘柄。リバウンドを狙います。
+    - **👀 様子見**: 上記に当てはまらない、方向感に欠ける銘柄。
+
+    #### ② RSIヒートマップ (過熱感の可視化)
+    - 🔵 **30以下**: 売られすぎ (逆張りチャンス)
+    - ⚪ **30-50**: 弱気～中立
+    - 🟢 **50-55**: 上昇予兆
+    - 🟢🔥 **55-65**: **理想的な上昇トレンド (押し目買いの好機)**
+    - 🟢 **65-70**: 強い上昇
+    - 🔴 **70以上**: 買われすぎ (天井警戒)
+
+    #### ③ バックテスト (過去75営業日の検証)
+    「過去3ヶ月半、この銘柄で押し目買いをしていたらどうなっていたか？」をシミュレーションします。
+    - **エントリー条件**: 「上昇トレンド中(5MA>25MA)」かつ「安値が5MAにタッチ」した日。
+    - **除外条件**: ポジション保有中(最大10日)は新規エントリーしません（重複カウント防止）。
+    - **勝利条件**: エントリーから10日以内に、目標利益(大型+2%/小型+4%)に到達すれば勝ち。
+    - **表示**: 「3勝1敗」のように表示。「0勝0敗」はトレンドが強すぎて押し目がなかったことを意味します。
+
+    ---
+
+    ### 3. 売買ターゲットの算出式
+    AIの勘ではなく、プログラムが計算した値を提示します。
     
-    ※**「0勝0敗」**の場合、トレンドが強すぎて5日線まで落ちてこなかった（買えなかった）ことを意味します。
+    - **推奨買値**:
+        - 順張り: **5日移動平均線** (トレンドが強い時はここまで待つ)
+        - 逆張り: **現在値** (落ちてくるナイフを拾うのではなく、反発を確認して入る)
+    - **利確ターゲット (分割決済)**:
+        - **半益 (Half)**: 25MA + 10% (順張り) / 5MA回復 (逆張り)
+        - **全益 (Full)**: 25MA + 20% (順張り) / 25MA回帰 (逆張り)
+
+    ### 4. AIスコア (100点満点)
+    - **基本点**: 50点
+    - **トレンド**: 上昇PO(+20)、下落PO(-20)
+    - **RSI**: 理想ゾーン(+25)、売られすぎ(+15)、買われすぎ(-10)
+    - **出来高**: 前日比1.0倍以上(+10)
+    - **バックテスト**: 勝率80%以上(+15)、40%以下(-20)
     """)
 
 # --- サイドバー設定 ---
@@ -136,9 +181,7 @@ def get_stock_info_from_kabutan(code):
         return data
 
 def run_dynamic_backtest(df, market_cap):
-    """
-    バックテスト (勝敗数カウント版)
-    """
+    """ バックテスト (勝敗数カウント版) """
     try:
         if len(df) < 80: return "データ不足", 0
         
@@ -164,7 +207,6 @@ def run_dynamic_backtest(df, market_cap):
             if i < skip_until: continue
             row = df.iloc[i]
             
-            # 条件: 上昇トレンド中の押し目 (5MA指値)
             if row['SMA5'] > row['SMA25']:
                 entry_price = row['SMA5']
                 if row['Low'] <= entry_price:
@@ -174,14 +216,12 @@ def run_dynamic_backtest(df, market_cap):
                     search_limit = min(i + 11, len(df))
                     
                     for j in range(i + 1, search_limit):
-                        # 利確ライン到達
                         if df.iloc[j]['High'] >= target_price:
                             wins += 1
                             win_flg = True
                             skip_until = j + 1
                             break
                     
-                    # 10日以内に利確できなければ「負け/引き分け」扱い
                     if not win_flg:
                         losses += 1
                         skip_until = i + 10
@@ -189,7 +229,6 @@ def run_dynamic_backtest(df, market_cap):
         if entries == 0: return "機会なし(0勝0敗)", 0
         
         win_rate = (wins / entries) * 100
-        # 表示文字列: "3勝1敗 (4%抜)"
         result_str = f"{wins}勝{losses}敗 ({cap_str}抜)"
         return result_str, win_rate
     except Exception:
@@ -283,7 +322,6 @@ def get_technical_summary(ticker):
             vol_str = f"{vol_ratio:.2f}倍"
             if vol_ratio >= 1.0: score += 10
 
-        # バックテスト加点
         if "機会なし" not in backtest_result_str:
             if win_rate >= 80: score += 15
             elif win_rate >= 60: score += 5
@@ -363,7 +401,7 @@ def generate_ranking_table(high_score_list, low_score_list):
             [{d['code']} {d['name']}]
             - スコア:{d['score']}, 戦略:{d['strategy']}
             - ★モメンタム: {d['momentum']}
-            - ★バックテスト(5MA押し目): {d['backtest']}
+            - ★BT(5MA押し目): {d['backtest']}
             - 時価総額:{d['cap_disp']}, RSI:{d['rsi_str']}, 出来高:{d['vol_str']}
             - 現在値:{d['price']:,.0f}円
             - 推奨買値(残):{d['buy_display']}
@@ -379,15 +417,20 @@ def generate_ranking_table(high_score_list, low_score_list):
     【口調】
     - 常に冷静で、理知的な「です・ます」調。
     
+    【重要：所感コメントの書き方】
+    - **「BTは...」「RSIは...」という書き出しは禁止です。**
+    - まるで人間がチャートを見ながら喋っているように、自然な文章にしてください。
+    - **切り口を銘柄ごとに変えてください。**
+      - ある時は「出来高の急増」から触れる。
+      - ある時は「バックテストの勝率」を根拠にする。
+      - ある時は「RSIの過熱感」を警告する。
+    - 画一的な定型文（「～なので期待できます」の連呼）は避けてください。
+    - 100文字以内で、具体的な根拠（数字）を含めつつ、プロの視点を提示してください。
+
     【出力データのルール】
     1. **表のみ出力**: 挨拶不要。
-    2. **そのまま表示**: データ内の「RSI」「出来高」「推奨買値」「利確目標」は、**加工せずそのまま**表に入れてください。
-    3. **バックテスト**: 提供された「〇勝〇敗」というデータを**そのまま「BT(5MA)」列に表示**してください。
-    4. **アイの所感**: 
-       - 80文字以内で、画一的な表現を避けること。
-       - **バックテストの結果（〇勝〇敗）に必ず触れること。**
-       - 例：「BTが5勝0敗と相性抜群です。押し目は強気に拾いましょう」「0勝3敗と相性が悪いため、安易なエントリーは危険です」「機会なし＝トレンドが強すぎて押し目がない状態です」など、データに基づいたコメントにする。
-
+    2. **そのまま表示**: データ内の「RSI」「出来高」「推奨買値」「利確目標」「BT(5MA)」は、**加工せずそのまま**表に入れてください。
+    
     【データ1: 注目ゾーン (買い推奨・順張り・逆張り)】
     {list_to_text(high_score_list)}
 
@@ -396,7 +439,7 @@ def generate_ranking_table(high_score_list, low_score_list):
     
     【出力構成】
     **【買い推奨・注目ゾーン】**
-    | 順位 | コード | 企業名 | 時価総額 | スコア | 戦略 | RSI | 出来高<br>(5日比) | 現在値 | 推奨買値(残) | 利確<br>(半益/全益) | BT(5MA) | PER/<br>PBR | アイの所感 |
+    | 順位 | コード | 企業名 | 時価総額 | スコア | 戦略 | RSI | 出来高<br>(5日比) | 現在値 | 推奨買値(残) | 利確<br>(半益/全益) | BT(5MA) | PER/<br>PBR | アイの所感(100文字) |
     
     **【様子見・警戒ゾーン】**
     (同じ形式の表を作成)
