@@ -120,7 +120,7 @@ if api_key:
 
 def get_stock_info_from_kabutan(code):
     """
-    株探から情報を取得 (構造指定・確実版)
+    株探から情報を取得 (構造解析・安定版)
     """
     url = f"https://kabutan.jp/stock/?code={code}"
     headers = {"User-Agent": "Mozilla/5.0"}
@@ -137,22 +137,23 @@ def get_stock_info_from_kabutan(code):
             raw_name = match_name.group(1).strip()
             data["name"] = re.sub(r'[（\(].*?[）\)]', '', raw_name)
 
-        # 2. 現在値 (テキスト解析)
-        text_content = re.sub(r'<[^>]+>', ' ', html)
-        text_content = re.sub(r'\s+', ' ', text_content)
-        match_price = re.search(r'現在値\s*([0-9,.]+)', text_content)
+        # 2. 現在値 (現在値</th><td>2,415.0</td>)
+        # タグの間に空白が入っても大丈夫なように \s* を使用
+        match_price = re.search(r'現在値</th>\s*<td[^>]*>([0-9,.]+)</td>', html)
         if match_price:
             data["price"] = float(match_price.group(1).replace(",", ""))
 
-        # 3. 出来高 (テキスト解析)
-        match_vol = re.search(r'出来高\s*([0-9,]+)\s*株', text_content)
+        # 3. 出来高
+        match_vol = re.search(r'出来高</th>\s*<td[^>]*>([0-9,]+).*?株</td>', html)
         if match_vol:
             data["volume"] = float(match_vol.group(1).replace(",", ""))
 
         # 4. 時価総額 (v_zika2クラスを狙い撃ち)
-        match_cap_area = re.search(r'class="v_zika2">(.*?)</td>', html)
+        # <td class="v_zika2">28<span>兆</span>6,605<span>億円</span></td>
+        match_cap_area = re.search(r'class="v_zika2"[^>]*>(.*?)</td>', html)
         if match_cap_area:
             raw_cap_html = match_cap_area.group(1)
+            # タグを全削除して数字と単位だけにする -> "28兆6605億円"
             cap_text = re.sub(r'<[^>]+>', '', raw_cap_html).replace(",", "").strip()
             
             if "兆" in cap_text:
@@ -167,17 +168,20 @@ def get_stock_info_from_kabutan(code):
                     data["cap"] = 0
 
         # 5. PER / PBR (stockinfo_i3 ID内を検索)
+        # HTML全体からではなく、このIDの中身だけを取り出して検索
         i3_match = re.search(r'<div id="stockinfo_i3">.*?<tbody>(.*?)</tbody>', html)
         if i3_match:
             tbody = i3_match.group(1)
+            # <td>...</td> を全て取得
             tds = re.findall(r'<td[^>]*>(.*?)</td>', tbody)
             
             def clean_val(s):
+                # タグを除去して空白削除
                 return re.sub(r'<[^>]+>', '', s).strip()
 
             if len(tds) >= 2:
-                data["per"] = clean_val(tds[0])
-                data["pbr"] = clean_val(tds[1])
+                data["per"] = clean_val(tds[0]) # 1つ目
+                data["pbr"] = clean_val(tds[1]) # 2つ目
 
         return data
     except Exception:
@@ -416,6 +420,10 @@ def generate_ranking_table(high_score_list, low_score_list):
     
     **【様子見・警戒ゾーン】**
     (同じ形式の表を作成)
+    
+    3. **【アイの独り言（投資家への警鐘）】**
+       - 最後にこのセクションを設け、ここだけは**「～だ」「～である」「～と思う」という常体（独白調）**に切り替えてください。
+       - プロとして相場を俯瞰し、静かにリスクを懸念する内容を3行程度で記述してください。
     """
     
     try:
@@ -461,7 +469,7 @@ if st.button("🚀 分析開始 (アイに聞く)"):
                 elif sort_option == "時価総額順":
                     data_list.sort(key=lambda x: x['cap'], reverse=True)
 
-                # --- 【重要修正】様子見は強制的に下のリストへ ---
+                # --- 様子見除外ロジック (復活) ---
                 high_score_list = [d for d in data_list if d['score'] >= 70 and d['strategy'] != "👀様子見"]
                 low_score_list = [d for d in data_list if d not in high_score_list]
 
