@@ -46,9 +46,16 @@ with col_title:
         /* 4列目: 時価総額 */
         th:nth-child(4), td:nth-child(4) { width: 60px; font-size: 11px; text-align: right; }
 
-        /* 5-8列目: スコア等 */
+        /* 5列目: スコア */
         th:nth-child(5), td:nth-child(5) { width: 40px; text-align: center; }
-        th:nth-child(6), td:nth-child(6) { font-size: 12px; }
+
+        /* 6列目: 戦略 (ご要望通り幅を広げる) */
+        th:nth-child(6), td:nth-child(6) { 
+            font-size: 12px; 
+            min-width: 70px; 
+        }
+
+        /* 7-8列目: RSI, 出来高 */
         th:nth-child(7), td:nth-child(7) { min-width: 45px; }
         th:nth-child(8), td:nth-child(8) { font-size: 12px; }
 
@@ -61,7 +68,7 @@ with col_title:
         /* 11列目: 利確 */
         th:nth-child(11), td:nth-child(11) { min-width: 100px; font-size: 12px; }
 
-        /* 12列目: PER/PBR */
+        /* 12列目: PER/PBR (ヘッダー文字削除済み) */
         th:nth-child(12), td:nth-child(12) { font-size: 11px; width: 70px; }
 
         /* 13列目: アイの所感 */
@@ -113,8 +120,7 @@ if api_key:
 
 def get_stock_info_from_kabutan(code):
     """
-    株探から情報を取得 (ハイブリッド版)
-    時価総額などはテキスト検索、指標(PER/PBR)はテーブル構造解析で確実に取得
+    株探から情報を取得 (構造解析・タグ完全除去版)
     """
     url = f"https://kabutan.jp/stock/?code={code}"
     headers = {"User-Agent": "Mozilla/5.0"}
@@ -125,10 +131,6 @@ def get_stock_info_from_kabutan(code):
         res.encoding = res.apparent_encoding
         html = res.text.replace("\n", "").replace("\r", "")
         
-        # テキスト検索用のクリーンデータ
-        text_content = re.sub(r'<[^>]+>', ' ', html)
-        text_content = re.sub(r'\s+', ' ', text_content)
-        
         # 1. 社名
         match_name = re.search(r'<title>(.*?)【', html)
         if match_name: 
@@ -136,43 +138,53 @@ def get_stock_info_from_kabutan(code):
             data["name"] = re.sub(r'[（\(].*?[）\)]', '', raw_name)
 
         # 2. 現在値 (テキスト解析)
+        # HTMLタグを除去したテキストを作成して検索
+        text_content = re.sub(r'<[^>]+>', ' ', html)
+        text_content = re.sub(r'\s+', ' ', text_content)
+        
         match_price = re.search(r'現在値\s*([0-9,.]+)', text_content)
         if match_price:
             data["price"] = float(match_price.group(1).replace(",", ""))
 
-        # 3. 出来高 (テキスト解析)
+        # 3. 出来高
         match_vol = re.search(r'出来高\s*([0-9,]+)\s*株', text_content)
         if match_vol:
             data["volume"] = float(match_vol.group(1).replace(",", ""))
 
-        # 4. 時価総額 (兆対応・テキスト解析)
-        match_cap = re.search(r'時価総額\s*([0-9,]+(?:兆[0-9,]+)?)\s*億円', text_content)
-        if match_cap:
-            raw_cap = match_cap.group(1).replace(",", "")
-            if "兆" in raw_cap:
-                parts = raw_cap.split("兆")
+        # 4. 時価総額 (v_zika2クラスを狙い撃ち + タグ全削除)
+        # <td class="v_zika2">28<span>兆</span>6,605<span>億円</span></td>
+        match_cap_area = re.search(r'class="v_zika2">(.*?)</td>', html)
+        if match_cap_area:
+            raw_cap_html = match_cap_area.group(1)
+            # タグを全削除して数字と単位だけにする -> "28兆6605億円"
+            cap_text = re.sub(r'<[^>]+>', '', raw_cap_html).replace(",", "").strip()
+            
+            if "兆" in cap_text:
+                parts = cap_text.replace("億円", "").split("兆")
                 trillion = int(parts[0])
                 billion = int(parts[1]) if parts[1] else 0
                 data["cap"] = trillion * 10000 + billion
             else:
-                try: data["cap"] = int(raw_cap)
-                except: data["cap"] = 0
+                try:
+                    data["cap"] = int(cap_text.replace("億円", ""))
+                except:
+                    data["cap"] = 0
 
-        # 5. PER / PBR (★修正: テーブル構造解析に戻す)
-        # テキスト検索だと順番が混ざるため、HTMLのテーブルセル(td)の並び順を信頼する
+        # 5. PER / PBR (stockinfo_i3 テーブルのセル順序依存)
+        # 確実にPER=1つ目、PBR=2つ目を取得する
         i3_match = re.search(r'<div id="stockinfo_i3">.*?<tbody>(.*?)</tbody>', html)
         if i3_match:
             tbody = i3_match.group(1)
-            # <td>...</td> を順番に取得
-            # 1つ目がPER、2つ目がPBR
+            # <td>...</td> を全て取得
             tds = re.findall(r'<td[^>]*>(.*?)</td>', tbody)
             
-            def clean_tag_val(val):
-                return re.sub(r'<[^>]+>', '', val).strip()
+            def clean_val(s):
+                # タグを除去して空白削除
+                return re.sub(r'<[^>]+>', '', s).strip()
 
             if len(tds) >= 2:
-                data["per"] = clean_tag_val(tds[0])
-                data["pbr"] = clean_tag_val(tds[1])
+                data["per"] = clean_val(tds[0]) # 1つ目がPER
+                data["pbr"] = clean_val(tds[1]) # 2つ目がPBR
 
         return data
     except Exception:
