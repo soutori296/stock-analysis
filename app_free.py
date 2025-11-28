@@ -54,7 +54,7 @@ with col_title:
             border-radius: 4px; font-size: 14px; font-weight: bold; vertical-align: middle;
         }}
         
-        /* テーブル全体の設定 */
+        /* テーブル全体 */
         table {{ 
             width: 100%; 
             border-collapse: collapse; 
@@ -67,7 +67,6 @@ with col_title:
             background-color: #dcdcdc !important; 
             color: #000000 !important;
             font-weight: bold; 
-            text-align: center !important; /* ヘッダーは強制中央揃え */
             border: 1px solid #bbbbbb;
             padding: 4px 1px !important; 
             font-size: 11px !important; 
@@ -84,64 +83,70 @@ with col_title:
             border: 1px solid #cccccc;
             color: inherit;
             word-wrap: break-word !important;
-            overflow-wrap: break-word !important;
             white-space: normal !important;
         }}
 
-        /* --- 列幅・配置の完全調整 --- */
+        /* --- 列幅・配置調整 --- */
         
         /* 1.順位 */
-        th:nth-child(1), td:nth-child(1) {{ width: 25px; text-align: center; }} 
+        th:nth-child(1) {{ text-align: center !important; }}
+        td:nth-child(1) {{ width: 25px; text-align: center; }} 
         
         /* 2.コード */
-        th:nth-child(2), td:nth-child(2) {{ width: 40px; text-align: center; }} 
+        th:nth-child(2) {{ text-align: center !important; }}
+        td:nth-child(2) {{ width: 40px; text-align: center; }} 
         
-        /* 3.企業名 (150px, 左) */
-        th:nth-child(3) {{ text-align: center; }}
+        /* 3.企業名 (左揃え) */
+        th:nth-child(3) {{ text-align: left !important; padding-left: 4px !important; }}
         td:nth-child(3) {{ width: 150px; font-weight: bold; font-size: 12px !important; text-align: left; }} 
         
-        /* 4.時価総額 (90pxに拡大, ヘッダー中央, データ右) */
-        th:nth-child(4) {{ text-align: center; }}
-        td:nth-child(4) {{ width: 90px; text-align: right; }} 
+        /* 4.時価総額 */
+        th:nth-child(4) {{ text-align: center !important; }}
+        td:nth-child(4) {{ width: 60px; text-align: right; }} 
         
-        /* 5.スコア (35px, 中央) */
-        th:nth-child(5), td:nth-child(5) {{ width: 35px; text-align: center; }} 
+        /* 5.スコア */
+        th:nth-child(5) {{ text-align: center !important; }}
+        td:nth-child(5) {{ width: 35px; text-align: center; }} 
         
-        /* 6.戦略 (55px, 中央) */
-        th:nth-child(6), td:nth-child(6) {{ width: 55px; text-align: center; }} 
+        /* 6.戦略 */
+        th:nth-child(6) {{ text-align: center !important; }}
+        td:nth-child(6) {{ width: 55px; text-align: center; }} 
         
-        /* 7.RSI (50px, 中央) */
-        th:nth-child(7), td:nth-child(7) {{ width: 50px; text-align: center; }} 
+        /* 7.RSI */
+        th:nth-child(7) {{ text-align: center !important; }}
+        td:nth-child(7) {{ width: 50px; text-align: center; }} 
         
-        /* 8.出来高 (50px, ヘッダー中央, データ右) */
-        th:nth-child(8) {{ text-align: center; }}
+        /* 8.出来高 */
+        th:nth-child(8) {{ text-align: center !important; }}
         td:nth-child(8) {{ width: 50px; text-align: right; }} 
         
-        /* 9.現在値 (60px, ヘッダー中央, データ右) */
-        th:nth-child(9) {{ text-align: center; }}
+        /* 9.現在値 */
+        th:nth-child(9) {{ text-align: center !important; }}
         td:nth-child(9) {{ width: 60px; text-align: right; font-weight: bold; }} 
         
-        /* 10.推奨買値 (75px, ヘッダー中央, データ右) */
-        th:nth-child(10) {{ text-align: center; }}
+        /* 10.推奨買値 */
+        th:nth-child(10) {{ text-align: center !important; }}
         td:nth-child(10) {{ width: 75px; text-align: right; }} 
         
-        /* 11.利確 (100px, ヘッダー中央, データ左) */
-        th:nth-child(11) {{ text-align: center; }}
+        /* 11.利確 */
+        th:nth-child(11) {{ text-align: center !important; }}
         td:nth-child(11) {{ width: 100px; text-align: left; }} 
         
-        /* 12.バックテスト (70px, 中央) */
-        th:nth-child(12), td:nth-child(12) {{ 
+        /* 12.バックテスト */
+        th:nth-child(12) {{ text-align: center !important; }}
+        td:nth-child(12) {{ 
             width: 70px; 
             color: #0056b3; 
             font-weight: bold; 
             text-align: center;
         }} 
         
-        /* 13.PER/PBR (55px, 中央) */
-        th:nth-child(13), td:nth-child(13) {{ width: 55px; text-align: center; }} 
+        /* 13.PER/PBR */
+        th:nth-child(13) {{ text-align: center !important; }}
+        td:nth-child(13) {{ width: 55px; text-align: center; }} 
         
-        /* 14.所感 (残り全て, 左) */
-        th:nth-child(14) {{ text-align: center; }}
+        /* 14.所感 (左揃え) */
+        th:nth-child(14) {{ text-align: left !important; padding-left: 4px !important; }}
         td:nth-child(14) {{ 
             width: auto; 
             text-align: left; 
@@ -244,7 +249,7 @@ if api_key:
         st.error(f"System Error: {e}")
 
 def get_stock_info_from_kabutan(code):
-    """ 株探から情報を取得 """
+    """ 株探から情報を取得 (時価総額 修正版) """
     url = f"https://kabutan.jp/stock/?code={code}"
     headers = {"User-Agent": "Mozilla/5.0"}
     data = {"name": "不明", "per": "-", "pbr": "-", "price": None, "volume": None, "cap": 0}
@@ -269,18 +274,24 @@ def get_stock_info_from_kabutan(code):
 
         match_cap_area = re.search(r'class="v_zika2"[^>]*>(.*?)</td>', html)
         if match_cap_area:
+            # タグを除去してから数字と単位を探す
             raw_cap_html = match_cap_area.group(1)
             cap_text = re.sub(r'<[^>]+>', '', raw_cap_html).replace(",", "").strip()
+            
             try:
                 trillion = 0
                 billion = 0
+                
+                # "2兆1,000億円" のようなケース
                 if "兆" in cap_text:
                     parts = cap_text.split("兆")
                     trillion = float(parts[0])
                     if len(parts) > 1 and "億円" in parts[1]:
                         billion = float(parts[1].replace("億円", ""))
+                # "400億円" のようなケース
                 elif "億円" in cap_text:
                     billion = float(cap_text.replace("億円", ""))
+                
                 data["cap"] = (trillion * 10000) + billion
             except:
                 data["cap"] = 0
@@ -478,10 +489,11 @@ def get_technical_summary(ticker):
 
         profit_display = f"半:{fmt_target(t_half, current_price)}<br>全:{fmt_target(t_full, current_price)}"
 
+        # 時価総額表示 (修正: 単位戻し)
         if fund['cap'] >= 10000:
             cap_disp = f"{fund['cap']/10000:.1f}兆円"
         elif fund['cap'] > 0:
-            cap_disp = f"{fund['cap']:,.1f}億円"
+            cap_disp = f"{fund['cap']:,.0f}億円" # 小数点なし
         else:
             cap_disp = "-"
 
@@ -538,9 +550,9 @@ def generate_ranking_table(high_score_list, low_score_list):
     - 常に冷静で、理知的な「です・ます」調。
     
     【重要：出力形式】
-    - Markdownの表ではなく、**HTMLの `<tr>` タグのみ** を出力してください。
-    - `<table>` タグや `<thead>` タグは不要です。
-    - 各行のフォーマットは以下に従ってください：
+    - **HTMLの `<tr>` タグのみ** を出力してください。
+    - テーブル全体（`<table>`）は作らないでください。
+    - 各行は以下のフォーマットに従ってください。
     
     ```html
     <tr>
@@ -567,9 +579,12 @@ def generate_ranking_table(high_score_list, low_score_list):
     【データ2: 警戒ゾーン】
     {list_to_text(low_score_list)}
     
-    **【アイの独り言（投資家への警鐘）】**
-    - `<!--SPLIT-->` という区切り文字を必ず入れてください。
-    - その後に `<h3>【アイの独り言】</h3>` から始まる独白を記述してください。
+    **【分離の指示】**
+    - 注目ゾーンと警戒ゾーンの間には、必ず以下の区切り行を入れてください。
+    `<tr><td colspan="14" style="background-color:#555; color:white; text-align:center; font-weight:bold; padding:5px;">▼ 様子見・警戒ゾーン ▼</td></tr>`
+
+    **【アイの独り言】**
+    - 全てのテーブル行を出力し終わった後に、`<!--SPLIT-->` を入れてから、`<h3>【アイの独り言】</h3>` を記述してください。
     """
     
     try:
@@ -640,7 +655,6 @@ if st.session_state.analyzed_data:
     with st.spinner("🤖 アイが分析レポートを作成中... (並べ替え反映)"):
         ai_output = generate_ranking_table(high_score_list, low_score_list)
         
-        # 独り言との分離
         monologue = ""
         table_rows = ai_output
         if "<!--SPLIT-->" in ai_output:
@@ -648,10 +662,8 @@ if st.session_state.analyzed_data:
             table_rows = parts[0].replace("```html", "").replace("```", "").strip()
             monologue = parts[1].strip()
         else:
-            # 区切りがない場合のフォールバック（独り言がない場合など）
             table_rows = ai_output.replace("```html", "").replace("```", "").strip()
 
-        # HTMLテーブル構築 (ヘッダー幅完全固定)
         final_html = f"""
         <table class="ai-table">
           <thead>
