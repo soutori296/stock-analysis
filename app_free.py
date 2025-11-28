@@ -12,7 +12,7 @@ import os
 ICON_FILE = "aisan.png"
 
 # ページ設定
-st.set_page_config(page_title="教えて！AIさん 2", page_icon="🤖", layout="wide")
+st.set_page_config(page_title="教えて！AIさん 2", page_icon="aisan.png", layout="wide")
 
 # --- セッションステート初期化 ---
 if 'analyzed_data' not in st.session_state:
@@ -60,7 +60,6 @@ with col_title:
             border-collapse: collapse; 
             table-layout: fixed !important; 
             font-family: "Meiryo", sans-serif;
-            margin-bottom: 20px;
         }}
         
         /* ヘッダー */
@@ -96,12 +95,12 @@ with col_title:
         th:nth-child(5), td:nth-child(5) {{ width: 35px; text-align: center; }} /* スコア */
         th:nth-child(6), td:nth-child(6) {{ width: 55px; text-align: center; }} /* 戦略 */
         th:nth-child(7), td:nth-child(7) {{ width: 50px; text-align: center; }} /* RSI */
-        th:nth-child(8), td:nth-child(8) {{ width: 55px; text-align: right; }} /* 出来高 */
-        th:nth-child(9), td:nth-child(9) {{ width: 65px; text-align: right; font-weight: bold; }} /* 現在値 */
-        th:nth-child(10), td:nth-child(10) {{ width: 85px; text-align: right; }} /* 推奨買値 */
-        th:nth-child(11), td:nth-child(11) {{ width: 125px; text-align: left; }} /* 利確 */
+        th:nth-child(8), td:nth-child(8) {{ width: 50px; text-align: right; }} /* 出来高 */
+        th:nth-child(9), td:nth-child(9) {{ width: 60px; text-align: right; font-weight: bold; }} /* 現在値 */
+        th:nth-child(10), td:nth-child(10) {{ width: 75px; text-align: right; }} /* 推奨買値 */
+        th:nth-child(11), td:nth-child(11) {{ width: 100px; text-align: left; }} /* 利確 */
         th:nth-child(12), td:nth-child(12) {{ width: 70px; color: #0056b3; font-weight: bold; text-align: center; }} /* BT */
-        th:nth-child(13), td:nth-child(13) {{ width: 60px; text-align: center; }} /* PER/PBR */
+        th:nth-child(13), td:nth-child(13) {{ width: 55px; text-align: center; }} /* PER/PBR */
         th:nth-child(14), td:nth-child(14) {{ width: auto; text-align: left; font-size: 12px !important; }} /* 所感 */
         
     </style>
@@ -303,7 +302,7 @@ def run_dynamic_backtest(df, market_cap):
         if entries == 0: return "機会なし(0勝0敗)", 0
         
         win_rate = (wins / entries) * 100
-        # 【修正】HTMLタグを使わず純粋な文字列で返す
+        # 【修正】<br>を使わず、純粋なテキストとして返す
         result_str = f"{wins}勝{losses}敗 ({cap_str}抜)"
         return result_str, win_rate
     except Exception:
@@ -424,7 +423,7 @@ def get_technical_summary(ticker):
 
         diff = current_price - buy_target_val
         diff_txt = f"{diff:+,.0f}" if diff != 0 else "0"
-        buy_display = f"{buy_target_val:,.0f}<br>({diff_txt})"
+        buy_display = f"{buy_target_val:,.0f} ({diff_txt})" # 【修正】ここも<br>を使わない
         if strategy == "👀様子見": buy_display = "様子見"
 
         def fmt_target(target, current):
@@ -433,7 +432,7 @@ def get_technical_summary(ticker):
             pct = (target - current) / current * 100
             return f"{target:,.0f} (+{pct:.1f}%)"
 
-        profit_display = f"半:{fmt_target(t_half, current_price)} 全:{fmt_target(t_full, current_price)}" 
+        profit_display = f"半:{fmt_target(t_half, current_price)} 全:{fmt_target(t_full, current_price)}" # 【修正】スペース区切り
 
         if fund['cap'] >= 10000:
             cap_disp = f"{fund['cap']/10000:.1f}兆円"
@@ -442,7 +441,7 @@ def get_technical_summary(ticker):
         else:
             cap_disp = "-"
 
-        fund_disp = f"{fund['per']} / {fund['pbr']}" 
+        fund_disp = f"{fund['per']} / {fund['pbr']}" # 【修正】スラッシュ区切り
 
         return {
             "code": ticker,
@@ -473,7 +472,6 @@ def generate_ranking_table(high_score_list, low_score_list):
     def list_to_text(lst):
         txt = ""
         for d in lst:
-            fund_txt = d['fund_disp'].replace("<br>", "/")
             txt += f"""
             [{d['code']} {d['name']}]
             - スコア:{d['score']}, 戦略:{d['strategy']}
@@ -481,9 +479,9 @@ def generate_ranking_table(high_score_list, low_score_list):
             - ★バックテスト: {d['backtest']}
             - 時価総額:{d['cap_disp']}, RSI:{d['rsi_str']}, 出来高倍率(前日):{d['vol_str']}
             - 現在値:{d['price']:,.0f}円, リアルタイム出来高:{d['real_vol']:,.0f}株
-            - 推奨買値(残):{d['buy_display'].replace('<br>', ' ')}
-            - 利確目標:{d['profit_display'].replace('<br>', ' ')}
-            - 指標:{fund_txt}
+            - 推奨買値(残):{d['buy_display']}
+            - 利確目標:{d['profit_display']}
+            - 指標:{d['fund_disp']}
             --------------------------------
             """
         return txt if txt else "なし"
@@ -498,20 +496,42 @@ def generate_ranking_table(high_score_list, low_score_list):
     - **HTMLの `<tr>` タグのみ** を出力してください。
     - `<table>` タグは不要です。
     
-    【2段表示の指示】
+    【2段表示のルール】
     以下の項目は、必ず間に `<br>` を入れて2段にしてください：
     - 出来高(前日比): `1.20倍<br>(前日比)`
-    - 推奨買値: `2,000<br>(-50)`
-    - 利確: `半:2,100...<br>全:2,200...`
-    - バックテスト: `6勝2敗<br>(4%抜)`
-    - PER/PBR: `10.0倍<br>1.0倍`
+    - 推奨買値(残): `2,000<br>(-50)` ※データは `2,000 (-50)` と来ます。カッコの前で改行してください。
+    - 利確(半/全): `半:2,100...<br>全:2,200...` ※データは `半:... 全:...` と来ます。スペースで改行してください。
+    - バックテスト: `6勝2敗<br>(4%抜)` ※データは `6勝2敗 (4%抜)` と来ます。カッコの前で改行してください。
+    - PER/PBR: `10.0倍<br>1.0倍` ※データは `10.0倍 / 1.0倍` と来ます。スラッシュで改行してください。
+
+    【出力フォーマット】
+    ```html
+    <tr>
+      <td style="text-align:center;">1</td>
+      <td style="text-align:center;">7203</td>
+      <td style="text-align:left; font-weight:bold;">トヨタ自動車</td>
+      <td style="text-align:right;">30.0兆円</td>
+      <td style="text-align:center;">95</td>
+      <td style="text-align:center;">🔥順張り</td>
+      <td style="text-align:center;">🟢65.0</td>
+      <td style="text-align:right;">1.20倍</td>
+      <td style="text-align:right; font-weight:bold;">2,000</td>
+      <td style="text-align:right;">1,950<br>(-50)</td>
+      <td style="text-align:left;">半:2,100 (+5.0%)<br>全:2,200 (+10.0%)</td>
+      <td style="text-align:center; font-weight:bold; color:#0056b3;">6勝2敗<br>(4%抜)</td>
+      <td style="text-align:center;">10.0倍<br>1.0倍</td>
+      <td style="text-align:left;">アイの所感コメント（80文字程度）</td>
+    </tr>
+    ```
+
+    【データ1: 注目ゾーン】
+    {list_to_text(high_score_list)}
+
+    【データ2: 警戒ゾーン】
+    {list_to_text(low_score_list)}
     
-    【出力】
-    **【買い推奨・注目ゾーン】**の行データ
-    `<!--SEP-->`
-    **【様子見・警戒ゾーン】**の行データ
-    `<!--SPLIT-->`
-    `<h3>【アイの独り言】</h3>` ...
+    **【アイの独り言（投資家への警鐘）】**
+    - `<!--SPLIT-->` の後に `<h3>【アイの独り言】</h3>` を記述。
     """
     
     try:
@@ -582,73 +602,45 @@ if st.session_state.analyzed_data:
     with st.spinner("🤖 アイが分析レポートを作成中... (並べ替え反映)"):
         ai_output = generate_ranking_table(high_score_list, low_score_list)
         
-        # AI出力のクリーンアップ
-        def clean_ai_output(text):
-            # 不要なマークダウンタグを削除
-            text = text.replace("```html", "").replace("```", "").strip()
-            # 余計な説明文が入っていたら削除（<tr>で始まらない行を消す、ただしSPLITタグなどは残す）
-            lines = text.split('\n')
-            clean_lines = []
-            for line in lines:
-                if "<tr>" in line or "<td>" in line or "</tr>" in line or "<!--" in line or "<h3>" in line:
-                    clean_lines.append(line)
-            return "\n".join(clean_lines)
-
-        ai_output = clean_ai_output(ai_output)
-        
         monologue = ""
-        table_1_rows = ""
-        table_2_rows = ""
-
+        table_rows = ai_output
         if "<!--SPLIT-->" in ai_output:
-            main_part, monologue = ai_output.split("<!--SPLIT-->")
+            parts = ai_output.split("<!--SPLIT-->")
+            table_rows = parts[0].replace("```html", "").replace("```", "").strip()
+            monologue = parts[1].strip()
         else:
-            main_part, monologue = ai_output, ""
+            table_rows = ai_output.replace("```html", "").replace("```", "").strip()
 
-        if "<!--SEP-->" in main_part:
-            table_1_rows, table_2_rows = main_part.split("<!--SEP-->")
-        else:
-            table_1_rows = main_part
-
-        # テーブル構築関数
-        def create_table_html(rows):
-            return f"""
-            <table style="width: 100%; border-collapse: collapse; table-layout: fixed; font-family: 'Meiryo', sans-serif;">
-              <thead>
-                <tr style="background-color: #dcdcdc; color: #000000; border: 1px solid #bbbbbb;">
-                  <th style="width: 30px; text-align:center; padding:4px 1px; border:1px solid #bbb; font-size:11px;">順位</th>
-                  <th style="width: 45px; text-align:center; padding:4px 1px; border:1px solid #bbb; font-size:11px;">コード</th>
-                  <th style="width: 160px; text-align:left; padding:4px 1px; border:1px solid #bbb; font-size:11px;">企業名</th>
-                  <th style="width: 65px; text-align:right; padding:4px 1px; border:1px solid #bbb; font-size:11px;">時価総額</th>
-                  <th style="width: 40px; text-align:center; padding:4px 1px; border:1px solid #bbb; font-size:11px;">スコア</th>
-                  <th style="width: 60px; text-align:center; padding:4px 1px; border:1px solid #bbb; font-size:11px;">戦略</th>
-                  <th style="width: 55px; text-align:center; padding:4px 1px; border:1px solid #bbb; font-size:11px;">RSI</th>
-                  <th style="width: 55px; text-align:right; padding:4px 1px; border:1px solid #bbb; font-size:11px;">出来高<br>(前日比)</th>
-                  <th style="width: 65px; text-align:right; padding:4px 1px; border:1px solid #bbb; font-size:11px;">現在値</th>
-                  <th style="width: 85px; text-align:right; padding:4px 1px; border:1px solid #bbb; font-size:11px;">推奨買値<br>(残)</th>
-                  <th style="width: 125px; text-align:left; padding:4px 1px; border:1px solid #bbb; font-size:11px;">利確<br>(半/全)</th>
-                  <th style="width: 70px; text-align:center; padding:4px 1px; border:1px solid #bbb; font-size:11px; color:#0056b3;">バック<br>テスト</th>
-                  <th style="width: 60px; text-align:center; padding:4px 1px; border:1px solid #bbb; font-size:11px;">PER<br>PBR</th>
-                  <th style="width: auto; text-align:left; padding:4px 1px; border:1px solid #bbb; font-size:11px;">アイの所感</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows}
-              </tbody>
-            </table>
-            """
-
+        final_html = f"""
+        <table class="ai-table">
+          <thead>
+            <tr style="background-color: #dcdcdc; color: #000000; border: 1px solid #bbbbbb;">
+              <th style="width: 30px;">順位</th>
+              <th style="width: 45px;">コード</th>
+              <th style="width: 150px; text-align:left;">企業名</th>
+              <th style="width: 90px; text-align:right;">時価総額</th>
+              <th style="width: 40px;">スコア</th>
+              <th style="width: 60px;">戦略</th>
+              <th style="width: 55px;">RSI</th>
+              <th style="width: 55px; text-align:right;">出来高<br>(前日比)</th>
+              <th style="width: 65px; text-align:right;">現在値</th>
+              <th style="width: 85px; text-align:right;">推奨買値<br>(残)</th>
+              <th style="width: 125px; text-align:left;">利確<br>(半/全)</th>
+              <th style="width: 70px;">バック<br>テスト</th>
+              <th style="width: 60px;">PER<br>PBR</th>
+              <th style="width: auto; text-align:left;">アイの所感</th>
+            </tr>
+          </thead>
+          <tbody>
+            {table_rows}
+          </tbody>
+        </table>
+        <br>
+        {monologue}
+        """
+    
     st.markdown("### 📊 アイ推奨ポートフォリオ")
-    if table_1_rows.strip():
-        st.markdown(create_table_html(table_1_rows), unsafe_allow_html=True)
-    else:
-        st.info("推奨ゾーンの銘柄はありません。")
-
-    if table_2_rows.strip():
-        st.markdown("#### ⚠️ 様子見・警戒ゾーン")
-        st.markdown(create_table_html(table_2_rows), unsafe_allow_html=True)
-
-    st.markdown(monologue, unsafe_allow_html=True)
+    st.markdown(final_html, unsafe_allow_html=True)
     
     with st.expander("詳細データリスト"):
         st.dataframe(pd.DataFrame(data_list)[['code', 'name', 'price', 'cap_disp', 'score', 'rsi_str', 'vol_str', 'backtest']])
