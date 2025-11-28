@@ -43,13 +43,17 @@ with col_title:
             overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
         }
 
-        /* 4列目: 時価総額 */
-        th:nth-child(4), td:nth-child(4) { width: 60px; font-size: 11px; text-align: right; }
+        /* 4列目: 時価総額 (4文字分削除対応) */
+        th:nth-child(4), td:nth-child(4) { 
+            width: 60px; 
+            font-size: 11px; 
+            text-align: right; 
+        }
 
         /* 5列目: スコア */
         th:nth-child(5), td:nth-child(5) { width: 40px; text-align: center; }
 
-        /* 6列目: 戦略 (ご要望通り幅を広げる) */
+        /* 6列目: 戦略 (広げる) */
         th:nth-child(6), td:nth-child(6) { 
             font-size: 12px; 
             min-width: 70px; 
@@ -62,13 +66,13 @@ with col_title:
         /* 9列目: 現在値 */
         th:nth-child(9), td:nth-child(9) { white-space: nowrap; }
 
-        /* 10列目: 推奨買値 */
+        /* 10列目: 推奨買値 (4文字分削除対応) */
         th:nth-child(10), td:nth-child(10) { width: 70px; font-size: 12px; }
 
         /* 11列目: 利確 */
         th:nth-child(11), td:nth-child(11) { min-width: 100px; font-size: 12px; }
 
-        /* 12列目: PER/PBR (ヘッダー文字削除済み) */
+        /* 12列目: PER/PBR */
         th:nth-child(12), td:nth-child(12) { font-size: 11px; width: 70px; }
 
         /* 13列目: アイの所感 */
@@ -77,7 +81,7 @@ with col_title:
     <p class="big-font" style="margin-top: 0px;">あなたの提示した銘柄についてアイが分析して売買戦略を伝えます。</p>
     """, unsafe_allow_html=True)
 
-# ヘルプ
+# ヘルプ (元の内容に戻しました)
 with st.expander("ℹ️ スコア配分・機能説明"):
     st.markdown("""
     ### 💯 AIスコア算出ルール (100点満点)
@@ -120,7 +124,8 @@ if api_key:
 
 def get_stock_info_from_kabutan(code):
     """
-    株探から情報を取得 (構造解析・タグ完全除去版)
+    株探から情報を取得 (構造指定・確実版)
+    PER/PBRは stockinfo_i3 エリア限定で取得することで重複を防ぐ
     """
     url = f"https://kabutan.jp/stock/?code={code}"
     headers = {"User-Agent": "Mozilla/5.0"}
@@ -138,25 +143,24 @@ def get_stock_info_from_kabutan(code):
             data["name"] = re.sub(r'[（\(].*?[）\)]', '', raw_name)
 
         # 2. 現在値 (テキスト解析)
-        # HTMLタグを除去したテキストを作成して検索
+        # タグ除去して検索
         text_content = re.sub(r'<[^>]+>', ' ', html)
         text_content = re.sub(r'\s+', ' ', text_content)
-        
         match_price = re.search(r'現在値\s*([0-9,.]+)', text_content)
         if match_price:
             data["price"] = float(match_price.group(1).replace(",", ""))
 
-        # 3. 出来高
+        # 3. 出来高 (テキスト解析)
         match_vol = re.search(r'出来高\s*([0-9,]+)\s*株', text_content)
         if match_vol:
             data["volume"] = float(match_vol.group(1).replace(",", ""))
 
-        # 4. 時価総額 (v_zika2クラスを狙い撃ち + タグ全削除)
+        # 4. 時価総額 (v_zika2クラス指定 + タグ全削除)
         # <td class="v_zika2">28<span>兆</span>6,605<span>億円</span></td>
-        match_cap_area = re.search(r'class="v_zika2">(.*?)</td>', html)
+        match_cap_area = re.search(r'class="v_zika2"[^>]*>(.*?)</td>', html)
         if match_cap_area:
             raw_cap_html = match_cap_area.group(1)
-            # タグを全削除して数字と単位だけにする -> "28兆6605億円"
+            # タグを全削除 "28兆6,605億円"
             cap_text = re.sub(r'<[^>]+>', '', raw_cap_html).replace(",", "").strip()
             
             if "兆" in cap_text:
@@ -170,21 +174,21 @@ def get_stock_info_from_kabutan(code):
                 except:
                     data["cap"] = 0
 
-        # 5. PER / PBR (stockinfo_i3 テーブルのセル順序依存)
-        # 確実にPER=1つ目、PBR=2つ目を取得する
-        i3_match = re.search(r'<div id="stockinfo_i3">.*?<tbody>(.*?)</tbody>', html)
+        # 5. PER / PBR (エリア限定検索)
+        # <div id="stockinfo_i3"> の中だけを切り出す
+        i3_match = re.search(r'<div id="stockinfo_i3">(.*?)</div>', html)
         if i3_match:
-            tbody = i3_match.group(1)
-            # <td>...</td> を全て取得
-            tds = re.findall(r'<td[^>]*>(.*?)</td>', tbody)
+            i3_html = i3_match.group(1)
+            # その中の <td>...</td> を全て取得
+            tds = re.findall(r'<td[^>]*>(.*?)</td>', i3_html)
             
             def clean_val(s):
-                # タグを除去して空白削除
-                return re.sub(r'<[^>]+>', '', s).strip()
+                return re.sub(r'<[^>]+>', '', s).strip() # タグ削除
 
+            # 1つ目がPER、2つ目がPBR
             if len(tds) >= 2:
-                data["per"] = clean_val(tds[0]) # 1つ目がPER
-                data["pbr"] = clean_val(tds[1]) # 2つ目がPBR
+                data["per"] = clean_val(tds[0])
+                data["pbr"] = clean_val(tds[1])
 
         return data
     except Exception:
