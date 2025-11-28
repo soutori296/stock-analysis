@@ -11,88 +11,105 @@ import re
 ICON_URL = "https://raw.githubusercontent.com/soutori296/stock-analysis/main/aisan.png"
 
 # ページ設定
-st.set_page_config(page_title="教えて！AIさん 2", page_icon="aisan.png", layout="wide")
+st.set_page_config(page_title="教えて！AIさん 2", page_icon="🤖", layout="wide")
 
-# --- タイトルエリア (シンプルで確実な表示方法に変更) ---
+# --- 時間管理ロジック (JST / 2024年11月～の新市場ルール対応) ---
+def get_market_status():
+    """
+    現在の日本時間(JST)を取得し、市場の状態を判定する
+    - 東証の取引終了: 15:30
+    - 株探の更新(20分遅れ): 15:50
+    """
+    jst_now = datetime.datetime.utcnow() + datetime.timedelta(hours=9)
+    current_time = jst_now.time()
+    
+    start_time = datetime.time(9, 0)
+    # 【修正】15:30終了 + 20分ディレイ = 15:50 までは「進行中」とみなす
+    end_time = datetime.time(15, 50)
+    
+    # 土日は休み
+    if jst_now.weekday() >= 5:
+        return "休日(確定値)", jst_now
+    
+    if start_time <= current_time <= end_time:
+        return "ザラ場(進行中)", jst_now
+    else:
+        return "引け後(確定値)", jst_now
+
+status_label, jst_now = get_market_status()
+status_color = "#d32f2f" if "進行中" in status_label else "#1976d2" # 赤 / 青
+
+# --- タイトルエリア ---
 col_icon, col_title = st.columns([1.5, 8.5])
 with col_icon:
     try:
-        # 余計なチェックをせず、直接画像を表示させる（これが一番確実）
         st.image(ICON_URL, width=100)
     except:
         st.write("🤖")
 
 with col_title:
     st.title("教えて！AIさん 2")
-    st.markdown("""
+    st.markdown(f"""
     <style>
-        .big-font { font-size:18px !important; font-weight: bold; color: #4A4A4A; }
+        .big-font {{ font-size:18px !important; font-weight: bold; color: #4A4A4A; }}
+        .status-badge {{
+            background-color: {status_color}; color: white; padding: 4px 8px;
+            border-radius: 4px; font-size: 14px; font-weight: bold; vertical-align: middle;
+        }}
         
         /* テーブル全体の設定 */
-        table { 
+        table {{ 
             width: 100%; 
             border-collapse: collapse; 
             table-layout: fixed; 
             font-family: "Meiryo", sans-serif;
-        }
+        }}
         
-        /* ヘッダー設定 (文字色を黒に固定して見やすく) */
-        th { 
-            background-color: #e0e0e0 !important; /* 背景：薄いグレー */
-            color: #000000 !important; /* 文字：黒 (強制) */
-            font-weight: bold; 
-            text-align: center;
-            border: 1px solid #ccc;
-            padding: 8px 4px !important;
-            font-size: 13px;
-        }
+        /* ヘッダー設定 */
+        th {{ 
+            background-color: #e0e0e0 !important; color: #000000 !important;
+            font-weight: bold; text-align: center; border: 1px solid #ccc;
+            padding: 8px 4px !important; font-size: 13px;
+        }}
         
         /* データセル設定 */
-        td { 
-            font-size: 13px; 
-            vertical-align: middle !important; 
-            padding: 8px 4px !important; 
-            line-height: 1.4 !important;
-            word-wrap: break-word;
-            border: 1px solid #ddd;
-            color: inherit;
-        }
+        td {{ 
+            font-size: 13px; vertical-align: middle !important; padding: 8px 5px !important;
+            line-height: 1.5 !important; word-wrap: break-word; border: 1px solid #e0e0e0; color: inherit;
+        }}
 
-        /* --- 各列の幅指定 (全14列) --- */
-        th:nth-child(1), td:nth-child(1) { width: 35px; text-align: center; } /* 順位 */
-        th:nth-child(2), td:nth-child(2) { width: 45px; text-align: center; } /* コード */
-        th:nth-child(3), td:nth-child(3) { width: 160px; font-weight: bold; font-size: 14px; } /* 企業名 */
-        th:nth-child(4), td:nth-child(4) { width: 75px; text-align: right; font-size: 12px; } /* 時価総額 */
-        th:nth-child(5), td:nth-child(5) { width: 45px; text-align: center; } /* スコア */
-        th:nth-child(6), td:nth-child(6) { width: 70px; font-size: 12px; } /* 戦略 */
-        th:nth-child(7), td:nth-child(7) { width: 65px; text-align: center; } /* RSI */
-        th:nth-child(8), td:nth-child(8) { width: 75px; font-size: 12px; text-align: right; } /* 出来高 */
-        th:nth-child(9), td:nth-child(9) { width: 80px; text-align: right; font-weight: bold; } /* 現在値 */
-        th:nth-child(10), td:nth-child(10) { width: 100px; font-size: 12px; } /* 推奨買値 */
-        th:nth-child(11), td:nth-child(11) { width: 110px; font-size: 11px; } /* 利確 */
-        th:nth-child(12), td:nth-child(12) { width: 110px; font-size: 11px; color: #0056b3; font-weight: bold; } /* バックテスト */
-        th:nth-child(13), td:nth-child(13) { width: 70px; font-size: 11px; } /* 指標 */
-        th:nth-child(14), td:nth-child(14) { width: auto; font-size: 12px; } /* 所感 */
+        /* --- 各列の幅指定 --- */
+        th:nth-child(1), td:nth-child(1) {{ width: 35px; text-align: center; }} /* 順位 */
+        th:nth-child(2), td:nth-child(2) {{ width: 45px; text-align: center; }} /* コード */
+        th:nth-child(3), td:nth-child(3) {{ width: 160px; font-weight: bold; font-size: 14px; }} /* 企業名 */
+        th:nth-child(4), td:nth-child(4) {{ width: 75px; text-align: right; font-size: 12px; }} /* 時価総額 */
+        th:nth-child(5), td:nth-child(5) {{ width: 45px; text-align: center; }} /* スコア */
+        th:nth-child(6), td:nth-child(6) {{ width: 70px; font-size: 12px; }} /* 戦略 */
+        th:nth-child(7), td:nth-child(7) {{ width: 65px; text-align: center; }} /* RSI */
+        th:nth-child(8), td:nth-child(8) {{ width: 75px; font-size: 12px; text-align: right; }} /* 出来高 */
+        th:nth-child(9), td:nth-child(9) {{ width: 80px; text-align: right; font-weight: bold; }} /* 現在値 */
+        th:nth-child(10), td:nth-child(10) {{ width: 100px; font-size: 12px; }} /* 推奨買値 */
+        th:nth-child(11), td:nth-child(11) {{ width: 110px; font-size: 11px; }} /* 利確 */
+        th:nth-child(12), td:nth-child(12) {{ width: 110px; font-size: 11px; color: #0068c9; font-weight: bold; }} /* バックテスト */
+        th:nth-child(13), td:nth-child(13) {{ width: 70px; font-size: 11px; }} /* 指標 */
+        th:nth-child(14), td:nth-child(14) {{ width: auto; font-size: 12px; }} /* 所感 */
     </style>
-    <p class="big-font" style="margin-top: 0px;">あなたの提示した銘柄についてアイが分析して売買戦略を伝えます。</p>
+    <p class="big-font" style="margin-top: 0px;">
+        あなたの提示した銘柄についてアイが分析して売買戦略を伝えます。<br>
+        <span class="status-badge">{status_label}</span> <span style="font-size:12px; color:#666;">({jst_now.strftime('%H:%M')} 現在)</span>
+    </p>
     """, unsafe_allow_html=True)
 
 # --- 完全取扱説明書 ---
-# --- 完全取扱説明書 ---
 with st.expander("📘 完全取扱説明書 (データソース・ロジック・スコア計算) を読む"):
-    st.markdown("""
-    ### 1. データ取得の仕組み（ハイブリッド方式）
-    本アプリは、情報の正確性を保つために複数のデータを厳密に使い分けています。
-    
-    | 項目 | 更新タイミング | 理由 |
-    | :--- | :--- | :--- |
-    | **現在値・出来高** | **リアルタイム** | 今の板状況を反映するため。 |
-    | **指標(PER/PBR)** | 最新決算反映 | 正確なファンダメンタルズ把握のため。 |
-    | **テクニカル判定** | **前日終値** | ダマシを防ぎ、確定したローソク足でトレンド判定を行うため。 |
+    st.markdown(f"""
+    ### 1. データ取得と時間の仕組み
+    | 項目 | 取得元 | 状態 | 解説 |
+    | :--- | :--- | :--- | :--- |
+    | **現在値・出来高** | **株探** | **{status_label}** | 15:50までは「途中経過」です。15:50以降は「確定値」となります。(東証15:30終了+20分遅延) |
+    | **テクニカル** | **Stooq** | **前日確定** | トレンド判定やバックテストは、ダマシを防ぐため「前日終値」基準で行います。 |
 
-    ---
-
-    ### 2. 分析ロジックの詳細
+    ### 2. 分析ロジック詳細
     #### ① 戦略判定 (Trend vs Rebound)
     - **🔥 順張り**: 移動平均線が「5日 ＞ 25日 ＞ 75日」の上昇トレンドにある銘柄。押し目を狙います。
     - **🌊 逆張り**: 「RSIが30以下」または「25MA乖離率が-10%以下」の売られすぎ銘柄。リバウンドを狙います。
@@ -109,12 +126,16 @@ with st.expander("📘 完全取扱説明書 (データソース・ロジック�
     #### ③ バックテスト (5MA押し目買い検証)
     「過去75営業日、この銘柄で押し目買いをしていたらどうなっていたか？」をシミュレーションします。
     - **エントリー条件**: 「上昇トレンド中(5MA>25MA)」かつ「安値が5MAにタッチ」した日。
-    - **除外条件**: ポジション保有中(最大10日)は新規エントリーしません。
+    - **除外条件**: ポジション保有中(最大10日)は新規エントリーしません（重複カウント防止）。
     - **勝利条件**: エントリーから10日以内に、目標利益(大型+2%/小型+4%)に到達すれば勝ち。
+    - **表示**: 「3勝1敗」のように表示。「0勝0敗」はトレンドが強すぎて押し目がなかったことを意味します。
 
     ### 3. 売買ターゲットの算出式
+    AIの勘ではなく、プログラムが計算した値を提示します。
     - **推奨買値**: 順張りなら**5日線**、逆張りなら**現在値**。
-    - **利確**: 半益は**25MA+10%**、全益は**25MA+20%** (順張りの場合)。
+    - **利確ターゲット**:
+        - **半益**: 25MA + 10% (順張り) / 5MA回復 (逆張り)
+        - **全益**: 25MA + 20% (順張り) / 25MA回帰 (逆張り)
     """)
 
 # --- サイドバー設定 ---
@@ -296,7 +317,13 @@ def get_technical_summary(ticker):
         ma25 = last_day['SMA25']
         ma75 = last_day['SMA75']
         rsi = last_day['RSI']
-        vol_sma5 = last_day['Vol_SMA5']
+        
+        vol_sma5_prev = last_day['Vol_SMA5']
+        vol_ratio = 0
+        vol_str = "-"
+        if vol_sma5_prev > 0:
+            vol_ratio = last_day['Volume'] / vol_sma5_prev
+            vol_str = f"{vol_ratio:.2f}倍"
         
         recent_changes = df['Close'].diff().tail(5)
         up_days_count = (recent_changes > 0).sum()
@@ -333,12 +360,7 @@ def get_technical_summary(ticker):
             score -= 10
             rsi_str = f"🔴{rsi:.1f}"
 
-        vol_ratio = 0
-        vol_str = "-"
-        if vol_sma5 > 0 and current_vol > 0:
-            vol_ratio = current_vol / vol_sma5
-            vol_str = f"{vol_ratio:.2f}倍"
-            if vol_ratio >= 1.0: score += 10
+        if vol_ratio >= 1.0: score += 10
 
         if "機会なし" not in backtest_result_str:
             if win_rate >= 80: score += 15
@@ -403,7 +425,8 @@ def get_technical_summary(ticker):
             "profit_display": profit_display,
             "backtest": backtest_result_str,
             "momentum": momentum_str,
-            "up_days": up_days_count 
+            "up_days": up_days_count,
+            "real_vol": current_vol # リアルタイム出来高（AIへの情報提供用）
         }
     except Exception:
         return None
@@ -420,8 +443,8 @@ def generate_ranking_table(high_score_list, low_score_list):
             - スコア:{d['score']}, 戦略:{d['strategy']}
             - ★モメンタム: {d['momentum']}
             - ★バックテスト: {d['backtest']}
-            - 時価総額:{d['cap_disp']}, RSI:{d['rsi_str']}, 出来高:{d['vol_str']}
-            - 現在値:{d['price']:,.0f}円
+            - 時価総額:{d['cap_disp']}, RSI:{d['rsi_str']}, 出来高倍率(前日):{d['vol_str']}
+            - 現在値:{d['price']:,.0f}円, リアルタイム出来高:{d['real_vol']:,.0f}株
             - 推奨買値(残):{d['buy_display'].replace('<br>', ' ')}
             - 利確目標:{d['profit_display'].replace('<br>', ' ')}
             - 指標:{fund_txt}
@@ -442,12 +465,12 @@ def generate_ranking_table(high_score_list, low_score_list):
     
     【出力構成】
     **【買い推奨・注目ゾーン】**
-    | 順位 | コード | 企業名 | 時価総額 | スコア | 戦略 | RSI | 出来高<br>(5日比) | 現在値 | 推奨買値<br>(残) | 利確<br>(半/全) | バック<br>テスト | PER<br>PBR | アイの所感 |
+    | 順位 | コード | 企業名 | 時価総額 | スコア | 戦略 | RSI | 出来高<br>(前日比) | 現在値 | 推奨買値<br>(残) | 利確<br>(半/全) | バック<br>テスト | PER<br>PBR | アイの所感 |
     |:---:|:---:|:---|---:|:---:|:---:|:---:|---:|---:|---:|---:|---:|---:|:---|
     | ... | ... | ... | ... | ... | ... | ... | ... | ... | ... | ... | ... | ... | ... |
 
     **【様子見・警戒ゾーン】**
-    | 順位 | コード | 企業名 | 時価総額 | スコア | 戦略 | RSI | 出来高<br>(5日比) | 現在値 | 推奨買値<br>(残) | 利確<br>(半/全) | バック<br>テスト | PER<br>PBR | アイの所感 |
+    | 順位 | コード | 企業名 | 時価総額 | スコア | 戦略 | RSI | 出来高<br>(前日比) | 現在値 | 推奨買値<br>(残) | 利確<br>(半/全) | バック<br>テスト | PER<br>PBR | アイの所感 |
     |:---:|:---:|:---|---:|:---:|:---:|:---:|---:|---:|---:|---:|---:|---:|:---|
     | ... | ... | ... | ... | ... | ... | ... | ... | ... | ... | ... | ... | ... | ... |
 
@@ -529,5 +552,3 @@ if st.button("🚀 分析開始 (アイに聞く)"):
                     st.dataframe(pd.DataFrame(data_list)[['code', 'name', 'price', 'cap_disp', 'score', 'rsi_str', 'vol_str', 'backtest']])
             else:
                 st.error("有効なデータが取得できませんでした。")
-
-
