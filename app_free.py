@@ -18,7 +18,7 @@ def get_market_status():
     """
     現在の日本時間(JST)を取得し、市場の状態を判定する
     - 東証の取引終了: 15:30
-    - 株探の更新(20分遅れ): 15:50
+    - 日本株情報サイトの更新(20分遅れ): 15:50
     """
     jst_now = datetime.datetime.utcnow() + datetime.timedelta(hours=9)
     current_time = jst_now.time()
@@ -552,3 +552,4 @@ if st.button("🚀 分析開始 (アイに聞く)"):
                     st.dataframe(pd.DataFrame(data_list)[['code', 'name', 'price', 'cap_disp', 'score', 'rsi_str', 'vol_str', 'backtest']])
             else:
                 st.error("有効なデータが取得できませんでした。")
+
