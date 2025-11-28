@@ -11,7 +11,7 @@ import re
 ICON_URL = "https://raw.githubusercontent.com/soutori296/stock-analysis/main/aisan.png"
 
 # ページ設定
-st.set_page_config(page_title="教えて！AIさん 2", page_icon="🤖", layout="wide")
+st.set_page_config(page_title="教えて！AIさん 2", page_icon="aisan.png", layout="wide")
 
 # --- タイトルエリア (シンプルで確実な表示方法に変更) ---
 col_icon, col_title = st.columns([1.5, 8.5])
@@ -525,3 +525,4 @@ if st.button("🚀 分析開始 (アイに聞く)"):
                     st.dataframe(pd.DataFrame(data_list)[['code', 'name', 'price', 'cap_disp', 'score', 'rsi_str', 'vol_str', 'backtest']])
             else:
                 st.error("有効なデータが取得できませんでした。")
+
