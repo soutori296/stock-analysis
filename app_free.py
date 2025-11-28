@@ -101,7 +101,12 @@ with col_title:
     """, unsafe_allow_html=True)
 
 # --- 完全取扱説明書 ---
-<table style="width:100%; font-size:14px;">
+with st.expander("📘 完全取扱説明書 (データソース・ロジック・スコア計算) を読む"):
+    st.markdown(f"""
+    ### 1. データ取得と時間の仕組み
+    
+    <!-- ここで列幅を調整できます (合計100%になるように設定) -->
+    <table style="width:100%; font-size:14px;">
       <thead>
         <tr>
           <th style="width: 20%;">項目</th>
@@ -569,6 +574,7 @@ if st.button("🚀 分析開始 (アイに聞く)"):
                     st.dataframe(pd.DataFrame(data_list)[['code', 'name', 'price', 'cap_disp', 'score', 'rsi_str', 'vol_str', 'backtest']])
             else:
                 st.error("有効なデータが取得できませんでした。")
+
 
 
 
