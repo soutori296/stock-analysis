@@ -12,7 +12,7 @@ import os
 ICON_FILE = "aisan.png"
 
 # ページ設定
-st.set_page_config(page_title="教えて！AIさん 2", page_icon="🤖", layout="wide")
+st.set_page_config(page_title="教えて！AIさん 2", page_icon="aisan.png", layout="wide")
 
 # --- セッションステート初期化 ---
 if 'analyzed_data' not in st.session_state:
@@ -54,7 +54,7 @@ with col_title:
             border-radius: 4px; font-size: 14px; font-weight: bold; vertical-align: middle;
         }}
         
-        /* テーブル全体 */
+        /* テーブル全体の設定 */
         table {{ 
             width: 100%; 
             border-collapse: collapse; 
@@ -67,6 +67,7 @@ with col_title:
             background-color: #dcdcdc !important; 
             color: #000000 !important;
             font-weight: bold; 
+            text-align: center !important; 
             border: 1px solid #bbbbbb;
             padding: 4px 1px !important; 
             font-size: 11px !important; 
@@ -86,72 +87,21 @@ with col_title:
             white-space: normal !important;
         }}
 
-        /* --- 列幅・配置調整 --- */
-        
-        /* 1.順位 */
-        th:nth-child(1) {{ text-align: center !important; }}
-        td:nth-child(1) {{ width: 25px; text-align: center; }} 
-        
-        /* 2.コード */
-        th:nth-child(2) {{ text-align: center !important; }}
-        td:nth-child(2) {{ width: 40px; text-align: center; }} 
-        
-        /* 3.企業名 (左揃え) */
-        th:nth-child(3) {{ text-align: left !important; padding-left: 4px !important; }}
-        td:nth-child(3) {{ width: 150px; font-weight: bold; font-size: 12px !important; text-align: left; }} 
-        
-        /* 4.時価総額 */
-        th:nth-child(4) {{ text-align: center !important; }}
-        td:nth-child(4) {{ width: 60px; text-align: right; }} 
-        
-        /* 5.スコア */
-        th:nth-child(5) {{ text-align: center !important; }}
-        td:nth-child(5) {{ width: 35px; text-align: center; }} 
-        
-        /* 6.戦略 */
-        th:nth-child(6) {{ text-align: center !important; }}
-        td:nth-child(6) {{ width: 55px; text-align: center; }} 
-        
-        /* 7.RSI */
-        th:nth-child(7) {{ text-align: center !important; }}
-        td:nth-child(7) {{ width: 50px; text-align: center; }} 
-        
-        /* 8.出来高 */
-        th:nth-child(8) {{ text-align: center !important; }}
-        td:nth-child(8) {{ width: 50px; text-align: right; }} 
-        
-        /* 9.現在値 */
-        th:nth-child(9) {{ text-align: center !important; }}
-        td:nth-child(9) {{ width: 60px; text-align: right; font-weight: bold; }} 
-        
-        /* 10.推奨買値 */
-        th:nth-child(10) {{ text-align: center !important; }}
-        td:nth-child(10) {{ width: 75px; text-align: right; }} 
-        
-        /* 11.利確 */
-        th:nth-child(11) {{ text-align: center !important; }}
-        td:nth-child(11) {{ width: 100px; text-align: left; }} 
-        
-        /* 12.バックテスト */
-        th:nth-child(12) {{ text-align: center !important; }}
-        td:nth-child(12) {{ 
-            width: 70px; 
-            color: #0056b3; 
-            font-weight: bold; 
-            text-align: center;
-        }} 
-        
-        /* 13.PER/PBR */
-        th:nth-child(13) {{ text-align: center !important; }}
-        td:nth-child(13) {{ width: 55px; text-align: center; }} 
-        
-        /* 14.所感 (左揃え) */
-        th:nth-child(14) {{ text-align: left !important; padding-left: 4px !important; }}
-        td:nth-child(14) {{ 
-            width: auto; 
-            text-align: left; 
-            font-size: 12px !important;
-        }} 
+        /* --- 列幅の最適化 --- */
+        th:nth-child(1), td:nth-child(1) {{ width: 25px; text-align: center; }} /* 順位 */
+        th:nth-child(2), td:nth-child(2) {{ width: 40px; text-align: center; }} /* コード */
+        th:nth-child(3), td:nth-child(3) {{ width: 150px; font-weight: bold; font-size: 12px !important; text-align: left; }} /* 企業名 */
+        th:nth-child(4), td:nth-child(4) {{ width: 60px; text-align: right; }} /* 時価総額 */
+        th:nth-child(5), td:nth-child(5) {{ width: 35px; text-align: center; }} /* スコア */
+        th:nth-child(6), td:nth-child(6) {{ width: 55px; text-align: center; }} /* 戦略 */
+        th:nth-child(7), td:nth-child(7) {{ width: 50px; text-align: center; }} /* RSI */
+        th:nth-child(8), td:nth-child(8) {{ width: 50px; text-align: right; }} /* 出来高 */
+        th:nth-child(9), td:nth-child(9) {{ width: 60px; text-align: right; font-weight: bold; }} /* 現在値 */
+        th:nth-child(10), td:nth-child(10) {{ width: 75px; text-align: right; }} /* 推奨買値 */
+        th:nth-child(11), td:nth-child(11) {{ width: 100px; text-align: left; }} /* 利確 */
+        th:nth-child(12), td:nth-child(12) {{ width: 70px; color: #0056b3; font-weight: bold; text-align: center; }} /* BT */
+        th:nth-child(13), td:nth-child(13) {{ width: 55px; text-align: center; }} /* PER/PBR */
+        th:nth-child(14), td:nth-child(14) {{ width: auto; text-align: left; font-size: 12px !important; }} /* 所感 */
         
     </style>
     <p class="big-font" style="margin-top: 0px;">
@@ -249,7 +199,7 @@ if api_key:
         st.error(f"System Error: {e}")
 
 def get_stock_info_from_kabutan(code):
-    """ 株探から情報を取得 (時価総額 修正版) """
+    """ 株探から情報を取得 """
     url = f"https://kabutan.jp/stock/?code={code}"
     headers = {"User-Agent": "Mozilla/5.0"}
     data = {"name": "不明", "per": "-", "pbr": "-", "price": None, "volume": None, "cap": 0}
@@ -274,24 +224,18 @@ def get_stock_info_from_kabutan(code):
 
         match_cap_area = re.search(r'class="v_zika2"[^>]*>(.*?)</td>', html)
         if match_cap_area:
-            # タグを除去してから数字と単位を探す
             raw_cap_html = match_cap_area.group(1)
             cap_text = re.sub(r'<[^>]+>', '', raw_cap_html).replace(",", "").strip()
-            
             try:
                 trillion = 0
                 billion = 0
-                
-                # "2兆1,000億円" のようなケース
                 if "兆" in cap_text:
                     parts = cap_text.split("兆")
                     trillion = float(parts[0])
                     if len(parts) > 1 and "億円" in parts[1]:
                         billion = float(parts[1].replace("億円", ""))
-                # "400億円" のようなケース
                 elif "億円" in cap_text:
                     billion = float(cap_text.replace("億円", ""))
-                
                 data["cap"] = (trillion * 10000) + billion
             except:
                 data["cap"] = 0
@@ -358,7 +302,8 @@ def run_dynamic_backtest(df, market_cap):
         if entries == 0: return "機会なし(0勝0敗)", 0
         
         win_rate = (wins / entries) * 100
-        result_str = f"{wins}勝{losses}敗<br>({cap_str}抜)"
+        # 【修正】<br>を使わず、純粋なテキストとして返す
+        result_str = f"{wins}勝{losses}敗 ({cap_str}抜)"
         return result_str, win_rate
     except Exception:
         return "計算エラー", 0
@@ -478,7 +423,7 @@ def get_technical_summary(ticker):
 
         diff = current_price - buy_target_val
         diff_txt = f"{diff:+,.0f}" if diff != 0 else "0"
-        buy_display = f"{buy_target_val:,.0f}<br>({diff_txt})"
+        buy_display = f"{buy_target_val:,.0f} ({diff_txt})" # 【修正】ここも<br>を使わない
         if strategy == "👀様子見": buy_display = "様子見"
 
         def fmt_target(target, current):
@@ -487,17 +432,16 @@ def get_technical_summary(ticker):
             pct = (target - current) / current * 100
             return f"{target:,.0f} (+{pct:.1f}%)"
 
-        profit_display = f"半:{fmt_target(t_half, current_price)}<br>全:{fmt_target(t_full, current_price)}"
+        profit_display = f"半:{fmt_target(t_half, current_price)} 全:{fmt_target(t_full, current_price)}" # 【修正】スペース区切り
 
-        # 時価総額表示 (修正: 単位戻し)
         if fund['cap'] >= 10000:
             cap_disp = f"{fund['cap']/10000:.1f}兆円"
         elif fund['cap'] > 0:
-            cap_disp = f"{fund['cap']:,.0f}億円" # 小数点なし
+            cap_disp = f"{fund['cap']:,.1f}億円"
         else:
             cap_disp = "-"
 
-        fund_disp = f"{fund['per']}<br>{fund['pbr']}"
+        fund_disp = f"{fund['per']} / {fund['pbr']}" # 【修正】スラッシュ区切り
 
         return {
             "code": ticker,
@@ -528,7 +472,6 @@ def generate_ranking_table(high_score_list, low_score_list):
     def list_to_text(lst):
         txt = ""
         for d in lst:
-            fund_txt = d['fund_disp'].replace("<br>", "/")
             txt += f"""
             [{d['code']} {d['name']}]
             - スコア:{d['score']}, 戦略:{d['strategy']}
@@ -536,9 +479,9 @@ def generate_ranking_table(high_score_list, low_score_list):
             - ★バックテスト: {d['backtest']}
             - 時価総額:{d['cap_disp']}, RSI:{d['rsi_str']}, 出来高倍率(前日):{d['vol_str']}
             - 現在値:{d['price']:,.0f}円, リアルタイム出来高:{d['real_vol']:,.0f}株
-            - 推奨買値(残):{d['buy_display'].replace('<br>', ' ')}
-            - 利確目標:{d['profit_display'].replace('<br>', ' ')}
-            - 指標:{fund_txt}
+            - 推奨買値(残):{d['buy_display']}
+            - 利確目標:{d['profit_display']}
+            - 指標:{d['fund_disp']}
             --------------------------------
             """
         return txt if txt else "なし"
@@ -551,9 +494,17 @@ def generate_ranking_table(high_score_list, low_score_list):
     
     【重要：出力形式】
     - **HTMLの `<tr>` タグのみ** を出力してください。
-    - テーブル全体（`<table>`）は作らないでください。
-    - 各行は以下のフォーマットに従ってください。
+    - `<table>` タグは不要です。
     
+    【2段表示のルール】
+    以下の項目は、必ず間に `<br>` を入れて2段にしてください：
+    - 出来高(前日比): `1.20倍<br>(前日比)`
+    - 推奨買値(残): `2,000<br>(-50)` ※データは `2,000 (-50)` と来ます。カッコの前で改行してください。
+    - 利確(半/全): `半:2,100...<br>全:2,200...` ※データは `半:... 全:...` と来ます。スペースで改行してください。
+    - バックテスト: `6勝2敗<br>(4%抜)` ※データは `6勝2敗 (4%抜)` と来ます。カッコの前で改行してください。
+    - PER/PBR: `10.0倍<br>1.0倍` ※データは `10.0倍 / 1.0倍` と来ます。スラッシュで改行してください。
+
+    【出力フォーマット】
     ```html
     <tr>
       <td style="text-align:center;">1</td>
@@ -579,12 +530,8 @@ def generate_ranking_table(high_score_list, low_score_list):
     【データ2: 警戒ゾーン】
     {list_to_text(low_score_list)}
     
-    **【分離の指示】**
-    - 注目ゾーンと警戒ゾーンの間には、必ず以下の区切り行を入れてください。
-    `<tr><td colspan="14" style="background-color:#555; color:white; text-align:center; font-weight:bold; padding:5px;">▼ 様子見・警戒ゾーン ▼</td></tr>`
-
-    **【アイの独り言】**
-    - 全てのテーブル行を出力し終わった後に、`<!--SPLIT-->` を入れてから、`<h3>【アイの独り言】</h3>` を記述してください。
+    **【アイの独り言（投資家への警鐘）】**
+    - `<!--SPLIT-->` の後に `<h3>【アイの独り言】</h3>` を記述。
     """
     
     try:
