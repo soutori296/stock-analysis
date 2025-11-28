@@ -6,187 +6,155 @@ import time
 import requests
 import io
 import re
-import os
-
-# --- アイコン設定 ---
-ICON_FILE = "aisan.png"
+import math
 
 # ページ設定
-st.set_page_config(page_title="教えて！AIさん 2", page_icon="aisan.png", layout="wide")
+st.set_page_config(page_title="教えて！AIさん 2", layout="wide")
 
-# --- セッションステート初期化 ---
+# --- セッションステート管理 (高速化の鍵) ---
 if 'analyzed_data' not in st.session_state:
-    st.session_state.analyzed_data = None
+    st.session_state.analyzed_data = []
+if 'ai_monologue' not in st.session_state:
+    st.session_state.ai_monologue = ""
 
-# --- 時間管理ロジック (JST) ---
+# --- 時間管理 (JST) ---
 def get_market_status():
     jst_now = datetime.datetime.utcnow() + datetime.timedelta(hours=9)
     current_time = jst_now.time()
-    start_time = datetime.time(9, 0)
-    end_time = datetime.time(15, 50) 
-    
-    if jst_now.weekday() >= 5:
-        return "休日(確定値)", jst_now
-    
-    if start_time <= current_time <= end_time:
-        return "ザラ場(進行中)", jst_now
-    else:
-        return "引け後(確定値)", jst_now
+    if jst_now.weekday() >= 5: return "休日(確定値)"
+    if datetime.time(9, 0) <= current_time <= datetime.time(15, 20): # 20分遅延考慮
+        return "ザラ場(進行中)"
+    return "引け後(確定値)"
 
-status_label, jst_now = get_market_status()
+status_label = get_market_status()
 status_color = "#d32f2f" if "進行中" in status_label else "#1976d2"
 
+# --- CSSスタイル (スマホ対応・テーブル装飾) ---
+st.markdown(f"""
+<style>
+    /* 全体フォント */
+    body, p, div, td, th {{ font-family: "Meiryo", sans-serif; }}
+    
+    .big-font {{ font-size:18px !important; font-weight: bold; color: #4A4A4A; }}
+    .status-badge {{
+        background-color: {status_color}; color: white; padding: 3px 8px;
+        border-radius: 4px; font-size: 12px; font-weight: bold; vertical-align: middle;
+    }}
+
+    /* テーブルのコンテナ (スマホで横スクロールさせる) */
+    .table-container {{
+        width: 100%;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        margin-bottom: 20px;
+    }}
+
+    /* テーブル本体 */
+    .ai-table {{
+        width: 100%;
+        border-collapse: collapse;
+        min-width: 1000px; /* スマホでもこれ以下の幅には潰さない */
+        font-size: 13px;
+    }}
+
+    /* ヘッダー */
+    .ai-table th {{
+        background-color: #f0f0f0;
+        color: #333;
+        border: 1px solid #ccc;
+        padding: 8px 4px;
+        text-align: center; /* 基本は中央 */
+        vertical-align: middle;
+        white-space: nowrap;
+    }}
+    
+    /* 左揃えにするヘッダー */
+    .th-left {{ text-align: left !important; }}
+
+    /* セル */
+    .ai-table td {{
+        border: 1px solid #ccc;
+        padding: 6px 4px;
+        vertical-align: middle;
+        line-height: 1.4;
+    }}
+
+    /* 列ごとのスタイル */
+    .td-center {{ text-align: center; }}
+    .td-right {{ text-align: right; }}
+    .td-left {{ text-align: left; }}
+    .td-bold {{ font-weight: bold; }}
+    .td-blue {{ color: #0056b3; font-weight: bold; }}
+    
+    /* 説明書のテーブル */
+    .desc-table th, .desc-table td {{ text-align: center !important; }}
+    
+</style>
+""", unsafe_allow_html=True)
+
 # --- タイトルエリア ---
-col_icon, col_title = st.columns([1.5, 8.5])
-with col_icon:
-    if os.path.exists(ICON_FILE):
-        st.image(ICON_FILE, width=100)
-    else:
-        st.write("🤖")
+st.title("📈 教えて！AIさん 2")
+st.markdown(f"""
+<p class="big-font">
+    あなたの提示した銘柄についてアイが分析して売買戦略を伝えます。<br>
+    <span class="status-badge">{status_label}</span>
+</p>
+""", unsafe_allow_html=True)
 
-with col_title:
-    st.title("教えて！AIさん 2")
-    st.markdown(f"""
-    <style>
-        .big-font {{ font-size:18px !important; font-weight: bold; color: #4A4A4A; }}
-        .status-badge {{
-            background-color: {status_color}; color: white; padding: 4px 8px;
-            border-radius: 4px; font-size: 14px; font-weight: bold; vertical-align: middle;
-        }}
-        
-        /* テーブル全体の設定 */
-        table {{ 
-            width: 100%; 
-            border-collapse: collapse; 
-            table-layout: fixed !important; 
-            font-family: "Meiryo", sans-serif;
-        }}
-        
-        /* ヘッダー */
-        th {{ 
-            background-color: #dcdcdc !important; 
-            color: #000000 !important;
-            font-weight: bold; 
-            text-align: center !important; 
-            border: 1px solid #bbbbbb;
-            padding: 4px 1px !important; 
-            font-size: 11px !important; 
-            vertical-align: middle !important;
-            line-height: 1.2 !important;
-        }}
-        
-        /* データセル */
-        td {{ 
-            font-size: 11px !important; 
-            vertical-align: middle !important; 
-            padding: 4px 2px !important; 
-            line-height: 1.3 !important;
-            border: 1px solid #cccccc;
-            color: inherit;
-            word-wrap: break-word !important;
-            white-space: normal !important;
-        }}
-
-        /* --- 列幅の最適化 --- */
-        th:nth-child(1), td:nth-child(1) {{ width: 25px; text-align: center; }} /* 順位 */
-        th:nth-child(2), td:nth-child(2) {{ width: 40px; text-align: center; }} /* コード */
-        th:nth-child(3), td:nth-child(3) {{ width: 150px; font-weight: bold; font-size: 12px !important; text-align: left; }} /* 企業名 */
-        th:nth-child(4), td:nth-child(4) {{ width: 60px; text-align: right; }} /* 時価総額 */
-        th:nth-child(5), td:nth-child(5) {{ width: 35px; text-align: center; }} /* スコア */
-        th:nth-child(6), td:nth-child(6) {{ width: 55px; text-align: center; }} /* 戦略 */
-        th:nth-child(7), td:nth-child(7) {{ width: 50px; text-align: center; }} /* RSI */
-        th:nth-child(8), td:nth-child(8) {{ width: 50px; text-align: right; }} /* 出来高 */
-        th:nth-child(9), td:nth-child(9) {{ width: 60px; text-align: right; font-weight: bold; }} /* 現在値 */
-        th:nth-child(10), td:nth-child(10) {{ width: 75px; text-align: right; }} /* 推奨買値 */
-        th:nth-child(11), td:nth-child(11) {{ width: 100px; text-align: left; }} /* 利確 */
-        th:nth-child(12), td:nth-child(12) {{ width: 70px; color: #0056b3; font-weight: bold; text-align: center; }} /* BT */
-        th:nth-child(13), td:nth-child(13) {{ width: 55px; text-align: center; }} /* PER/PBR */
-        th:nth-child(14), td:nth-child(14) {{ width: auto; text-align: left; font-size: 12px !important; }} /* 所感 */
-        
-    </style>
-    <p class="big-font" style="margin-top: 0px;">
-        あなたの提示した銘柄についてアイが分析して売買戦略を伝えます。<br>
-        <span class="status-badge">{status_label}</span> <span style="font-size:12px; color:#666;">({jst_now.strftime('%H:%M')} 現在)</span>
-    </p>
-    """, unsafe_allow_html=True)
-
-# --- 説明書 ---
-with st.expander("📘 完全取扱説明書 (データソース・ロジック・スコア計算) を読む"):
-    st.markdown(f"""
-    ### 1. データ取得と時間の仕組み
-    <table style="width: 100%; text-align: left; border-collapse: collapse; font-size: 14px;">
+# --- 説明書 (中央揃え修正) ---
+with st.expander("📘 取扱説明書 (データソース・判定基準)"):
+    st.markdown("""
+    <div style="text-align: center;">
+    
+    ### 1. データ取得について
+    <table class="desc-table" style="width:100%; margin:auto;">
       <thead>
-        <tr style="background-color: #dcdcdc; color: #000000;">
-          <th style="padding: 10px; border: 1px solid #bbbbbb; width: 15%; text-align: left;">項目</th>
-          <th style="padding: 10px; border: 1px solid #bbbbbb; width: 10%; text-align: left;">取得元</th>
-          <th style="padding: 10px; border: 1px solid #bbbbbb; width: 20%; text-align: left;">状態</th>
-          <th style="padding: 10px; border: 1px solid #bbbbbb; width: 55%; text-align: left;">解説</th>
+        <tr style="background-color:#eee;">
+          <th>項目</th><th>取得元</th><th>状態</th>
         </tr>
       </thead>
       <tbody>
         <tr>
-          <td style="padding: 8px; border: 1px solid #bbbbbb;"><b>現在値・出来高</b></td>
-          <td style="padding: 8px; border: 1px solid #bbbbbb;"><b>株探</b></td>
-          <td style="padding: 8px; border: 1px solid #bbbbbb;"><b>{status_label}</b></td>
-          <td style="padding: 8px; border: 1px solid #bbbbbb;">15:50までは「途中経過」。15:50以降は「確定値」となります。(東証15:30終了+20分遅延)</td>
+          <td>現在値・出来高</td><td><b>株情報サイト</b></td><td>リアルタイム(遅延あり)</td>
         </tr>
         <tr>
-          <td style="padding: 8px; border: 1px solid #bbbbbb;"><b>テクニカル</b></td>
-          <td style="padding: 8px; border: 1px solid #bbbbbb;"><b>Stooq</b></td>
-          <td style="padding: 8px; border: 1px solid #bbbbbb;"><b>前日確定</b></td>
-          <td style="padding: 8px; border: 1px solid #bbbbbb;">トレンド判定やバックテストは、ダマシを防ぐため「前日終値」基準で行います。</td>
+          <td>テクニカル指標</td><td><b>Stooq</b></td><td>前日終値(確定値)</td>
         </tr>
       </tbody>
     </table>
+    <br>
+    ※RSIや移動平均線は「前日の確定足」で計算しています。<br>
+    ザラ場の半端な値で判定が変わるのを防ぐためです。
 
-    ### 2. 分析ロジック詳細
-    #### ① 戦略判定 (Trend vs Rebound)
-    - **🔥 順張り**: 移動平均線が「5日 ＞ 25日 ＞ 75日」の上昇トレンドにある銘柄。押し目を狙います。
-    - **🌊 逆張り**: 「RSIが30以下」または「25MA乖離率が-10%以下」の売られすぎ銘柄。リバウンドを狙います。
-    - **👀 様子見**: 上記に当てはまらない、方向感に欠ける銘柄。
+    ### 2. RSIの色分け基準
+    🔵 <b>30以下</b>：売られすぎ (逆張りチャンス)<br>
+    🟢 <b>55～65</b>：理想的な上昇トレンド (押し目買い)<br>
+    🔴 <b>70以上</b>：買われすぎ (過熱感あり)<br>
+    ⚪ <b>その他</b>：中立・様子見
 
-    #### ② RSIヒートマップ (過熱感の可視化)
-    - 🔵 **30以下**: 売られすぎ (逆張りチャンス)
-    - ⚪ **30-50**: 弱気～中立
-    - 🟢 **50-55**: 上昇予兆
-    - 🟢🔥 **55-65**: **理想的な上昇トレンド (押し目買いの好機)**
-    - 🟢 **65-70**: 強い上昇
-    - 🔴 **70以上**: 買われすぎ (天井警戒)
-
-    #### ③ バックテスト (5MA押し目買い検証)
-    「過去75営業日、この銘柄で押し目買いをしていたらどうなっていたか？」をシミュレーションします。
-    - **エントリー条件**: 「上昇トレンド中(5MA>25MA)」かつ「安値が5MAにタッチ」した日。
-    - **除外条件**: ポジション保有中(最大10日)は新規エントリーしません。
-    - **勝利条件**: エントリーから10日以内に、目標利益(大型+2%/小型+4%)に到達すれば勝ち。
-
-    ### 3. 売買ターゲットの算出式
-    - **推奨買値**: 順張りなら**5日線**、逆張りなら**現在値**。
-    - **利確ターゲット**:
-        - **半益**: 25MA + 10% (順張り) / 5MA回復 (逆張り)
-        - **全益**: 25MA + 20% (順張り) / 25MA回帰 (逆張り)
+    </div>
     """, unsafe_allow_html=True)
 
 # --- サイドバー設定 ---
-st.sidebar.header("設定")
 if "GEMINI_API_KEY" in st.secrets:
     api_key = st.secrets["GEMINI_API_KEY"]
-    st.sidebar.success("🔑 Secretsからキーを読み込みました")
+    st.sidebar.success("🔑 Security Clearance: OK")
 else:
     api_key = st.sidebar.text_input("Gemini API Key", type="password")
 
 tickers_input = st.text_area(
     "Analysing Targets (銘柄コードを入力)", 
     value="", 
-    placeholder="例:\n7203\n8306\n9984\n(ここにコードを入力してください)",
+    placeholder="例:\n7203\n8306\n9984",
     height=150
 )
 
 sort_option = st.sidebar.selectbox("並べ替え順", [
     "AIスコア順 (おすすめ)", 
-    "バックテスト成績順 (勝率重視)", 
-    "モメンタム順 (上昇日数)", 
-    "RSI順", 
-    "時価総額順"
+    "時価総額順",
+    "RSI順 (低い順)", 
+    "RSI順 (高い順)",
+    "コード順"
 ])
 
 model_name = 'gemini-2.5-flash'
@@ -198,8 +166,32 @@ if api_key:
     except Exception as e:
         st.error(f"System Error: {e}")
 
-def get_stock_info_from_kabutan(code):
-    """ 株探から情報を取得 """
+# --- 関数群 ---
+
+def fmt_market_cap(val):
+    """ 時価総額を「兆・億円」の整数で表記する関数 """
+    if not val or val == 0: return "-"
+    try:
+        # valは単位なしの生の数値(円)を想定、あるいは「億円」単位で来るか確認が必要
+        # ここでは kabutanから取得する際に「億円」単位で取得して変換している前提
+        # get_stock_info で (兆*10000 + 億) の形(単位:億円)にしている
+        
+        oku_val = int(val) # 単位：億円
+        
+        if oku_val >= 10000:
+            cho = oku_val // 10000
+            rem_oku = oku_val % 10000
+            if rem_oku == 0:
+                return f"{cho}兆円"
+            else:
+                return f"{cho}兆{rem_oku}億円"
+        else:
+            return f"{oku_val}億円"
+    except:
+        return "-"
+
+def get_stock_info(code):
+    """ Webから現在値・時価総額等を取得 """
     url = f"https://kabutan.jp/stock/?code={code}"
     headers = {"User-Agent": "Mozilla/5.0"}
     data = {"name": "不明", "per": "-", "pbr": "-", "price": None, "volume": None, "cap": 0}
@@ -207,440 +199,307 @@ def get_stock_info_from_kabutan(code):
     try:
         res = requests.get(url, headers=headers, timeout=5)
         res.encoding = res.apparent_encoding
-        html = res.text.replace("\n", "").replace("\r", "")
+        html = res.text.replace("\n", "")
         
-        match_name = re.search(r'<title>(.*?)【', html)
-        if match_name: 
-            raw_name = match_name.group(1).strip()
-            data["name"] = re.sub(r'[（\(].*?[）\)]', '', raw_name)
+        # 社名
+        m_name = re.search(r'<title>(.*?)【', html)
+        if m_name: data["name"] = m_name.group(1).strip()
 
-        match_price = re.search(r'現在値</th>\s*<td[^>]*>([0-9,.]+)</td>', html)
-        if match_price:
-            data["price"] = float(match_price.group(1).replace(",", ""))
+        # PER/PBR
+        def get_val(k):
+            m = re.search(rf'{k}.*?>([0-9\.,\-]+)(?:</span>)?(?:倍|％)', html)
+            return m.group(1) + "倍" if m else "-"
+        data["per"] = get_val("PER")
+        data["pbr"] = get_val("PBR")
 
-        match_vol = re.search(r'出来高</th>\s*<td[^>]*>([0-9,]+).*?株</td>', html)
-        if match_vol:
-            data["volume"] = float(match_vol.group(1).replace(",", ""))
+        # 現在値
+        m_price = re.search(r'現在値</th>\s*<td[^>]*>([0-9,]+)</td>', html)
+        if m_price: data["price"] = float(m_price.group(1).replace(",", ""))
 
-        match_cap_area = re.search(r'class="v_zika2"[^>]*>(.*?)</td>', html)
-        if match_cap_area:
-            raw_cap_html = match_cap_area.group(1)
-            cap_text = re.sub(r'<[^>]+>', '', raw_cap_html).replace(",", "").strip()
-            try:
-                trillion = 0
+        # 出来高
+        m_vol = re.search(r'出来高</th>\s*<td[^>]*>([0-9,]+).*?株</td>', html)
+        if m_vol: data["volume"] = float(m_vol.group(1).replace(",", ""))
+
+        # 時価総額 (v_zika2クラス等から取得)
+        # 株探は "30.5兆円" や "400億円" のように書かれている
+        m_cap = re.search(r'時価総額</th>\s*<td[^>]*>(.*?)</td>', html)
+        if m_cap:
+            cap_str = re.sub(r'<[^>]+>', '', m_cap.group(1)).strip()
+            # 単位変換: 億円単位の数値にする
+            val = 0
+            if "兆" in cap_str:
+                parts = cap_str.split("兆")
+                trillion = float(parts[0].replace(",", ""))
                 billion = 0
-                if "兆" in cap_text:
-                    parts = cap_text.split("兆")
-                    trillion = float(parts[0])
-                    if len(parts) > 1 and "億円" in parts[1]:
-                        billion = float(parts[1].replace("億円", ""))
-                elif "億円" in cap_text:
-                    billion = float(cap_text.replace("億円", ""))
-                data["cap"] = (trillion * 10000) + billion
-            except:
-                data["cap"] = 0
-
-        i3_match = re.search(r'<div id="stockinfo_i3">.*?<tbody>(.*?)</tbody>', html)
-        if i3_match:
-            tbody = i3_match.group(1)
-            tds = re.findall(r'<td[^>]*>(.*?)</td>', tbody)
-            def clean_val(s): return re.sub(r'<[^>]+>', '', s).strip()
-            if len(tds) >= 2:
-                data["per"] = clean_val(tds[0])
-                data["pbr"] = clean_val(tds[1])
-
-        return data
-    except Exception:
-        return data
-
-def run_dynamic_backtest(df, market_cap):
-    """ バックテスト (勝敗数カウント版) """
-    try:
-        if len(df) < 80: return "データ不足", 0
-        
-        target_pct = 0.04 
-        cap_str = "4%"
-        if market_cap > 0:
-            if market_cap >= 10000: # 1兆円
-                target_pct = 0.02
-                cap_str = "2%"
-            elif market_cap >= 1000: # 1000億円
-                target_pct = 0.03
-                cap_str = "3%"
-        
-        check_start_idx = len(df) - 80 
-        check_end_idx = len(df) - 5
-        
-        wins = 0
-        losses = 0
-        entries = 0
-        skip_until = -1
-        
-        for i in range(check_start_idx, check_end_idx):
-            if i < skip_until: continue
-            row = df.iloc[i]
+                if len(parts) > 1 and "億" in parts[1]:
+                    billion = float(re.search(r'(\d+)', parts[1]).group(1))
+                val = trillion * 10000 + billion
+            elif "億" in cap_str:
+                val = float(re.search(r'([0-9,]+)', cap_str).group(1).replace(",", ""))
             
-            if row['SMA5'] > row['SMA25']:
-                entry_price = row['SMA5']
-                if row['Low'] <= entry_price:
-                    entries += 1
-                    target_price = entry_price * (1 + target_pct)
-                    win_flg = False
-                    search_limit = min(i + 11, len(df))
-                    
-                    for j in range(i + 1, search_limit):
-                        if df.iloc[j]['High'] >= target_price:
-                            wins += 1
-                            win_flg = True
-                            skip_until = j + 1
-                            break
-                    
-                    if not win_flg:
-                        losses += 1
-                        skip_until = i + 10
-        
-        if entries == 0: return "機会なし(0勝0敗)", 0
-        
-        win_rate = (wins / entries) * 100
-        # 【修正】<br>を使わず、純粋なテキストとして返す
-        result_str = f"{wins}勝{losses}敗 ({cap_str}抜)"
-        return result_str, win_rate
-    except Exception:
-        return "計算エラー", 0
+            data["cap"] = val
+
+        return data
+    except:
+        return data
 
 @st.cache_data(ttl=3600)
-def get_technical_summary(ticker):
-    ticker = str(ticker).strip().replace(".T", "").replace(".t", "").upper()
-    if not ticker.isalnum(): return None
+def get_stock_data(ticker):
+    """ Stooqからテクニカルデータ取得 & 指標計算 """
+    ticker = str(ticker).strip().replace(".T", "").upper()
     stock_code = f"{ticker}.JP"
     
-    fund = get_stock_info_from_kabutan(ticker)
-    csv_url = f"https://stooq.com/q/d/l/?s={stock_code}&i=d"
+    # Web情報取得
+    info = get_stock_info(ticker)
     
+    # CSV取得
     try:
-        headers = {"User-Agent": "Mozilla/5.0"}
-        res = requests.get(csv_url, headers=headers, timeout=10)
-        if res.status_code != 200: return None
-        
+        csv_url = f"https://stooq.com/q/d/l/?s={stock_code}&i=d"
+        res = requests.get(csv_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
         df = pd.read_csv(io.BytesIO(res.content), index_col="Date", parse_dates=True)
-        if df.empty: return None
+        
+        if df.empty or len(df) < 25: return None
         
         df = df.sort_index()
-        df = df.tail(150) 
         
-        df['SMA5'] = df['Close'].rolling(window=5).mean()
-        df['SMA25'] = df['Close'].rolling(window=25).mean()
-        df['SMA75'] = df['Close'].rolling(window=75).mean()
-        df['Vol_SMA5'] = df['Volume'].rolling(window=5).mean()
-
+        # MA計算
+        df['SMA5'] = df['Close'].rolling(5).mean()
+        df['SMA25'] = df['Close'].rolling(25).mean()
+        df['SMA75'] = df['Close'].rolling(75).mean()
+        df['Vol_SMA5'] = df['Volume'].rolling(5).mean()
+        
+        # RSI計算
         delta = df['Close'].diff()
-        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+        gain = (delta.where(delta > 0, 0)).rolling(14).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
         rs = gain / loss
         df['RSI'] = 100 - (100 / (1 + rs))
         
-        if len(df) < 80: return None
-
-        backtest_result_str, win_rate = run_dynamic_backtest(df, fund["cap"])
+        last = df.iloc[-1]
+        prev = df.iloc[-2]
         
-        last_day = df.iloc[-1]
+        # 現在値の決定 (Web優先、なければ前日終値)
+        curr_price = info["price"] if info["price"] else last['Close']
         
-        current_price = fund["price"] if fund["price"] else last_day['Close']
-        current_vol = fund["volume"] if fund["volume"] else 0
-        
-        ma5 = last_day['SMA5']
-        ma25 = last_day['SMA25']
-        ma75 = last_day['SMA75']
-        rsi = last_day['RSI']
-        
-        vol_sma5_prev = last_day['Vol_SMA5']
+        # 出来高倍率 (Web当日 / Stooq前日5MA)
         vol_ratio = 0
-        vol_str = "-"
-        if vol_sma5_prev > 0:
-            vol_ratio = last_day['Volume'] / vol_sma5_prev
-            vol_str = f"{vol_ratio:.2f}倍"
+        if info["volume"] and last['Vol_SMA5']:
+            vol_ratio = info["volume"] / last['Vol_SMA5']
         
-        recent_changes = df['Close'].diff().tail(5)
-        up_days_count = (recent_changes > 0).sum()
-        momentum_str = f"{up_days_count}勝{5-up_days_count}敗"
+        # RSI色分け
+        rsi_val = last['RSI']
+        if rsi_val <= 30: rsi_mark = "🔵"
+        elif 55 <= rsi_val <= 65: rsi_mark = "🟢"
+        elif rsi_val >= 70: rsi_mark = "🔴"
+        else: rsi_mark = "⚪"
         
-        # --- スコアリング ---
-        score = 50 
+        # 戦略判定
+        strategy = "様子見"
+        ma5, ma25 = last['SMA5'], last['SMA25']
         
-        if ma5 > ma25 and ma25 > ma75:
-            score += 20
-            po_status = "🔥順張り"
-        elif ma5 < ma25 and ma25 < ma75:
-            score -= 20
-            po_status = "▼下落PO"
-        else:
-            po_status = "レンジ"
-
-        if rsi <= 30:
-            score += 15
-            rsi_str = f"🔵{rsi:.1f}"
-        elif 30 < rsi < 50:
-            score -= 5
-            rsi_str = f"⚪{rsi:.1f}"
-        elif 50 <= rsi < 55:
-            score += 10
-            rsi_str = f"🟢{rsi:.1f}"
-        elif 55 <= rsi <= 65:
-            score += 25
-            rsi_str = f"🟢🔥{rsi:.1f}"
-        elif 65 < rsi < 70:
-            score += 10
-            rsi_str = f"🟢{rsi:.1f}"
-        else:
-            score -= 10
-            rsi_str = f"🔴{rsi:.1f}"
-
-        if vol_ratio >= 1.0: score += 10
-
-        if "機会なし" not in backtest_result_str:
-            if win_rate >= 80: score += 15
-            elif win_rate >= 60: score += 5
-            elif win_rate <= 40: score -= 20
-
-        score = max(0, min(100, score))
-
-        if "順張り" in po_status:
+        # 順張り: 5>25>75 & 上昇中
+        if ma5 > ma25 > last['SMA75'] and ma5 > prev['SMA5']:
             strategy = "🔥順張り"
-            buy_target_val = ma5
-            t_half = max(current_price * 1.05, ma25 * 1.10)
-            t_full = max(current_price * 1.10, ma25 * 1.20)
+            buy_target = int(ma5) # 5MA
+            p_half = int(ma25 * 1.10)
+            p_full = int(ma25 * 1.20)
+        # 逆張り: RSI<30 or 乖離-10%
+        elif rsi_val <= 30 or (curr_price < ma25 * 0.9):
+            strategy = "🌊逆張り"
+            buy_target = int(curr_price) # 現在値
+            p_half = int(ma5) # 5MA回復
+            p_full = int(ma25) # 25MA回帰
         else:
-            if rsi <= 35:
-                strategy = "🌊逆張り"
-                buy_target_val = current_price
-                t_half = ma5
-                t_full = ma25
-            else:
-                strategy = "👀様子見"
-                buy_target_val = ma25
-                t_half = 0
-                t_full = 0
+            buy_target = int(ma25)
+            p_half = 0; p_full = 0
 
-        diff = current_price - buy_target_val
-        diff_txt = f"{diff:+,.0f}" if diff != 0 else "0"
-        buy_display = f"{buy_target_val:,.0f} ({diff_txt})" # 【修正】ここも<br>を使わない
-        if strategy == "👀様子見": buy_display = "様子見"
-
-        def fmt_target(target, current):
-            if target <= 0: return "-"
-            if target <= current: return "到達済"
-            pct = (target - current) / current * 100
-            return f"{target:,.0f} (+{pct:.1f}%)"
-
-        profit_display = f"半:{fmt_target(t_half, current_price)} 全:{fmt_target(t_full, current_price)}" # 【修正】スペース区切り
-
-        if fund['cap'] >= 10000:
-            cap_disp = f"{fund['cap']/10000:.1f}兆円"
-        elif fund['cap'] > 0:
-            cap_disp = f"{fund['cap']:,.1f}億円"
-        else:
-            cap_disp = "-"
-
-        fund_disp = f"{fund['per']} / {fund['pbr']}" # 【修正】スラッシュ区切り
+        # スコア計算 (簡易版)
+        score = 50
+        if "順張り" in strategy: score += 20
+        if "逆張り" in strategy: score += 15
+        if 55 <= rsi_val <= 65: score += 10
+        if vol_ratio > 1.5: score += 10
+        score = min(100, score)
 
         return {
             "code": ticker,
-            "name": fund['name'],
-            "price": current_price,
-            "score": score,
-            "strategy": strategy,
-            "rsi_raw": rsi,
-            "rsi_str": rsi_str,
+            "name": info["name"],
+            "price": curr_price,
+            "cap_val": info["cap"],
+            "cap_disp": fmt_market_cap(info["cap"]),
+            "per": info["per"], "pbr": info["pbr"],
+            "rsi": rsi_val, "rsi_disp": f"{rsi_mark}{rsi_val:.1f}",
             "vol_ratio": vol_ratio,
-            "vol_str": vol_str,
-            "cap": fund["cap"],
-            "cap_disp": cap_disp,
-            "fund_disp": fund_disp, 
-            "buy_display": buy_display, 
-            "profit_display": profit_display,
-            "backtest": backtest_result_str,
-            "momentum": momentum_str,
-            "up_days": up_days_count,
-            "real_vol": current_vol
+            "strategy": strategy,
+            "score": score,
+            "buy": buy_target,
+            "p_half": p_half, "p_full": p_full
         }
-    except Exception:
+
+    except:
         return None
 
-def generate_ranking_table(high_score_list, low_score_list):
-    if model is None: return "API Key Required."
-
-    def list_to_text(lst):
-        txt = ""
-        for d in lst:
-            txt += f"""
-            [{d['code']} {d['name']}]
-            - スコア:{d['score']}, 戦略:{d['strategy']}
-            - ★モメンタム: {d['momentum']}
-            - ★バックテスト: {d['backtest']}
-            - 時価総額:{d['cap_disp']}, RSI:{d['rsi_str']}, 出来高倍率(前日):{d['vol_str']}
-            - 現在値:{d['price']:,.0f}円, リアルタイム出来高:{d['real_vol']:,.0f}株
-            - 推奨買値(残):{d['buy_display']}
-            - 利確目標:{d['profit_display']}
-            - 指標:{d['fund_disp']}
-            --------------------------------
-            """
-        return txt if txt else "なし"
-
+def batch_analyze_with_ai(data_list):
+    """ 
+    全銘柄のコメントを一括生成する (高速化) 
+    JSON形式などで返させ、後でパースする
+    """
+    if not model: return {}
+    
+    prompt_text = ""
+    for d in data_list:
+        prompt_text += f"""
+        ID:{d['code']} | {d['name']} | 現在:{d['price']} | 戦略:{d['strategy']} | RSI:{d['rsi']:.1f}
+        """
+    
     prompt = f"""
-    あなたは「アイ」という名前のプロトレーダー（30代女性）です。
+    あなたは「アイ」という名前のプロトレーダー（30代女性、冷静・理知的）。
+    以下の銘柄リストについて、それぞれの「所感コメント（40文字以内、丁寧語）」を作成してください。
     
-    【口調】
-    - 常に冷静で、理知的な「です・ます」調。
+    【出力形式】
+    コード | コメント
+    コード | コメント
+    ...
     
-    【重要：出力形式】
-    - **HTMLの `<tr>` タグのみ** を出力してください。
-    - `<table>` タグは不要です。
+    【データ】
+    {prompt_text}
     
-    【2段表示のルール】
-    以下の項目は、必ず間に `<br>` を入れて2段にしてください：
-    - 出来高(前日比): `1.20倍<br>(前日比)`
-    - 推奨買値(残): `2,000<br>(-50)` ※データは `2,000 (-50)` と来ます。カッコの前で改行してください。
-    - 利確(半/全): `半:2,100...<br>全:2,200...` ※データは `半:... 全:...` と来ます。スペースで改行してください。
-    - バックテスト: `6勝2敗<br>(4%抜)` ※データは `6勝2敗 (4%抜)` と来ます。カッコの前で改行してください。
-    - PER/PBR: `10.0倍<br>1.0倍` ※データは `10.0倍 / 1.0倍` と来ます。スラッシュで改行してください。
-
-    【出力フォーマット】
-    ```html
-    <tr>
-      <td style="text-align:center;">1</td>
-      <td style="text-align:center;">7203</td>
-      <td style="text-align:left; font-weight:bold;">トヨタ自動車</td>
-      <td style="text-align:right;">30.0兆円</td>
-      <td style="text-align:center;">95</td>
-      <td style="text-align:center;">🔥順張り</td>
-      <td style="text-align:center;">🟢65.0</td>
-      <td style="text-align:right;">1.20倍</td>
-      <td style="text-align:right; font-weight:bold;">2,000</td>
-      <td style="text-align:right;">1,950<br>(-50)</td>
-      <td style="text-align:left;">半:2,100 (+5.0%)<br>全:2,200 (+10.0%)</td>
-      <td style="text-align:center; font-weight:bold; color:#0056b3;">6勝2敗<br>(4%抜)</td>
-      <td style="text-align:center;">10.0倍<br>1.0倍</td>
-      <td style="text-align:left;">アイの所感コメント（80文字程度）</td>
-    </tr>
-    ```
-
-    【データ1: 注目ゾーン】
-    {list_to_text(high_score_list)}
-
-    【データ2: 警戒ゾーン】
-    {list_to_text(low_score_list)}
-    
-    **【アイの独り言（投資家への警鐘）】**
-    - `<!--SPLIT-->` の後に `<h3>【アイの独り言】</h3>` を記述。
+    【最後に】
+    最後に「END_OF_LIST」と書き、その後に続けて「アイの独り言（常体・独白調）」を3行程度で書いてください。
+    独り言は、余計な記号(```など)をつけず、純粋なテキストで書いてください。
     """
     
     try:
-        response = model.generate_content(prompt)
-        return response.text
-    except Exception as e:
-        return f"AI Error: {str(e)}"
+        res = model.generate_content(prompt)
+        text = res.text
+        
+        comments = {}
+        monologue = ""
+        
+        # パース処理
+        parts = text.split("END_OF_LIST")
+        lines = parts[0].strip().split("\n")
+        
+        for line in lines:
+            if "|" in line:
+                code, com = line.split("|", 1)
+                comments[code.strip()] = com.strip()
+        
+        if len(parts) > 1:
+            monologue = parts[1].strip().replace("```", "")
+            
+        return comments, monologue
+    except:
+        return {}, "AI接続エラー"
 
 # --- メイン処理 ---
+
 if st.button("🚀 分析開始 (アイに聞く)"):
     if not api_key:
         st.warning("APIキーを入力してください。")
     elif not tickers_input.strip():
         st.warning("銘柄コードを入力してください。")
     else:
-        st.session_state.analyzed_data = [] 
+        # 1. データ取得
+        raw_tickers = list(set([t.strip() for t in tickers_input.replace("\n", ",").split(",") if t.strip()]))
         
-        normalized_input = tickers_input.replace("\n", ",").replace("、", ",").replace(" ", "")
-        raw_tickers = list(set([t for t in normalized_input.split(",") if t]))
+        data_list = []
+        bar = st.progress(0)
         
-        if len(raw_tickers) > 40:
-            st.error(f"⛔ 銘柄数が多すぎます。40件以下にしてください。")
-        else:
-            data_list = []
-            progress_bar = st.progress(0)
-            status_text = st.empty()
+        for i, t in enumerate(raw_tickers):
+            d = get_stock_data(t)
+            if d: data_list.append(d)
+            bar.progress((i+1)/len(raw_tickers))
+            time.sleep(0.5)
             
-            for i, t in enumerate(raw_tickers):
-                status_text.text(f"Processing ({i+1}/{len(raw_tickers)}): {t} ...")
-                data = get_technical_summary(t)
-                if data:
-                    data_list.append(data)
-                progress_bar.progress((i + 1) / len(raw_tickers))
-                time.sleep(1.0) 
+        # 2. AI一括生成
+        with st.spinner("🤖 アイが全銘柄を診断中..."):
+            comments_map, monologue = batch_analyze_with_ai(data_list)
             
+            # データにコメントを結合
+            for d in data_list:
+                d["comment"] = comments_map.get(d["code"], "コメント生成失敗")
+            
+            # セッションに保存
             st.session_state.analyzed_data = data_list
+            st.session_state.ai_monologue = monologue
 
-# --- データの表示・並べ替え ---
+# --- 表示処理 (並べ替えはここで行う) ---
 if st.session_state.analyzed_data:
-    data_list = st.session_state.analyzed_data
+    data = st.session_state.analyzed_data
     
-    if sort_option == "AIスコア順 (おすすめ)":
-        data_list.sort(key=lambda x: x['score'], reverse=True)
-    elif sort_option == "モメンタム順 (上昇日数)":
-        data_list.sort(key=lambda x: x['up_days'], reverse=True)
-    elif sort_option == "バックテスト成績順 (勝率重視)":
-        def get_backtest_score(s):
-            m = re.search(r'(\d+)勝(\d+)敗', s)
-            if m:
-                wins = int(m.group(1))
-                losses = int(m.group(2))
-                total = wins + losses
-                rate = wins / total if total > 0 else 0
-                return (rate, wins) 
-            return (-1, -1)
-        data_list.sort(key=lambda x: get_backtest_score(x['backtest']), reverse=True)
-    elif sort_option == "RSI順":
-        data_list.sort(key=lambda x: x['rsi_raw'])
-    elif sort_option == "時価総額順":
-        data_list.sort(key=lambda x: x['cap'], reverse=True)
-
-    high_score_list = [d for d in data_list if d['score'] >= 60 and d['strategy'] != "👀様子見"]
-    low_score_list = [d for d in data_list if d not in high_score_list]
-
-    for idx, d in enumerate(high_score_list): d['rank'] = idx + 1
-    for idx, d in enumerate(low_score_list): d['rank'] = idx + 1
-
-    with st.spinner("🤖 アイが分析レポートを作成中... (並べ替え反映)"):
-        ai_output = generate_ranking_table(high_score_list, low_score_list)
+    # 並べ替えロジック
+    if "スコア" in sort_option:
+        data.sort(key=lambda x: x['score'], reverse=True)
+    elif "時価総額" in sort_option:
+        data.sort(key=lambda x: x['cap_val'], reverse=True)
+    elif "RSI順 (低い" in sort_option:
+        data.sort(key=lambda x: x['rsi'])
+    elif "RSI順 (高い" in sort_option:
+        data.sort(key=lambda x: x['rsi'], reverse=True)
+    else:
+        data.sort(key=lambda x: x['code'])
         
-        monologue = ""
-        table_rows = ai_output
-        if "<!--SPLIT-->" in ai_output:
-            parts = ai_output.split("<!--SPLIT-->")
-            table_rows = parts[0].replace("```html", "").replace("```", "").strip()
-            monologue = parts[1].strip()
+    # HTML生成
+    html_rows = ""
+    for i, d in enumerate(data):
+        # 差分表示
+        diff = d['price'] - d['buy']
+        diff_txt = f"({diff:+,.0f})" if diff != 0 else "(0)"
+        
+        # 利確ターゲット
+        if d['p_half'] > 0:
+            target_txt = f"半:{d['p_half']:,}<br>全:{d['p_full']:,}"
         else:
-            table_rows = ai_output.replace("```html", "").replace("```", "").strip()
+            target_txt = "-"
 
-        final_html = f"""
-        <table class="ai-table">
-          <thead>
-            <tr style="background-color: #dcdcdc; color: #000000; border: 1px solid #bbbbbb;">
-              <th style="width: 30px;">順位</th>
-              <th style="width: 45px;">コード</th>
-              <th style="width: 150px; text-align:left;">企業名</th>
-              <th style="width: 90px; text-align:right;">時価総額</th>
-              <th style="width: 40px;">スコア</th>
-              <th style="width: 60px;">戦略</th>
-              <th style="width: 55px;">RSI</th>
-              <th style="width: 55px; text-align:right;">出来高<br>(前日比)</th>
-              <th style="width: 65px; text-align:right;">現在値</th>
-              <th style="width: 85px; text-align:right;">推奨買値<br>(残)</th>
-              <th style="width: 125px; text-align:left;">利確<br>(半/全)</th>
-              <th style="width: 70px;">バック<br>テスト</th>
-              <th style="width: 60px;">PER<br>PBR</th>
-              <th style="width: auto; text-align:left;">アイの所感</th>
-            </tr>
-          </thead>
-          <tbody>
-            {table_rows}
-          </tbody>
-        </table>
-        <br>
-        {monologue}
+        html_rows += f"""
+        <tr>
+            <td class="td-center">{i+1}</td>
+            <td class="td-center">{d['code']}</td>
+            <td class="td-left td-bold">{d['name']}</td>
+            <td class="td-right">{d['cap_disp']}</td>
+            <td class="td-center">{d['strategy']}</td>
+            <td class="td-center">{d['rsi_disp']}</td>
+            <td class="td-right">{d['vol_ratio']:.1f}倍</td>
+            <td class="td-right td-bold">{d['price']:,.0f}</td>
+            <td class="td-right">{d['buy']:,.0f}<br><span style="font-size:10px;color:#666">{diff_txt}</span></td>
+            <td class="td-left">{target_txt}</td>
+            <td class="td-center">{d['per']}<br>{d['pbr']}</td>
+            <td class="td-left">{d['comment']}</td>
+        </tr>
         """
+
+    table_html = f"""
+    <div class="table-container">
+        <table class="ai-table">
+            <thead>
+                <tr>
+                    <th style="width:30px;">順位</th>
+                    <th style="width:50px;">コード</th>
+                    <th class="th-left" style="width:140px;">企業名</th>
+                    <th style="width:80px;">時価総額</th>
+                    <th style="width:60px;">戦略</th>
+                    <th style="width:50px;">RSI</th>
+                    <th style="width:50px;">出来高<br>(前日比)</th>
+                    <th style="width:60px;">現在値</th>
+                    <th style="width:70px;">推奨買値<br>(乖離)</th>
+                    <th style="width:90px;">利確目標</th>
+                    <th style="width:50px;">PER<br>PBR</th>
+                    <th class="th-left" style="min-width:150px;">アイの所感</th>
+                </tr>
+            </thead>
+            <tbody>
+                {html_rows}
+            </tbody>
+        </table>
+    </div>
+    """
     
     st.markdown("### 📊 アイ推奨ポートフォリオ")
-    st.markdown(final_html, unsafe_allow_html=True)
+    st.markdown(table_html, unsafe_allow_html=True)
     
-    with st.expander("詳細データリスト"):
-        st.dataframe(pd.DataFrame(data_list)[['code', 'name', 'price', 'cap_disp', 'score', 'rsi_str', 'vol_str', 'backtest']])
+    # 独り言セクション
+    st.markdown("---")
+    st.markdown(f"**【アイの独り言】**")
+    st.markdown(st.session_state.ai_monologue)
