@@ -94,7 +94,7 @@ with col_title:
         
         /* 3.企業名 (幅大幅減 160->110) */
         th:nth-child(3) {{ text-align: center; }}
-        td:nth-child(3) {{ width: 110px; font-weight: bold; font-size: 13px; text-align: left; }} 
+        td:nth-child(3) {{ width: 130px; font-weight: bold; font-size: 13px; text-align: left; }} 
         
         /* 4.時価総額 (幅微減 95->80, ヘッダー中央) */
         th:nth-child(4) {{ text-align: center; }}
@@ -107,11 +107,11 @@ with col_title:
         th:nth-child(6), td:nth-child(6) {{ width: 70px; font-size: 12px; text-align: center; }} 
         
         /* 7.RSI */
-        th:nth-child(7), td:nth-child(7) {{ width: 85px; text-align: center; }} 
+        th:nth-child(7), td:nth-child(7) {{ width: 70px; text-align: center; }} 
         
         /* 8.出来高 (ヘッダー中央) */
         th:nth-child(8) {{ text-align: center; }}
-        td:nth-child(8) {{ width: 75px; font-size: 12px; text-align: right; }} 
+        td:nth-child(8) {{ width: 70px; font-size: 12px; text-align: right; }} 
         
         /* 9.現在値 */
         th:nth-child(9), td:nth-child(9) {{ width: 80px; text-align: right; font-weight: bold; }} 
@@ -121,7 +121,7 @@ with col_title:
         
         /* 11.利確 (幅増 110->150, ヘッダー中央, データ左) */
         th:nth-child(11) {{ text-align: center; }}
-        td:nth-child(11) {{ width: 120px; font-size: 11px; text-align: left; }} 
+        td:nth-child(11) {{ width: 90px; font-size: 11px; text-align: left; }} 
         
         /* 12.バックテスト (ヘッダー中央, データ中央) */
         th:nth-child(12), td:nth-child(12) {{ 
@@ -634,4 +634,5 @@ if st.session_state.analyzed_data:
     
     with st.expander("詳細データリスト"):
         st.dataframe(pd.DataFrame(data_list)[['code', 'name', 'price', 'cap_disp', 'score', 'rsi_str', 'vol_str', 'backtest']])
+
 
