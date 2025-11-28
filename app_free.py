@@ -46,16 +46,9 @@ with col_title:
         /* 4列目: 時価総額 */
         th:nth-child(4), td:nth-child(4) { width: 60px; font-size: 11px; text-align: right; }
 
-        /* 5列目: スコア */
+        /* 5-8列目: スコア等 */
         th:nth-child(5), td:nth-child(5) { width: 40px; text-align: center; }
-
-        /* 6列目: 戦略 */
-        th:nth-child(6), td:nth-child(6) { 
-            font-size: 12px; 
-            min-width: 70px; 
-        }
-
-        /* 7-8列目: RSI, 出来高 */
+        th:nth-child(6), td:nth-child(6) { font-size: 12px; }
         th:nth-child(7), td:nth-child(7) { min-width: 45px; }
         th:nth-child(8), td:nth-child(8) { font-size: 12px; }
 
@@ -120,8 +113,8 @@ if api_key:
 
 def get_stock_info_from_kabutan(code):
     """
-    株探から情報を取得 (構造指定・確実版)
-    PER/PBRはテーブル構造を利用して確実に取得
+    株探から情報を取得 (ハイブリッド版)
+    時価総額などはテキスト検索、指標(PER/PBR)はテーブル構造解析で確実に取得
     """
     url = f"https://kabutan.jp/stock/?code={code}"
     headers = {"User-Agent": "Mozilla/5.0"}
@@ -130,8 +123,9 @@ def get_stock_info_from_kabutan(code):
     try:
         res = requests.get(url, headers=headers, timeout=5)
         res.encoding = res.apparent_encoding
-        # HTMLそのままで処理する部分と、テキスト化する部分を使い分ける
         html = res.text.replace("\n", "").replace("\r", "")
+        
+        # テキスト検索用のクリーンデータ
         text_content = re.sub(r'<[^>]+>', ' ', html)
         text_content = re.sub(r'\s+', ' ', text_content)
         
@@ -141,17 +135,17 @@ def get_stock_info_from_kabutan(code):
             raw_name = match_name.group(1).strip()
             data["name"] = re.sub(r'[（\(].*?[）\)]', '', raw_name)
 
-        # 2. 現在値
+        # 2. 現在値 (テキスト解析)
         match_price = re.search(r'現在値\s*([0-9,.]+)', text_content)
         if match_price:
             data["price"] = float(match_price.group(1).replace(",", ""))
 
-        # 3. 出来高
+        # 3. 出来高 (テキスト解析)
         match_vol = re.search(r'出来高\s*([0-9,]+)\s*株', text_content)
         if match_vol:
             data["volume"] = float(match_vol.group(1).replace(",", ""))
 
-        # 4. 時価総額
+        # 4. 時価総額 (兆対応・テキスト解析)
         match_cap = re.search(r'時価総額\s*([0-9,]+(?:兆[0-9,]+)?)\s*億円', text_content)
         if match_cap:
             raw_cap = match_cap.group(1).replace(",", "")
@@ -164,21 +158,21 @@ def get_stock_info_from_kabutan(code):
                 try: data["cap"] = int(raw_cap)
                 except: data["cap"] = 0
 
-        # 5. PER / PBR (HTML構造依存で確実に取得)
-        # <div id="stockinfo_i3"> 内のテーブルを探す
-        # 1つ目のtdがPER、2つ目のtdがPBRという構造を利用
+        # 5. PER / PBR (★修正: テーブル構造解析に戻す)
+        # テキスト検索だと順番が混ざるため、HTMLのテーブルセル(td)の並び順を信頼する
         i3_match = re.search(r'<div id="stockinfo_i3">.*?<tbody>(.*?)</tbody>', html)
         if i3_match:
             tbody = i3_match.group(1)
-            tds = re.findall(r'<td.*?>(.*?)</td>', tbody)
+            # <td>...</td> を順番に取得
+            # 1つ目がPER、2つ目がPBR
+            tds = re.findall(r'<td[^>]*>(.*?)</td>', tbody)
             
-            def clean_val(s):
-                # タグを除去して空白削除
-                return re.sub(r'<[^>]+>', '', s).strip()
+            def clean_tag_val(val):
+                return re.sub(r'<[^>]+>', '', val).strip()
 
             if len(tds) >= 2:
-                data["per"] = clean_val(tds[0])
-                data["pbr"] = clean_val(tds[1])
+                data["per"] = clean_tag_val(tds[0])
+                data["pbr"] = clean_tag_val(tds[1])
 
         return data
     except Exception:
