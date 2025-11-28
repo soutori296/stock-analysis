@@ -6,37 +6,43 @@ import time
 import requests
 import io
 import re
+import os
 
 # --- アイコン設定 ---
-ICON_URL = "https://raw.githubusercontent.com/soutori296/stock-analysis/main/aisan.png"
+ICON_FILE = "aisan.png"
 
 # ページ設定
 st.set_page_config(page_title="教えて！AIさん 2", page_icon="🤖", layout="wide")
 
 # --- 時間管理ロジック (JST) ---
 def get_market_status():
+    # UTCからJSTへ変換 (+9時間)
     jst_now = datetime.datetime.utcnow() + datetime.timedelta(hours=9)
     current_time = jst_now.time()
+    
     start_time = datetime.time(9, 0)
     end_time = datetime.time(15, 50) # 15:30終了+20分遅延
     
+    # 土日は休日扱い
     if jst_now.weekday() >= 5:
         return "休日(確定値)", jst_now
     
+    # 平日の9:00～15:50はザラ場
     if start_time <= current_time <= end_time:
         return "ザラ場(進行中)", jst_now
     else:
         return "引け後(確定値)", jst_now
 
 status_label, jst_now = get_market_status()
+# 進行中は赤、確定後は青
 status_color = "#d32f2f" if "進行中" in status_label else "#1976d2"
 
 # --- タイトルエリア ---
 col_icon, col_title = st.columns([1.5, 8.5])
 with col_icon:
-    try:
-        st.image(ICON_URL, width=100)
-    except:
+    if os.path.exists(ICON_FILE):
+        st.image(ICON_FILE, width=100)
+    else:
         st.write("🤖")
 
 with col_title:
@@ -49,7 +55,7 @@ with col_title:
             border-radius: 4px; font-size: 14px; font-weight: bold; vertical-align: middle;
         }}
         
-        /* テーブル全体の設定 */
+        /* メイン分析テーブルの設定 */
         table {{ 
             width: 100%; 
             border-collapse: collapse; 
@@ -57,20 +63,29 @@ with col_title:
             font-family: "Meiryo", sans-serif;
         }}
         
-        /* ヘッダー設定 */
+        /* ヘッダー設定 (黒文字固定) */
         th {{ 
-            background-color: #e0e0e0 !important; color: #000000 !important;
-            font-weight: bold; text-align: center; border: 1px solid #ccc;
-            padding: 8px 4px !important; font-size: 13px;
+            background-color: #e0e0e0 !important; 
+            color: #000000 !important;
+            font-weight: bold; 
+            text-align: center; 
+            border: 1px solid #ccc;
+            padding: 8px 4px !important; 
+            font-size: 13px;
         }}
         
         /* データセル設定 */
         td {{ 
-            font-size: 13px; vertical-align: middle !important; padding: 8px 5px !important;
-            line-height: 1.5 !important; word-wrap: break-word; border: 1px solid #e0e0e0; color: inherit;
+            font-size: 13px; 
+            vertical-align: middle !important; 
+            padding: 8px 5px !important; 
+            line-height: 1.5 !important; 
+            word-wrap: break-word; 
+            border: 1px solid #e0e0e0; 
+            color: inherit;
         }}
 
-        /* --- 各列の幅指定 --- */
+        /* --- 列幅の微調整 --- */
         th:nth-child(1), td:nth-child(1) {{ width: 35px; text-align: center; }} /* 順位 */
         th:nth-child(2), td:nth-child(2) {{ width: 45px; text-align: center; }} /* コード */
         th:nth-child(3), td:nth-child(3) {{ width: 160px; font-weight: bold; font-size: 14px; }} /* 企業名 */
@@ -78,7 +93,7 @@ with col_title:
         th:nth-child(5), td:nth-child(5) {{ width: 45px; text-align: center; }} /* スコア */
         th:nth-child(6), td:nth-child(6) {{ width: 70px; font-size: 12px; }} /* 戦略 */
         th:nth-child(7), td:nth-child(7) {{ width: 65px; text-align: center; }} /* RSI */
-        th:nth-child(8), td:nth-child(8) {{ width: 85px; font-size: 12px; text-align: right; }} /* 出来高 */
+        th:nth-child(8), td:nth-child(8) {{ width: 75px; font-size: 12px; text-align: right; }} /* 出来高 */
         th:nth-child(9), td:nth-child(9) {{ width: 80px; text-align: right; font-weight: bold; }} /* 現在値 */
         th:nth-child(10), td:nth-child(10) {{ width: 100px; font-size: 12px; }} /* 推奨買値 */
         th:nth-child(11), td:nth-child(11) {{ width: 110px; font-size: 11px; }} /* 利確 */
@@ -92,18 +107,17 @@ with col_title:
     </p>
     """, unsafe_allow_html=True)
 
-# --- 完全取扱説明書 ---
+# --- 完全取扱説明書 (HTMLテーブル調整済み) ---
 with st.expander("📘 完全取扱説明書 (データソース・ロジック・スコア計算) を読む"):
-    # f""" とすることで変数を埋め込めるようにし、unsafe_allow_html=True で表を描画
     st.markdown(f"""
     ### 1. データ取得と時間の仕組み
     <table style="width: 100%; text-align: left; border-collapse: collapse; font-size: 14px;">
       <thead>
-        <tr style="background-color: #f0f2f6;">
-          <th style="padding: 8px; border: 1px solid #ddd; width: 15%;">項目</th>
-          <th style="padding: 8px; border: 1px solid #ddd; width: 10%;">取得元</th>
-          <th style="padding: 8px; border: 1px solid #ddd; width: 20%;">状態</th>
-          <th style="padding: 8px; border: 1px solid #ddd; width: 55%;">解説</th>
+        <tr style="background-color: #f0f2f6; color: #000000;">
+          <th style="padding: 8px; border: 1px solid #ddd; width: 15%; color: black;">項目</th>
+          <th style="padding: 8px; border: 1px solid #ddd; width: 10%; color: black;">取得元</th>
+          <th style="padding: 8px; border: 1px solid #ddd; width: 20%; color: black;">状態</th>
+          <th style="padding: 8px; border: 1px solid #ddd; width: 55%; color: black;">解説</th>
         </tr>
       </thead>
       <tbody>
@@ -122,7 +136,7 @@ with st.expander("📘 完全取扱説明書 (データソース・ロジック�
       </tbody>
     </table>
 
-    ### 2. 分析ロジック詳細
+    ### 2. 分析ロジックの詳細
     #### ① 戦略判定 (Trend vs Rebound)
     - **🔥 順張り**: 移動平均線が「5日 ＞ 25日 ＞ 75日」の上昇トレンドにある銘柄。押し目を狙います。
     - **🌊 逆張り**: 「RSIが30以下」または「25MA乖離率が-10%以下」の売られすぎ銘柄。リバウンドを狙います。
@@ -149,7 +163,7 @@ with st.expander("📘 完全取扱説明書 (データソース・ロジック�
     - **利確ターゲット**:
         - **半益**: 25MA + 10% (順張り) / 5MA回復 (逆張り)
         - **全益**: 25MA + 20% (順張り) / 25MA回帰 (逆張り)
-    """, unsafe_allow_html=True) # ← これが重要です！
+    """, unsafe_allow_html=True)
 
 # --- サイドバー設定 ---
 st.sidebar.header("設定")
@@ -331,7 +345,6 @@ def get_technical_summary(ticker):
         ma75 = last_day['SMA75']
         rsi = last_day['RSI']
         
-        # 出来高倍率 (前日確定値ベース)
         vol_sma5_prev = last_day['Vol_SMA5']
         vol_ratio = 0
         vol_str = "-"
@@ -566,4 +579,3 @@ if st.button("🚀 分析開始 (アイに聞く)"):
                     st.dataframe(pd.DataFrame(data_list)[['code', 'name', 'price', 'cap_disp', 'score', 'rsi_str', 'vol_str', 'backtest']])
             else:
                 st.error("有効なデータが取得できませんでした。")
-
