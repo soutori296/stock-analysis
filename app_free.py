@@ -107,31 +107,32 @@ with col_title:
     </p>
     """, unsafe_allow_html=True)
 
-# --- 完全取扱説明書 (HTMLテーブル調整済み) ---
+# --- 完全取扱説明書 (左寄せ統一版) ---
 with st.expander("📘 完全取扱説明書 (データソース・ロジック・スコア計算) を読む"):
     st.markdown(f"""
     ### 1. データ取得と時間の仕組み
-    <table style="width: 100%; text-align: left; border-collapse: collapse; font-size: 14px;">
+    <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
       <thead>
         <tr style="background-color: #f0f2f6; color: #000000;">
-          <th style="padding: 8px; border: 1px solid #ddd; width: 15%; color: black;">項目</th>
-          <th style="padding: 8px; border: 1px solid #ddd; width: 10%; color: black;">取得元</th>
-          <th style="padding: 8px; border: 1px solid #ddd; width: 20%; color: black;">状態</th>
-          <th style="padding: 8px; border: 1px solid #ddd; width: 55%; color: black;">解説</th>
+          <!-- text-align: left を全てのthタグに指定 -->
+          <th style="padding: 10px; border: 1px solid #ddd; width: 15%; text-align: left;">項目</th>
+          <th style="padding: 10px; border: 1px solid #ddd; width: 10%; text-align: left;">取得元</th>
+          <th style="padding: 10px; border: 1px solid #ddd; width: 20%; text-align: left;">状態</th>
+          <th style="padding: 10px; border: 1px solid #ddd; width: 55%; text-align: left;">解説</th>
         </tr>
       </thead>
       <tbody>
         <tr>
-          <td style="padding: 8px; border: 1px solid #ddd;"><b>現在値・出来高</b></td>
-          <td style="padding: 8px; border: 1px solid #ddd;"><b>株探</b></td>
-          <td style="padding: 8px; border: 1px solid #ddd;"><b>{status_label}</b></td>
-          <td style="padding: 8px; border: 1px solid #ddd;">15:50までは「途中経過」。15:50以降は「確定値」となります。(東証15:30終了+20分遅延)</td>
+          <td style="padding: 8px; border: 1px solid #ddd; text-align: left;"><b>現在値・出来高</b></td>
+          <td style="padding: 8px; border: 1px solid #ddd; text-align: left;"><b>株探</b></td>
+          <td style="padding: 8px; border: 1px solid #ddd; text-align: left;"><b>{status_label}</b></td>
+          <td style="padding: 8px; border: 1px solid #ddd; text-align: left;">15:50までは「途中経過」。15:50以降は「確定値」となります。(東証15:30終了+20分遅延)</td>
         </tr>
         <tr>
-          <td style="padding: 8px; border: 1px solid #ddd;"><b>テクニカル</b></td>
-          <td style="padding: 8px; border: 1px solid #ddd;"><b>Stooq</b></td>
-          <td style="padding: 8px; border: 1px solid #ddd;"><b>前日確定</b></td>
-          <td style="padding: 8px; border: 1px solid #ddd;">トレンド判定やバックテストは、ダマシを防ぐため「前日終値」基準で行います。</td>
+          <td style="padding: 8px; border: 1px solid #ddd; text-align: left;"><b>テクニカル</b></td>
+          <td style="padding: 8px; border: 1px solid #ddd; text-align: left;"><b>Stooq</b></td>
+          <td style="padding: 8px; border: 1px solid #ddd; text-align: left;"><b>前日確定</b></td>
+          <td style="padding: 8px; border: 1px solid #ddd; text-align: left;">トレンド判定やバックテストは、ダマシを防ぐため「前日終値」基準で行います。</td>
         </tr>
       </tbody>
     </table>
@@ -579,3 +580,4 @@ if st.button("🚀 分析開始 (アイに聞く)"):
                     st.dataframe(pd.DataFrame(data_list)[['code', 'name', 'price', 'cap_disp', 'score', 'rsi_str', 'vol_str', 'backtest']])
             else:
                 st.error("有効なデータが取得できませんでした。")
+
