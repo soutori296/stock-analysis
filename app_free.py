@@ -29,35 +29,24 @@ def get_market_status():
 status_label = get_market_status()
 status_color = "#d32f2f" if "進行中" in status_label else "#1976d2"
 
-# --- CSSスタイル ---
+# --- CSSスタイル (インデント対策済み) ---
 st.markdown(f"""
 <style>
-    body, p, div, td, th, span {{ font-family: "Meiryo", sans-serif; }}
+    body, p, div, td, th, span, h1, h2, h3 {{ font-family: "Meiryo", sans-serif !important; }}
     .big-font {{ font-size:18px !important; font-weight: bold; color: #4A4A4A; }}
-    .status-badge {{
-        background-color: {status_color}; color: white; padding: 2px 8px;
-        border-radius: 4px; font-size: 12px; font-weight: bold; vertical-align: middle;
-    }}
-    .center-text {{ text-align: center; }}
-    .center-table {{ margin-left: auto; margin-right: auto; }}
-    .table-container {{
-        width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; margin-bottom: 20px;
-    }}
-    .ai-table {{
-        width: 100%; border-collapse: collapse; min-width: 1000px; font-size: 13px; background-color: #fff;
-    }}
-    .ai-table th {{
-        background-color: #f0f0f0; color: #333; border: 1px solid #ccc; padding: 8px 4px;
-        text-align: center; vertical-align: middle; font-weight: bold; white-space: nowrap;
-    }}
+    .status-badge {{ background-color: {status_color}; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; vertical-align: middle; }}
+    .table-container {{ width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; margin-bottom: 20px; }}
+    .ai-table {{ width: 100%; border-collapse: collapse; min-width: 1000px; font-size: 13px; background-color: #fff; border: 1px solid #ddd; }}
+    .ai-table th {{ background-color: #f5f5f5; color: #333; border: 1px solid #bbb; padding: 8px 4px; text-align: center; vertical-align: middle; font-weight: bold; white-space: nowrap; }}
+    .ai-table td {{ border: 1px solid #ccc; padding: 6px 5px; vertical-align: middle; line-height: 1.4; }}
+    /* 左揃えヘッダー */
     .th-left {{ text-align: left !important; }}
-    .ai-table td {{
-        border: 1px solid #ccc; padding: 6px 5px; vertical-align: middle; line-height: 1.4;
-    }}
+    /* セル配置 */
     .td-center {{ text-align: center; }}
     .td-right {{ text-align: right; }}
     .td-left {{ text-align: left; }}
     .td-bold {{ font-weight: bold; }}
+    .td-blue {{ color: #0056b3; font-weight: bold; }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -71,40 +60,12 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # --- 説明書 ---
-with st.expander("📘 取扱説明書 (データソース・判定基準)"):
+with st.expander("📘 取扱説明書"):
     st.markdown("""
-    <div class="center-text">
-    
-    ### 1. データ取得について
-    <table class="center-table" style="width:80%; border:1px solid #ccc; border-collapse:collapse;">
-      <tr style="background-color:#eee;">
-        <th style="border:1px solid #ccc; padding:5px;">項目</th>
-        <th style="border:1px solid #ccc; padding:5px;">取得元</th>
-        <th style="border:1px solid #ccc; padding:5px;">状態</th>
-      </tr>
-      <tr>
-        <td style="border:1px solid #ccc; padding:5px;">現在値・出来高</td>
-        <td style="border:1px solid #ccc; padding:5px;"><b>株情報サイト</b></td>
-        <td style="border:1px solid #ccc; padding:5px;">リアルタイム(遅延あり)</td>
-      </tr>
-      <tr>
-        <td style="border:1px solid #ccc; padding:5px;">テクニカル指標</td>
-        <td style="border:1px solid #ccc; padding:5px;"><b>Stooq</b></td>
-        <td style="border:1px solid #ccc; padding:5px;">前日終値(確定値)</td>
-      </tr>
-    </table>
-    <br>
-    <small>※RSIや移動平均線は「前日の確定足」で計算しています。<br>
-    ザラ場の半端な値で判定がブレるのを防ぐためです。</small>
-
-    ### 2. RSIの色分け基準
-    🔵 <b>30以下</b>：売られすぎ (逆張りチャンス)<br>
-    🟢 <b>55～65</b>：理想的な上昇トレンド (押し目買い)<br>
-    🔴 <b>70以上</b>：買われすぎ (過熱感あり)<br>
-    ⚪ <b>その他</b>：中立・様子見
-
-    </div>
-    """, unsafe_allow_html=True)
+    - **現在値・出来高**: 株情報サイト (リアルタイム/遅延)
+    - **テクニカル**: Stooq (前日確定値基準)
+    - **RSI**: 🔵30以下(売られすぎ) / 🟢55-65(上昇トレンド) / 🔴70以上(過熱)
+    """)
 
 # --- サイドバー ---
 if "GEMINI_API_KEY" in st.secrets:
@@ -293,6 +254,7 @@ def batch_analyze_with_ai(data_list):
     
     【最後に】
     リストの最後に「END_OF_LIST」と書き、その後に続けて「アイの独り言（常体・独白調）」を3行程度で書いてください。
+    ※「アイの独り言」などの見出しは不要です。いきなり本文から始めてください。
     独り言の内容：
     ご自身の徹底した調査とリスク許容度に基づいて行ってください。特に、安易な高値掴みや、損失を確定できないまま持ち続けるといった行動は、長期的な資産形成を大きく阻害します。冷静な判断と規律あるトレードを心がけ、感情に流されない投資を実践していくことが、市場で生き残るために最も重要だと考えます。
     
@@ -355,48 +317,11 @@ if st.session_state.analyzed_data:
         diff_txt = f"({diff:+,.0f})" if diff != 0 else "(0)"
         target_txt = f"半:{d['p_half']:,}<br>全:{d['p_full']:,}" if d['p_half'] > 0 else "-"
 
-        html_rows += f"""
-        <tr>
-            <td class="td-center">{i+1}</td>
-            <td class="td-center">{d['code']}</td>
-            <td class="td-left td-bold">{d['name']}</td>
-            <td class="td-right">{d['cap_disp']}</td>
-            <td class="td-center">{d['score']}</td>
-            <td class="td-center">{d['strategy']}</td>
-            <td class="td-center">{d['rsi_disp']}</td>
-            <td class="td-right">{d['vol_ratio']:.1f}倍</td>
-            <td class="td-right td-bold">{d['price']:,.0f}</td>
-            <td class="td-right">{d['buy']:,.0f}<br><span style="font-size:10px;color:#666">{diff_txt}</span></td>
-            <td class="td-left">{target_txt}</td>
-            <td class="td-center">{d['per']}<br>{d['pbr']}</td>
-            <td class="td-left">{d['comment']}</td>
-        </tr>"""
+        # HTMLを1行で作る（インデント混入防止）
+        html_rows += f'<tr><td class="td-center">{i+1}</td><td class="td-center">{d["code"]}</td><td class="td-left td-bold">{d["name"]}</td><td class="td-right">{d["cap_disp"]}</td><td class="td-center">{d["score"]}</td><td class="td-center">{d["strategy"]}</td><td class="td-center">{d["rsi_disp"]}</td><td class="td-right">{d["vol_ratio"]:.1f}倍</td><td class="td-right td-bold">{d["price"]:,.0f}</td><td class="td-right">{d["buy"]:,.0f}<br><span style="font-size:10px;color:#666">{diff_txt}</span></td><td class="td-left">{target_txt}</td><td class="td-center">{d["per"]}<br>{d["pbr"]}</td><td class="td-left">{d["comment"]}</td></tr>'
 
-    # --- インデントなしでHTMLを作成 ---
-    table_html = f"""<div class="table-container">
-<table class="ai-table">
-<thead>
-<tr>
-<th style="width:30px;">順位</th>
-<th style="width:50px;">コード</th>
-<th class="th-left" style="width:140px;">企業名</th>
-<th style="width:80px;">時価総額</th>
-<th style="width:40px;">スコア</th>
-<th style="width:60px;">戦略</th>
-<th style="width:50px;">RSI</th>
-<th style="width:50px;">出来高<br>(前日比)</th>
-<th style="width:60px;">現在値</th>
-<th style="width:70px;">推奨買値<br>(乖離)</th>
-<th style="width:90px;">利確目標</th>
-<th style="width:50px;">PER<br>PBR</th>
-<th class="th-left" style="min-width:150px;">アイの所感</th>
-</tr>
-</thead>
-<tbody>
-{html_rows}
-</tbody>
-</table>
-</div>"""
+    # テーブル全体もインデントなしで記述
+    table_html = f'<div class="table-container"><table class="ai-table"><thead><tr><th style="width:30px;">順位</th><th style="width:50px;">コード</th><th class="th-left" style="width:140px;">企業名</th><th style="width:80px;">時価総額</th><th style="width:40px;">スコア</th><th style="width:60px;">戦略</th><th style="width:50px;">RSI</th><th style="width:50px;">出来高<br>(前日比)</th><th style="width:60px;">現在値</th><th style="width:70px;">推奨買値<br>(乖離)</th><th style="width:90px;">利確目標</th><th style="width:50px;">PER<br>PBR</th><th class="th-left" style="min-width:150px;">アイの所感</th></tr></thead><tbody>{html_rows}</tbody></table></div>'
     
     st.markdown("### 📊 アイ推奨ポートフォリオ")
     st.markdown(table_html, unsafe_allow_html=True)
