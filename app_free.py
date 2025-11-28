@@ -124,7 +124,7 @@ with st.expander("📘 完全取扱説明書 (データソース・ロジック�
       <tbody>
         <tr>
           <td style="padding: 8px; border: 1px solid #ddd; text-align: left;"><b>現在値・出来高</b></td>
-          <td style="padding: 8px; border: 1px solid #ddd; text-align: left;"><b>株探</b></td>
+          <td style="padding: 8px; border: 1px solid #ddd; text-align: left;"><b>株情報サイト</b></td>
           <td style="padding: 8px; border: 1px solid #ddd; text-align: left;"><b>{status_label}</b></td>
           <td style="padding: 8px; border: 1px solid #ddd; text-align: left;">15:50までは「途中経過」。15:50以降は「確定値」となります。(東証15:30終了+20分遅延)</td>
         </tr>
@@ -580,4 +580,5 @@ if st.button("🚀 分析開始 (アイに聞く)"):
                     st.dataframe(pd.DataFrame(data_list)[['code', 'name', 'price', 'cap_disp', 'score', 'rsi_str', 'vol_str', 'backtest']])
             else:
                 st.error("有効なデータが取得できませんでした。")
+
 
