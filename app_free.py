@@ -12,7 +12,7 @@ import os
 ICON_FILE = "aisan.png"
 
 # ページ設定
-st.set_page_config(page_title="教えて！AIさん 2", page_icon="🤖", layout="wide")
+st.set_page_config(page_title="教えて！AIさん 2", page_icon="aisan.png", layout="wide")
 
 # --- セッションステート初期化 ---
 if 'analyzed_data' not in st.session_state:
@@ -54,11 +54,11 @@ with col_title:
             border-radius: 4px; font-size: 14px; font-weight: bold; vertical-align: middle;
         }}
         
-        /* テーブル全体 */
+        /* テーブル全体の設定: 強制的に列幅を守らせる */
         table {{ 
             width: 100%; 
             border-collapse: collapse; 
-            table-layout: fixed; /* 列幅固定を強制 */
+            table-layout: fixed !important; /* これが最重要 */
             font-family: "Meiryo", sans-serif;
         }}
         
@@ -69,65 +69,69 @@ with col_title:
             font-weight: bold; 
             text-align: center !important; 
             border: 1px solid #bbbbbb;
-            padding: 4px 1px !important; /* 左右の余白を極限まで削る */
+            padding: 4px 1px !important; 
             font-size: 11px !important; 
             vertical-align: middle !important;
-            line-height: 1.1 !important;
+            line-height: 1.2 !important;
         }}
         
         /* データセル */
         td {{ 
-            font-size: 11px !important; /* 全体の文字を小さくして幅を稼ぐ */
+            font-size: 11px !important; 
             vertical-align: middle !important; 
-            padding: 4px 2px !important; /* 余白を削る */
-            line-height: 1.2 !important;
-            word-wrap: break-word; 
+            padding: 4px 2px !important; 
+            line-height: 1.3 !important;
             border: 1px solid #cccccc;
             color: inherit;
+            
+            /* 長い文字を強制的に折り返す設定 */
+            word-wrap: break-word !important;
+            overflow-wrap: break-word !important;
+            white-space: normal !important;
         }}
 
-        /* --- 列幅の極限調整 --- */
+        /* --- 列幅の再配分 (数値列を狭く、企業名と所感を広く) --- */
         
-        /* 1.順位: 25px */
+        /* 1.順位 */
         th:nth-child(1), td:nth-child(1) {{ width: 25px; text-align: center; }} 
         
-        /* 2.コード: 40px */
+        /* 2.コード */
         th:nth-child(2), td:nth-child(2) {{ width: 40px; text-align: center; }} 
         
-        /* 3.企業名: 110px (所感のために少し譲る) */
+        /* 3.企業名 (150px確保して改行を防ぐ) */
         th:nth-child(3) {{ text-align: center; }}
-        td:nth-child(3) {{ width: 110px; font-weight: bold; font-size: 12px !important; text-align: left; }} 
+        td:nth-child(3) {{ width: 150px; font-weight: bold; font-size: 12px !important; text-align: left; }} 
         
-        /* 4.時価総額: 60px (大幅縮小) */
+        /* 4.時価総額 (60px) */
         th:nth-child(4) {{ text-align: center; }}
         td:nth-child(4) {{ width: 60px; text-align: right; }} 
         
-        /* 5.スコア: 35px */
+        /* 5.スコア */
         th:nth-child(5), td:nth-child(5) {{ width: 35px; text-align: center; }} 
         
-        /* 6.戦略: 55px */
+        /* 6.戦略 */
         th:nth-child(6), td:nth-child(6) {{ width: 55px; text-align: center; }} 
         
-        /* 7.RSI: 50px (大幅縮小) */
+        /* 7.RSI */
         th:nth-child(7), td:nth-child(7) {{ width: 50px; text-align: center; }} 
         
-        /* 8.出来高: 55px (縮小) */
+        /* 8.出来高 (50px) */
         th:nth-child(8) {{ text-align: center; }}
-        td:nth-child(8) {{ width: 55px; text-align: right; }} 
+        td:nth-child(8) {{ width: 50px; text-align: right; }} 
         
-        /* 9.現在値: 60px (縮小) */
+        /* 9.現在値 (60px) */
         th:nth-child(9) {{ text-align: center; }}
         td:nth-child(9) {{ width: 60px; text-align: right; font-weight: bold; }} 
         
-        /* 10.推奨買値: 75px (縮小) */
+        /* 10.推奨買値 (75px) */
         th:nth-child(10) {{ text-align: center; }}
         td:nth-child(10) {{ width: 75px; text-align: right; }} 
         
-        /* 11.利確: 100px (最小限確保) */
+        /* 11.利確 (100px: 2段組み前提) */
         th:nth-child(11) {{ text-align: center; }}
         td:nth-child(11) {{ width: 100px; text-align: left; }} 
         
-        /* 12.バックテスト: 70px */
+        /* 12.バックテスト (70px) */
         th:nth-child(12), td:nth-child(12) {{ 
             width: 70px; 
             color: #0056b3; 
@@ -135,16 +139,15 @@ with col_title:
             text-align: center;
         }} 
         
-        /* 13.PER/PBR: 55px (縮小) */
+        /* 13.PER/PBR (55px) */
         th:nth-child(13), td:nth-child(13) {{ width: 55px; text-align: center; }} 
         
-        /* 14.所感: 残り全て (これで広くなるはず) */
+        /* 14.所感 (残り全て自動) */
         th:nth-child(14) {{ text-align: center; }}
         td:nth-child(14) {{ 
             width: auto; 
-            font-size: 12px !important; 
             text-align: left; 
-            padding-left: 5px !important;
+            font-size: 12px !important;
         }} 
         
     </style>
@@ -551,8 +554,9 @@ def generate_ranking_table(high_score_list, low_score_list):
     |:---:|:---:|:---|---:|:---:|:---:|:---:|---:|---:|---:|:---|:---:|---:|:---|
     | ... | ... | ... | ... | ... | ... | ... | ... | ... | ... | ... | ... | ... | ... |
 
-    ※「バックテスト」列には、データにある `6勝2敗<br>(4%抜)` のような文字列をそのまま入れてください。
-    ※「PER<br>PBR」列には、データにある `15.0倍<br>1.2倍` をそのまま入れてください。
+    ※「利確」列には、データにある `半:2470(+5.0%)<br>全:2695(+14.6%)` のように `<br>` をそのまま使って2段表示にしてください。
+    ※「バックテスト」列には `6勝2敗<br>(4%抜)` と `<br>` を使って書いてください。
+    ※「PER<br>PBR」列には `15.0倍<br>1.2倍` と書いてください。
     ※アイの所感は、80文字程度で記述してください。
 
     【データ1: 注目ゾーン】
