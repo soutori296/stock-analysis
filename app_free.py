@@ -29,11 +29,11 @@ def get_market_status():
 status_label = get_market_status()
 status_color = "#d32f2f" if "進行中" in status_label else "#1976d2"
 
-# --- CSSスタイル (視認性確保・スマホ対応) ---
+# --- CSSスタイル (修正版: divへの干渉を削除) ---
 st.markdown(f"""
 <style>
-    /* 全体をMeiryoフォントに */
-    body, p, div, td, th, span, h1, h2, h3 {{ font-family: "Meiryo", sans-serif !important; }}
+    /* フォント設定 (divへの適用をやめて、特定のクラスのみにする) */
+    .ai-font {{ font-family: "Meiryo", sans-serif !important; }}
     
     .big-font {{ font-size:18px !important; font-weight: bold; color: #4A4A4A; }}
     .status-badge {{ background-color: {status_color}; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; vertical-align: middle; }}
@@ -42,11 +42,12 @@ st.markdown(f"""
     .center-text {{ text-align: center; }}
     .table-container {{ width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; margin-bottom: 20px; }}
     
-    /* === メインテーブル設定 (強制的に白背景・黒文字) === */
+    /* === メインテーブル設定 === */
     .ai-table {{ 
         width: 100%; border-collapse: collapse; min-width: 1100px; 
         background-color: #ffffff !important; 
         color: #000000 !important;
+        font-family: "Meiryo", sans-serif;
     }}
     .ai-table th {{ 
         background-color: #e0e0e0 !important; 
@@ -57,6 +58,7 @@ st.markdown(f"""
         vertical-align: middle; 
         font-weight: bold; 
         white-space: nowrap; 
+        font-size: 12px;
     }}
     .ai-table td {{ 
         background-color: #ffffff !important;
@@ -73,6 +75,7 @@ st.markdown(f"""
         width: 90%; margin: 0 auto; border-collapse: collapse; 
         background-color: #ffffff !important;
         color: #000000 !important;
+        font-family: "Meiryo", sans-serif;
     }}
     .desc-table th {{ 
         background-color: #d0d0d0 !important; 
@@ -85,13 +88,13 @@ st.markdown(f"""
         border: 1px solid #ccc; padding: 8px; text-align: center !important; 
     }}
 
-    /* カラム用クラス */
-    .th-left {{ text-align: left !important; }}
+    /* スタイルクラス */
+    .th-left {{ text-align: left !important; }} 
     .td-center {{ text-align: center; }}
     .td-right {{ text-align: right; }}
     .td-left {{ text-align: left; }}
     .td-bold {{ font-weight: bold; }}
-    .td-blue {{ color: #0056b3 !important; font-weight: bold; }} /* 青文字も見やすく */
+    .td-blue {{ color: #0056b3 !important; font-weight: bold; font-size: 12px !important; }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -104,10 +107,10 @@ st.markdown(f"""
 </p>
 """, unsafe_allow_html=True)
 
-# --- 説明書 (詳細版・デザイン修正) ---
+# --- 説明書 ---
 with st.expander("📘 取扱説明書 (データソース・ロジック・バックテスト)"):
     st.markdown("""
-    <div class="center-text">
+    <div class="center-text ai-font">
     
     <h4>1. データ取得と時間の仕組み</h4>
     <table class="desc-table">
@@ -145,12 +148,13 @@ with st.expander("📘 取扱説明書 (データソース・ロジック・バ�
     </table>
 
     <table class="desc-table">
-        <tr><th colspan="2">③ バックテスト (簡易検証)</th></tr>
+        <tr><th colspan="2">③ バックテスト (勝率検証)</th></tr>
         <tr>
             <td colspan="2">
-            過去75日間で<b>「上昇トレンド中に5日線で買い、+2%～4%で売る」</b><br>
-            というルールで売買した場合の勝敗数を表示します。<br>
-            これにより、その銘柄の「素直さ（テクニカルの効きやすさ）」が分かります。
+            過去75日間で<b>「上昇トレンド中に安値が5日線にタッチしたら買い」</b><br>
+            というルールでシミュレーション。<br>
+            ※保有中は新規エントリーしないため、より実戦的な勝率が表示されます。<br>
+            利確目標：大型株+2%、中小型株+4%
             </td>
         </tr>
     </table>
@@ -216,25 +220,21 @@ def get_stock_info(code):
         res.encoding = res.apparent_encoding
         html = res.text.replace("\n", "")
         
-        # 社名 (カッコ削除)
+        # 社名
         m_name = re.search(r'<title>(.*?)【', html)
         if m_name: 
             raw_name = m_name.group(1).strip()
-            # "トヨタ自動車（トヨタ）" -> "トヨタ自動車"
             data["name"] = re.sub(r'[（\(].*?[）\)]', '', raw_name)
 
-        def get_val(k):
-            m = re.search(rf'{k}.*?>([0-9\.,\-]+)(?:</span>)?(?:倍|％)', html)
-            return m.group(1) + "倍" if m else "-"
-        data["per"] = get_val("PER")
-        data["pbr"] = get_val("PBR")
-
+        # 現在値
         m_price = re.search(r'現在値</th>\s*<td[^>]*>([0-9,]+)</td>', html)
         if m_price: data["price"] = float(m_price.group(1).replace(",", ""))
 
+        # 出来高
         m_vol = re.search(r'出来高</th>\s*<td[^>]*>([0-9,]+).*?株</td>', html)
         if m_vol: data["volume"] = float(m_vol.group(1).replace(",", ""))
 
+        # 時価総額
         m_cap = re.search(r'時価総額</th>\s*<td[^>]*>(.*?)</td>', html)
         if m_cap:
             cap_str = re.sub(r'<[^>]+>', '', m_cap.group(1)).strip()
@@ -251,20 +251,34 @@ def get_stock_info(code):
                 b_match = re.search(r'([0-9,]+)', cap_str)
                 if b_match: val = float(b_match.group(1).replace(",", ""))
             data["cap"] = val
+
+        # PER/PBR (取得ロジック強化)
+        # 基本情報テーブル(stockinfo_i3)の中身を特定して探す
+        i3_match = re.search(r'<div id="stockinfo_i3">(.*?)</div>', html)
+        if i3_match:
+            table_html = i3_match.group(1)
+            # PERを探す
+            if "PER" in table_html:
+                # PERのセルを探して、その次の数値セルを取得
+                per_match = re.search(r'PER.*?<td[^>]*>([0-9\.,\-]+).*?倍', table_html)
+                if per_match: data["per"] = per_match.group(1) + "倍"
+            
+            # PBRを探す
+            if "PBR" in table_html:
+                pbr_match = re.search(r'PBR.*?<td[^>]*>([0-9\.,\-]+).*?倍', table_html)
+                if pbr_match: data["pbr"] = pbr_match.group(1) + "倍"
+
         return data
     except:
         return data
 
 def run_backtest(df, market_cap):
     """ 
-    簡易バックテスト
-    ルール: 上昇トレンド(5>25)中に、安値が5MAにタッチしたら買い。
-    利益確定: 大型株+2%、中小型+4%
+    バックテスト (実戦型: 保有期間中は新規エントリーなし) 
     """
     try:
-        if len(df) < 80: return "データ不足"
+        if len(df) < 80: return "データ不足", 0
         
-        # 利益目標の設定 (大型は手堅く、小型は大きく)
         target_pct = 0.04 
         cap_str = "4%"
         if market_cap >= 10000: # 1兆円以上
@@ -273,34 +287,59 @@ def run_backtest(df, market_cap):
             
         wins = 0
         losses = 0
-        # 直近75日分を検証
-        test_data = df.tail(75).copy()
         
-        # 保有フラグ (簡易的に1日1トレード)
-        for i in range(len(test_data)-5): # 最後の5日は判定不能とする
+        # 直近75日
+        test_data = df.tail(75)
+        # indexアクセスのためにリスト化するか、ilocを使う
+        dates = test_data.index
+        
+        i = 0
+        n = len(test_data)
+        
+        # ループ制御のため while を使用
+        while i < n - 1: # 最終日は判定しない
             row = test_data.iloc[i]
             
-            # エントリー条件: 5MA > 25MA (上昇中) かつ 安値 <= 5MA (押し目)
+            # エントリー条件: 5MA > 25MA (上昇トレンド) かつ 安値 <= 5MA (押し目タッチ)
             if row['SMA5'] > row['SMA25'] and row['Low'] <= row['SMA5']:
-                entry_price = row['SMA5']
+                entry_price = row['SMA5'] # 5MAで指値エントリーと仮定
                 target_price = entry_price * (1 + target_pct)
                 
-                # 翌日以降5日間で達成したか？
+                # 保有期間 (最大10日間)
                 is_win = False
-                for j in range(1, 6):
-                    if i+j >= len(test_data): break
-                    future_row = test_data.iloc[i+j]
+                hold_days = 0
+                
+                # 翌日から未来を見る
+                for j in range(1, 11): 
+                    if i + j >= n: break
+                    future_row = test_data.iloc[i + j]
+                    hold_days = j
+                    
+                    # 利確判定 (高値がターゲット以上)
                     if future_row['High'] >= target_price:
+                        wins += 1
                         is_win = True
                         break
+                    
+                    # 損切り判定 (今回はシンプルに25MA割れで撤退とするか、期間終了で負けとするか)
+                    # ここではシンプルに期間内に利確できなければ「負け」とカウントする
                 
-                if is_win: wins += 1
-                else: losses += 1
+                if not is_win:
+                    losses += 1
+                
+                # 保有期間分スキップする (重複エントリー防止)
+                i += hold_days
+            
+            i += 1
         
-        if wins + losses == 0: return "機会なし"
-        return f"{wins}勝{losses}敗<br>({cap_str}抜)"
-    except:
-        return "-"
+        total = wins + losses
+        if total == 0: return "機会なし", 0
+        
+        # HTMLタグはここでは入れない (ソート用に関数分離するため)
+        return f"{wins}勝{losses}敗 ({cap_str}抜)", total
+
+    except Exception as e:
+        return "計算エラー", 0
 
 @st.cache_data(ttl=3600)
 def get_stock_data(ticker):
@@ -326,8 +365,8 @@ def get_stock_data(ticker):
         rs = gain / loss
         df['RSI'] = 100 - (100 / (1 + rs))
         
-        # バックテスト実行
-        backtest_res = run_backtest(df, info["cap"])
+        # バックテスト (戻り値: 文字列, トレード回数)
+        bt_str, bt_count = run_backtest(df, info["cap"])
         
         last = df.iloc[-1]
         prev = df.iloc[-2]
@@ -364,6 +403,11 @@ def get_stock_data(ticker):
         if "逆張り" in strategy: score += 15
         if 55 <= rsi_val <= 65: score += 10
         if vol_ratio > 1.5: score += 10
+        if bt_count > 0 and "勝" in bt_str: # バックテスト結果をスコア反映
+             # シンプルに勝ち越しなら加点
+             w = int(bt_str.split("勝")[0])
+             l = int(bt_str.split("勝")[1].split("敗")[0])
+             if w > l: score += 10
         score = min(100, score)
 
         return {
@@ -379,7 +423,7 @@ def get_stock_data(ticker):
             "score": score,
             "buy": buy_target,
             "p_half": p_half, "p_full": p_full,
-            "backtest": backtest_res
+            "backtest": bt_str
         }
     except:
         return None
@@ -451,25 +495,42 @@ if st.button("🚀 分析開始 (アイに聞く)"):
             st.session_state.analyzed_data = data_list
             st.session_state.ai_monologue = monologue
 
-# --- 表示 ---
+# --- 表示 (安全なキーアクセス) ---
 if st.session_state.analyzed_data:
     data = st.session_state.analyzed_data
-    if "スコア" in sort_option: data.sort(key=lambda x: x['score'], reverse=True)
-    elif "時価総額" in sort_option: data.sort(key=lambda x: x['cap_val'], reverse=True)
-    elif "RSI順 (低い" in sort_option: data.sort(key=lambda x: x['rsi'])
-    elif "RSI順 (高い" in sort_option: data.sort(key=lambda x: x['rsi'], reverse=True)
-    else: data.sort(key=lambda x: x['code'])
+    
+    if len(data) > 0 and 'backtest' not in data[0]:
+        st.warning("⚠️ データ形式が古いため、再分析してください。")
+        st.stop()
+
+    if "スコア" in sort_option: data.sort(key=lambda x: x.get('score', 0), reverse=True)
+    elif "時価総額" in sort_option: data.sort(key=lambda x: x.get('cap_val', 0), reverse=True)
+    elif "RSI順 (低い" in sort_option: data.sort(key=lambda x: x.get('rsi', 50))
+    elif "RSI順 (高い" in sort_option: data.sort(key=lambda x: x.get('rsi', 50), reverse=True)
+    else: data.sort(key=lambda x: x.get('code', ''))
     
     html_rows = ""
     for i, d in enumerate(data):
-        diff = d['price'] - d['buy']
+        price = d.get('price', 0)
+        buy = d.get('buy', 0)
+        diff = price - buy
         diff_txt = f"({diff:+,.0f})" if diff != 0 else "(0)"
-        target_txt = f"半:{d['p_half']:,}<br>全:{d['p_full']:,}" if d['p_half'] > 0 else "-"
+        
+        p_half = d.get('p_half', 0)
+        p_full = d.get('p_full', 0)
+        target_txt = f"半:{p_half:,}<br>全:{p_full:,}" if p_half > 0 else "-"
+        
+        # バックテスト結果の改行処理
+        bt_text = d.get("backtest", "-")
+        # "1勝2敗 (4%抜)" -> "1勝2敗<br>(4%抜)" に変換
+        if "(" in bt_text:
+            bt_display = bt_text.replace(" (", "<br>(")
+        else:
+            bt_display = bt_text
 
-        # HTML (インデントなし)
-        html_rows += f'<tr><td class="td-center">{i+1}</td><td class="td-center">{d["code"]}</td><td class="th-left td-bold">{d["name"]}</td><td class="td-right">{d["cap_disp"]}</td><td class="td-center">{d["score"]}</td><td class="td-center">{d["strategy"]}</td><td class="td-center">{d["rsi_disp"]}</td><td class="td-right">{d["vol_ratio"]:.1f}倍</td><td class="td-right td-bold">{d["price"]:,.0f}</td><td class="td-right">{d["buy"]:,.0f}<br><span style="font-size:10px;color:#666">{diff_txt}</span></td><td class="td-left">{target_txt}</td><td class="td-center td-blue">{d["backtest"]}</td><td class="td-center">{d["per"]}<br>{d["pbr"]}</td><td class="th-left">{d["comment"]}</td></tr>'
+        html_rows += f'<tr><td class="td-center">{i+1}</td><td class="td-center">{d.get("code")}</td><td class="th-left td-bold">{d.get("name")}</td><td class="td-right">{d.get("cap_disp")}</td><td class="td-center">{d.get("score")}</td><td class="td-center">{d.get("strategy")}</td><td class="td-center">{d.get("rsi_disp")}</td><td class="td-right">{d.get("vol_ratio", 0):.1f}倍</td><td class="td-right td-bold">{price:,.0f}</td><td class="td-right">{buy:,.0f}<br><span style="font-size:10px;color:#666">{diff_txt}</span></td><td class="td-left">{target_txt}</td><td class="td-center td-blue">{bt_display}</td><td class="td-center">{d.get("per")}<br>{d.get("pbr")}</td><td class="th-left">{d.get("comment")}</td></tr>'
 
-    table_html = f'<div class="table-container"><table class="ai-table"><thead><tr><th style="width:30px;">順位</th><th style="width:50px;">コード</th><th class="th-left" style="width:140px;">企業名</th><th style="width:80px;">時価総額</th><th style="width:40px;">スコア</th><th style="width:60px;">戦略</th><th style="width:50px;">RSI</th><th style="width:50px;">出来高<br>(前日比)</th><th style="width:60px;">現在値</th><th style="width:70px;">推奨買値<br>(乖離)</th><th style="width:90px;">利確目標</th><th style="width:60px;">勝敗数</th><th style="width:50px;">PER<br>PBR</th><th class="th-left" style="min-width:200px;">アイの所感</th></tr></thead><tbody>{html_rows}</tbody></table></div>'
+    table_html = f'<div class="table-container"><table class="ai-table"><thead><tr><th style="width:30px;">順位</th><th style="width:50px;">コード</th><th class="th-left" style="width:140px;">企業名</th><th style="width:80px;">時価総額</th><th style="width:40px;">スコア</th><th style="width:60px;">戦略</th><th style="width:50px;">RSI</th><th style="width:50px;">出来高<br>(前日比)</th><th style="width:60px;">現在値</th><th style="width:70px;">推奨買値<br>(乖離)</th><th style="width:90px;">利確目標</th><th style="width:85px;">勝敗数</th><th style="width:50px;">PER<br>PBR</th><th class="th-left" style="min-width:200px;">アイの所感</th></tr></thead><tbody>{html_rows}</tbody></table></div>'
     
     st.markdown("### 📊 アイ推奨ポートフォリオ")
     st.markdown(table_html, unsafe_allow_html=True)
@@ -479,4 +540,4 @@ if st.session_state.analyzed_data:
     st.markdown(st.session_state.ai_monologue)
     
     with st.expander("詳細データリスト (生データ確認用)"):
-        st.dataframe(pd.DataFrame(data)[['code', 'name', 'price', 'cap_disp', 'strategy', 'rsi_disp', 'vol_ratio', 'backtest']])
+        st.dataframe(pd.DataFrame(data))
