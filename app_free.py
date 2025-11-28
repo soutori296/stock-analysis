@@ -482,3 +482,4 @@ if st.session_state.analyzed_data:
     with st.expander("詳細データリスト (生データ確認用)"):
         st.dataframe(pd.DataFrame(data))
 
+
