@@ -49,10 +49,10 @@ with col_title:
         /* 5列目: スコア */
         th:nth-child(5), td:nth-child(5) { width: 40px; text-align: center; }
 
-        /* 6列目: 戦略 (幅を広げる) */
+        /* 6列目: 戦略 */
         th:nth-child(6), td:nth-child(6) { 
             font-size: 12px; 
-            min-width: 70px; /* +2文字分程度拡大 */
+            min-width: 70px; 
         }
 
         /* 7-8列目: RSI, 出来高 */
@@ -68,7 +68,7 @@ with col_title:
         /* 11列目: 利確 */
         th:nth-child(11), td:nth-child(11) { min-width: 100px; font-size: 12px; }
 
-        /* 12列目: PER/PBR (ヘッダーの「指標」削除) */
+        /* 12列目: PER/PBR */
         th:nth-child(12), td:nth-child(12) { font-size: 11px; width: 70px; }
 
         /* 13列目: アイの所感 */
@@ -119,10 +119,7 @@ if api_key:
         st.error(f"System Error: {e}")
 
 def get_stock_info_from_kabutan(code):
-    """
-    株探から情報を取得 (構造指定・確実版)
-    PER/PBRや時価総額を、特定のHTML構造からピンポイントで抜き出す
-    """
+    """株探から情報を取得"""
     url = f"https://kabutan.jp/stock/?code={code}"
     headers = {"User-Agent": "Mozilla/5.0"}
     data = {"name": "不明", "per": "-", "pbr": "-", "price": None, "volume": None, "cap": 0}
@@ -131,6 +128,8 @@ def get_stock_info_from_kabutan(code):
         res = requests.get(url, headers=headers, timeout=5)
         res.encoding = res.apparent_encoding
         html = res.text.replace("\n", "").replace("\r", "")
+        text_content = re.sub(r'<[^>]+>', ' ', html)
+        text_content = re.sub(r'\s+', ' ', text_content)
         
         # 1. 社名
         match_name = re.search(r'<title>(.*?)【', html)
@@ -139,57 +138,48 @@ def get_stock_info_from_kabutan(code):
             data["name"] = re.sub(r'[（\(].*?[）\)]', '', raw_name)
 
         # 2. 現在値
-        match_price = re.search(r'現在値</th>\s*<td[^>]*>([0-9,.]+)</td>', html)
+        match_price = re.search(r'現在値\s*([0-9,.]+)', text_content)
         if match_price:
             data["price"] = float(match_price.group(1).replace(",", ""))
 
         # 3. 出来高
-        match_vol = re.search(r'出来高</th>\s*<td[^>]*>([0-9,]+).*?株</td>', html)
+        match_vol = re.search(r'出来高\s*([0-9,]+)\s*株', text_content)
         if match_vol:
             data["volume"] = float(match_vol.group(1).replace(",", ""))
 
-        # 4. 時価総額 (v_zika2クラスを狙い撃ち)
-        # <td class="v_zika2">28<span>兆</span>6,605<span>億円</span></td>
-        match_cap_area = re.search(r'class="v_zika2">(.*?)</td>', html)
-        if match_cap_area:
-            raw_cap_html = match_cap_area.group(1)
-            # タグを全削除して数字と単位だけにする -> "28兆6,605億円"
-            cap_text = re.sub(r'<[^>]+>', '', raw_cap_html).replace(",", "").strip()
-            
-            if "兆" in cap_text:
-                parts = cap_text.replace("億円", "").split("兆")
+        # 4. 時価総額
+        match_cap = re.search(r'時価総額\s*([0-9,]+(?:兆[0-9,]+)?)\s*億円', text_content)
+        if match_cap:
+            raw_cap = match_cap.group(1).replace(",", "")
+            if "兆" in raw_cap:
+                parts = raw_cap.split("兆")
                 trillion = int(parts[0])
                 billion = int(parts[1]) if parts[1] else 0
                 data["cap"] = trillion * 10000 + billion
             else:
-                try:
-                    data["cap"] = int(cap_text.replace("億円", ""))
-                except:
-                    data["cap"] = 0
+                try: data["cap"] = int(raw_cap)
+                except: data["cap"] = 0
 
-        # 5. PER / PBR (stockinfo_i3 ID内を検索)
-        # <div id="stockinfo_i3">...<table>...<tbody>...
-        i3_match = re.search(r'<div id="stockinfo_i3">.*?<tbody>(.*?)</tbody>', html)
-        if i3_match:
-            tbody = i3_match.group(1)
-            # <td>...</td> を全て取得
-            tds = re.findall(r'<td[^>]*>(.*?)</td>', tbody)
-            
-            def clean_tag_val(val):
-                # タグを消して空白削除
-                val = re.sub(r'<[^>]+>', '', val).strip()
-                return val
+        # 5. PER / PBR
+        def find_value_strict(keyword, text):
+            idx = text.find(keyword)
+            if idx == -1: return None
+            chunk = text[idx:idx+50]
+            match = re.search(r'([0-9\.,\-]+)\s*倍', chunk)
+            return match
 
-            if len(tds) >= 2:
-                data["per"] = clean_tag_val(tds[0])
-                data["pbr"] = clean_tag_val(tds[1])
+        m_per = find_value_strict("PER", text_content)
+        if m_per: data["per"] = m_per.group(1) + "倍"
+
+        m_pbr = find_value_strict("PBR", text_content)
+        if m_pbr: data["pbr"] = m_pbr.group(1) + "倍"
 
         return data
     except Exception:
         return data
 
 def run_dynamic_backtest(df, market_cap):
-    """時価総額に応じたバックテスト"""
+    """時価総額に応じたバックテスト (条件緩和版)"""
     try:
         if len(df) < 40: return "データ不足"
         
@@ -269,8 +259,7 @@ def get_technical_summary(ticker):
         rsi = last_day['RSI']
         vol_sma5 = last_day['Vol_SMA5']
         
-        # --- モメンタム: 直近5日の上昇日数 ---
-        # tail(5)で直近5日を取得し、前日比プラスの日を数える
+        # モメンタム
         recent_changes = df['Close'].diff().tail(5)
         up_days_count = (recent_changes > 0).sum()
         momentum_str = f"{up_days_count}勝{5-up_days_count}敗"
@@ -278,7 +267,6 @@ def get_technical_summary(ticker):
         # --- スコアリング ---
         score = 50 
         
-        # 1. トレンド
         if ma5 > ma25 and ma25 > ma75:
             score += 20
             po_status = "🔥順張り"
@@ -288,11 +276,9 @@ def get_technical_summary(ticker):
         else:
             po_status = "レンジ"
 
-        # 2. モメンタム加点 (最優先)
         if up_days_count == 5: score += 10
         elif up_days_count == 4: score += 5
 
-        # 3. RSI評価
         if rsi <= 30:
             score += 15
             rsi_str = f"🔵{rsi:.1f}"
@@ -305,7 +291,6 @@ def get_technical_summary(ticker):
         else:
             rsi_str = f"🟢{rsi:.1f}"
 
-        # 4. 出来高倍率
         vol_ratio = 0
         vol_str = "-"
         if vol_sma5 > 0:
@@ -314,7 +299,6 @@ def get_technical_summary(ticker):
             if vol_ratio >= 1.5: score += 15
             elif vol_ratio >= 1.0: score += 5
 
-        # 5. バックテスト加点
         if "8" in backtest_result[:2] or "9" in backtest_result[:2] or "100" in backtest_result:
             score += 10
 
@@ -351,12 +335,10 @@ def get_technical_summary(ticker):
 
         profit_display = f"半: {fmt_target(t_half, current_price)}<br>全: {fmt_target(t_full, current_price)}"
 
-        # 時価総額表示
         cap_disp = f"{fund['cap']:,}億円"
         if fund['cap'] >= 10000:
             cap_disp = f"{fund['cap']/10000:.1f}兆円"
 
-        # 指標表示
         fund_disp = f"{fund['per']}<br>{fund['pbr']}"
 
         return {
@@ -375,8 +357,8 @@ def get_technical_summary(ticker):
             "buy_display": buy_display, 
             "profit_display": profit_display,
             "backtest": backtest_result,
-            "momentum": momentum_str, # モメンタム
-            "up_days": up_days_count  # ソート用
+            "momentum": momentum_str,
+            "up_days": up_days_count 
         }
     except Exception:
         return None
@@ -391,7 +373,7 @@ def generate_ranking_table(high_score_list, low_score_list):
             txt += f"""
             [{d['code']} {d['name']}]
             - スコア:{d['score']}, 戦略:{d['strategy']}
-            - ★モメンタム(直近5日): {d['momentum']} (勝ち数が多いほど強い)
+            - ★モメンタム: {d['momentum']} (5日間の勝敗)
             - 時価総額:{d['cap_disp']}, RSI:{d['rsi_str']}, 出来高:{d['vol_str']}
             - 裏データ(バックテスト): {d['backtest']}
             - 現在値:{d['price']:,.0f}円
@@ -413,14 +395,14 @@ def generate_ranking_table(high_score_list, low_score_list):
     1. **表のみ出力**: 挨拶不要。
     2. **そのまま表示**: データ内の「RSI」「出来高」「推奨買値」「利確目標」は、**加工せずそのまま**表に入れてください。
     3. **指標**: データ内の「指標表示用文字列」をそのまま出力して、セル内で2段にしてください。
-    4. **時価総額**: データの `cap_disp` を表示。
-    5. **分析重視**: **「モメンタム（〇勝〇敗）」を最重要視**してください。「5勝0敗」などは極めて強いトレンドとして評価し、所感に含めてください。バックテストはあくまで参考です。
+    4. **時価総額**: 「時価総額」の列を追加し、データの `cap_disp` を表示。
+    5. **分析重視**: **「モメンタム（〇勝〇敗）」を最重要視**してください。
     6. **アイの所感**: 80文字以内で、データに基づいた冷静なコメントを記述。
 
-    【データ1: 注目ゾーン】
+    【データ1: 注目ゾーン (買い推奨・順張り・逆張り)】
     {list_to_text(high_score_list)}
 
-    【データ2: 警戒ゾーン】
+    【データ2: 警戒ゾーン (様子見)】
     {list_to_text(low_score_list)}
     
     【出力構成】
@@ -429,6 +411,10 @@ def generate_ranking_table(high_score_list, low_score_list):
     
     **【様子見・警戒ゾーン】**
     (同じ形式の表を作成)
+    
+    3. **【アイの独り言（投資家への警鐘）】**
+       - 最後にこのセクションを設け、ここだけは**「～だ」「～である」「～と思う」という常体（独白調）**に切り替えてください。
+       - プロとして相場を俯瞰し、静かにリスクを懸念する内容を3行程度で記述してください。
     """
     
     try:
@@ -474,8 +460,13 @@ if st.button("🚀 分析開始 (アイに聞く)"):
                 elif sort_option == "時価総額順":
                     data_list.sort(key=lambda x: x['cap'], reverse=True)
 
-                high_score_list = [d for d in data_list if d['score'] >= 70]
-                low_score_list = [d for d in data_list if d['score'] < 70]
+                # --- 修正点: 様子見は強制的に下のリストへ ---
+                high_score_list = [d for d in data_list if d['score'] >= 70 and d['strategy'] != "👀様子見"]
+                low_score_list = [d for d in data_list if d not in high_score_list]
+
+                # 順位付け直し
+                for idx, d in enumerate(high_score_list): d['rank'] = idx + 1
+                for idx, d in enumerate(low_score_list): d['rank'] = idx + 1
 
                 status_text.text("🤖 アイが分析レポートを作成中...")
                 result = generate_ranking_table(high_score_list, low_score_list)
