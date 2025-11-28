@@ -92,32 +92,32 @@ with col_title:
     </p>
     """, unsafe_allow_html=True)
 
-# --- 完全取扱説明書 (HTMLタグ対応版) ---
+# --- 完全取扱説明書 ---
 with st.expander("📘 完全取扱説明書 (データソース・ロジック・スコア計算) を読む"):
-    # ここに unsafe_allow_html=True を入れることで表が正しく描画されます
+    # f""" とすることで変数を埋め込めるようにし、unsafe_allow_html=True で表を描画
     st.markdown(f"""
     ### 1. データ取得と時間の仕組み
-    <table style="width:100%; font-size:14px;">
+    <table style="width: 100%; text-align: left; border-collapse: collapse; font-size: 14px;">
       <thead>
-        <tr>
-          <th style="width: 20%;">項目</th>
-          <th style="width: 15%;">取得元</th>
-          <th style="width: 20%;">状態</th>
-          <th style="width: 45%;">解説</th>
+        <tr style="background-color: #f0f2f6;">
+          <th style="padding: 8px; border: 1px solid #ddd; width: 15%;">項目</th>
+          <th style="padding: 8px; border: 1px solid #ddd; width: 10%;">取得元</th>
+          <th style="padding: 8px; border: 1px solid #ddd; width: 20%;">状態</th>
+          <th style="padding: 8px; border: 1px solid #ddd; width: 55%;">解説</th>
         </tr>
       </thead>
       <tbody>
         <tr>
-          <td><b>現在値・出来高</b></td>
-          <td><b>株探</b></td>
-          <td><b>{status_label}</b></td>
-          <td>15:50までは「途中経過」です。15:50以降は「確定値」となります。(東証15:30終了+20分遅延)</td>
+          <td style="padding: 8px; border: 1px solid #ddd;"><b>現在値・出来高</b></td>
+          <td style="padding: 8px; border: 1px solid #ddd;"><b>株探</b></td>
+          <td style="padding: 8px; border: 1px solid #ddd;"><b>{status_label}</b></td>
+          <td style="padding: 8px; border: 1px solid #ddd;">15:50までは「途中経過」。15:50以降は「確定値」となります。(東証15:30終了+20分遅延)</td>
         </tr>
         <tr>
-          <td><b>テクニカル</b></td>
-          <td><b>Stooq</b></td>
-          <td><b>前日確定</b></td>
-          <td>トレンド判定やバックテストは、ダマシを防ぐため「前日終値」基準で行います。</td>
+          <td style="padding: 8px; border: 1px solid #ddd;"><b>テクニカル</b></td>
+          <td style="padding: 8px; border: 1px solid #ddd;"><b>Stooq</b></td>
+          <td style="padding: 8px; border: 1px solid #ddd;"><b>前日確定</b></td>
+          <td style="padding: 8px; border: 1px solid #ddd;">トレンド判定やバックテストは、ダマシを防ぐため「前日終値」基準で行います。</td>
         </tr>
       </tbody>
     </table>
@@ -566,3 +566,4 @@ if st.button("🚀 分析開始 (アイに聞く)"):
                     st.dataframe(pd.DataFrame(data_list)[['code', 'name', 'price', 'cap_disp', 'score', 'rsi_str', 'vol_str', 'backtest']])
             else:
                 st.error("有効なデータが取得できませんでした。")
+
