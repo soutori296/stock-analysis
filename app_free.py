@@ -8,15 +8,15 @@ import io
 import re
 import os
 
-# --- アイコン設定 ---
-ICON_FILE = "aisan.png"
-
-# ページ設定
+# --- ページ設定 (アイコン画像をファイル名で指定) ---
 st.set_page_config(page_title="教えて！AIさん 2", page_icon="aisan.png", layout="wide")
 
 # --- セッションステート初期化 ---
 if 'analyzed_data' not in st.session_state:
     st.session_state.analyzed_data = None
+
+# --- アイコンファイル変数 ---
+ICON_FILE = "aisan.png"
 
 # --- 時間管理ロジック (JST) ---
 def get_market_status():
@@ -42,7 +42,7 @@ with col_icon:
     if os.path.exists(ICON_FILE):
         st.image(ICON_FILE, width=100)
     else:
-        st.write("🤖")
+        st.write("🤖") # 画像がない場合の予備
 
 with col_title:
     st.title("教えて！AIさん 2")
