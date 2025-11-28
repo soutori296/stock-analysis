@@ -13,13 +13,15 @@ ICON_URL = "https://raw.githubusercontent.com/soutori296/stock-analysis/main/ais
 # ページ設定
 st.set_page_config(page_title="教えて！AIさん 2", page_icon="🤖", layout="wide")
 
-# --- タイトルエリア (アイコンエラー対策済み) ---
+# --- タイトルエリア (シンプルで確実な表示方法に変更) ---
 col_icon, col_title = st.columns([1.5, 8.5])
 with col_icon:
     try:
+        # 余計なチェックをせず、直接画像を表示させる（これが一番確実）
         st.image(ICON_URL, width=100)
     except:
         st.write("🤖")
+
 with col_title:
     st.title("教えて！AIさん 2")
     st.markdown("""
@@ -34,10 +36,10 @@ with col_title:
             font-family: "Meiryo", sans-serif;
         }
         
-        /* ヘッダー設定 (文字色を黒に固定) */
+        /* ヘッダー設定 (文字色を黒に固定して見やすく) */
         th { 
-            background-color: #e0e0e0 !important; /* 少し濃いグレーに変更 */
-            color: #000000 !important; /* 文字色を黒に固定 */
+            background-color: #e0e0e0 !important; /* 背景：薄いグレー */
+            color: #000000 !important; /* 文字：黒 (強制) */
             font-weight: bold; 
             text-align: center;
             border: 1px solid #ccc;
@@ -53,7 +55,7 @@ with col_title:
             line-height: 1.4 !important;
             word-wrap: break-word;
             border: 1px solid #ddd;
-            color: inherit; /* ユーザーのテーマ設定に従う */
+            color: inherit;
         }
 
         /* --- 各列の幅指定 (全14列) --- */
@@ -445,6 +447,7 @@ def generate_ranking_table(high_score_list, low_score_list):
     |:---:|:---:|:---|---:|:---:|:---:|:---:|---:|---:|---:|---:|---:|---:|:---|
     | ... | ... | ... | ... | ... | ... | ... | ... | ... | ... | ... | ... | ... | ... |
 
+    ※「バックテスト」列には、データにある `6勝2敗<br>(4%抜)` のような文字列をそのまま入れてください。
     ※「PER<br>PBR」列には、データにある `15.0倍<br>1.2倍` をそのまま入れてください。
     ※アイの所感は、80文字程度で記述してください。
 
@@ -522,4 +525,3 @@ if st.button("🚀 分析開始 (アイに聞く)"):
                     st.dataframe(pd.DataFrame(data_list)[['code', 'name', 'price', 'cap_disp', 'score', 'rsi_str', 'vol_str', 'backtest']])
             else:
                 st.error("有効なデータが取得できませんでした。")
-
