@@ -8,8 +8,11 @@ import io
 import re
 import math
 
+# --- アイコン設定 ---
+ICON_URL = "https://raw.githubusercontent.com/soutori296/stock-analysis/main/aisan.png"
+
 # --- ページ設定 ---
-st.set_page_config(page_title="教えて！AIさん 2", layout="wide")
+st.set_page_config(page_title="教えて！AIさん 2", page_icon="🤖", layout="wide")
 
 # --- セッションステート初期化 ---
 if 'analyzed_data' not in st.session_state:
@@ -478,3 +481,4 @@ if st.session_state.analyzed_data:
     
     with st.expander("詳細データリスト (生データ確認用)"):
         st.dataframe(pd.DataFrame(data))
+
