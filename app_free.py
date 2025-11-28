@@ -12,7 +12,11 @@ import os
 ICON_FILE = "aisan.png"
 
 # ページ設定
-st.set_page_config(page_title="教えて！AIさん 2", page_icon="aisan.png", layout="wide")
+st.set_page_config(page_title="教えて！AIさん 2", page_icon="🤖", layout="wide")
+
+# --- セッションステート初期化 (データ保持用) ---
+if 'analyzed_data' not in st.session_state:
+    st.session_state.analyzed_data = None
 
 # --- 時間管理ロジック (JST) ---
 def get_market_status():
@@ -50,7 +54,6 @@ with col_title:
             border-radius: 4px; font-size: 14px; font-weight: bold; vertical-align: middle;
         }}
         
-        /* テーブル全体の設定 */
         table {{ 
             width: 100%; 
             border-collapse: collapse; 
@@ -58,16 +61,15 @@ with col_title:
             font-family: "Meiryo", sans-serif;
         }}
         
-        /* ヘッダー設定 (自然なグレー背景・黒文字・中央揃え) */
+        /* ヘッダー設定 */
         th {{ 
-            background-color: #dcdcdc !important; /* 目に優しいグレー */
-            color: #222222 !important; /* 濃い黒グレー */
+            background-color: #dcdcdc !important; 
+            color: #000000 !important;
             font-weight: bold; 
-            text-align: center !important; /* ヘッダーは基本中央揃え */
-            border: 1px solid #bbbbbb; /* 枠線を少し濃くして明確に */
-            padding: 8px 2px !important;
-            font-size: 12px;
-            white-space: normal; /* 自動改行を許可 */
+            text-align: center; 
+            border: 1px solid #bbbbbb;
+            padding: 8px 4px !important; 
+            font-size: 13px;
         }}
         
         /* データセル設定 */
@@ -81,58 +83,23 @@ with col_title:
             color: inherit;
         }}
 
-        /* --- 各列の幅と配置の調整 --- */
-        
-        /* 1.順位 */
-        th:nth-child(1), td:nth-child(1) {{ width: 35px; text-align: center; }} 
-        
-        /* 2.コード (広く +1文字分) */
-        th:nth-child(2), td:nth-child(2) {{ width: 55px; text-align: center; }} 
-        
-        /* 3.企業名 (左揃え) */
+        /* --- 各列の幅指定 --- */
+        th:nth-child(1), td:nth-child(1) {{ width: 35px; text-align: center; }} /* 順位 */
+        th:nth-child(2), td:nth-child(2) {{ width: 55px; text-align: center; }} /* コード */
         th:nth-child(3) {{ text-align: center; }}
-        td:nth-child(3) {{ width: 160px; font-weight: bold; font-size: 14px; text-align: left; }} 
-        
-        /* 4.時価総額 (広く +2文字分) */
-        th:nth-child(4), td:nth-child(4) {{ width: 95px; text-align: right; font-size: 12px; }} 
-        
-        /* 5.スコア */
-        th:nth-child(5), td:nth-child(5) {{ width: 45px; text-align: center; }} 
-        
-        /* 6.戦略 */
-        th:nth-child(6), td:nth-child(6) {{ width: 70px; font-size: 12px; text-align: center; }} 
-        
-        /* 7.RSI (広く +2文字分) */
-        th:nth-child(7), td:nth-child(7) {{ width: 85px; text-align: center; }} 
-        
-        /* 8.出来高 */
-        th:nth-child(8), td:nth-child(8) {{ width: 75px; font-size: 12px; text-align: right; }} 
-        
-        /* 9.現在値 */
-        th:nth-child(9), td:nth-child(9) {{ width: 80px; text-align: right; font-weight: bold; }} 
-        
-        /* 10.推奨買値 */
-        th:nth-child(10), td:nth-child(10) {{ width: 100px; font-size: 12px; text-align: right; }} 
-        
-        /* 11.利確 */
-        th:nth-child(11), td:nth-child(11) {{ width: 110px; font-size: 11px; text-align: right; }} 
-        
-        /* 12.バックテスト (狭く -5文字分) */
-        th:nth-child(12), td:nth-child(12) {{ 
-            width: 75px; 
-            font-size: 11px; 
-            color: #0056b3; 
-            font-weight: bold; 
-            text-align: center;
-        }} 
-        
-        /* 13.指標 */
-        th:nth-child(13), td:nth-child(13) {{ width: 70px; font-size: 11px; text-align: center; }} 
-        
-        /* 14.所感 (左揃え) */
+        td:nth-child(3) {{ width: 160px; font-weight: bold; font-size: 14px; text-align: left; }} /* 企業名 */
+        th:nth-child(4), td:nth-child(4) {{ width: 95px; text-align: right; font-size: 12px; }} /* 時価総額 */
+        th:nth-child(5), td:nth-child(5) {{ width: 45px; text-align: center; }} /* スコア */
+        th:nth-child(6), td:nth-child(6) {{ width: 70px; font-size: 12px; text-align: center; }} /* 戦略 */
+        th:nth-child(7), td:nth-child(7) {{ width: 85px; text-align: center; }} /* RSI */
+        th:nth-child(8), td:nth-child(8) {{ width: 75px; font-size: 12px; text-align: right; }} /* 出来高 */
+        th:nth-child(9), td:nth-child(9) {{ width: 80px; text-align: right; font-weight: bold; }} /* 現在値 */
+        th:nth-child(10), td:nth-child(10) {{ width: 100px; font-size: 12px; text-align: right; }} /* 推奨買値 */
+        th:nth-child(11), td:nth-child(11) {{ width: 110px; font-size: 11px; text-align: right; }} /* 利確 */
+        th:nth-child(12), td:nth-child(12) {{ width: 75px; font-size: 11px; color: #0056b3; font-weight: bold; text-align: center; }} /* バックテスト */
+        th:nth-child(13), td:nth-child(13) {{ width: 70px; font-size: 11px; text-align: center; }} /* 指標 */
         th:nth-child(14) {{ text-align: center; }}
-        td:nth-child(14) {{ width: auto; font-size: 12px; text-align: left; }} 
-        
+        td:nth-child(14) {{ width: auto; font-size: 12px; text-align: left; }} /* 所感 */
     </style>
     <p class="big-font" style="margin-top: 0px;">
         あなたの提示した銘柄についてアイが分析して売買戦略を伝えます。<br>
@@ -140,17 +107,17 @@ with col_title:
     </p>
     """, unsafe_allow_html=True)
 
-# --- 完全取扱説明書 ---
+# --- 説明書 ---
 with st.expander("📘 完全取扱説明書 (データソース・ロジック・スコア計算) を読む"):
     st.markdown(f"""
     ### 1. データ取得と時間の仕組み
     <table style="width: 100%; text-align: left; border-collapse: collapse; font-size: 14px;">
       <thead>
         <tr style="background-color: #dcdcdc; color: #000000;">
-          <th style="padding: 8px; border: 1px solid #bbbbbb; width: 15%; text-align: left;">項目</th>
-          <th style="padding: 8px; border: 1px solid #bbbbbb; width: 10%; text-align: left;">取得元</th>
-          <th style="padding: 8px; border: 1px solid #bbbbbb; width: 20%; text-align: left;">状態</th>
-          <th style="padding: 8px; border: 1px solid #bbbbbb; width: 55%; text-align: left;">解説</th>
+          <th style="padding: 10px; border: 1px solid #bbbbbb; width: 15%; text-align: left;">項目</th>
+          <th style="padding: 10px; border: 1px solid #bbbbbb; width: 10%; text-align: left;">取得元</th>
+          <th style="padding: 10px; border: 1px solid #bbbbbb; width: 20%; text-align: left;">状態</th>
+          <th style="padding: 10px; border: 1px solid #bbbbbb; width: 55%; text-align: left;">解説</th>
         </tr>
       </thead>
       <tbody>
@@ -186,16 +153,12 @@ with st.expander("📘 完全取扱説明書 (データソース・ロジック�
     #### ③ バックテスト (5MA押し目買い検証)
     「過去75営業日、この銘柄で押し目買いをしていたらどうなっていたか？」をシミュレーションします。
     - **エントリー条件**: 「上昇トレンド中(5MA>25MA)」かつ「安値が5MAにタッチ」した日。
-    - **除外条件**: ポジション保有中(最大10日)は新規エントリーしません（重複カウント防止）。
+    - **除外条件**: ポジション保有中(最大10日)は新規エントリーしません。
     - **勝利条件**: エントリーから10日以内に、目標利益(大型+2%/小型+4%)に到達すれば勝ち。
-    - **表示**: 「3勝1敗」のように表示。「0勝0敗」はトレンドが強すぎて押し目がなかったことを意味します。
 
     ### 3. 売買ターゲットの算出式
-    AIの勘ではなく、プログラムが計算した値を提示します。
     - **推奨買値**: 順張りなら**5日線**、逆張りなら**現在値**。
-    - **利確ターゲット**:
-        - **半益**: 25MA + 10% (順張り) / 5MA回復 (逆張り)
-        - **全益**: 25MA + 20% (順張り) / 25MA回帰 (逆張り)
+    - **利確**: 半益は**25MA+10%**、全益は**25MA+20%** (順張りの場合)。
     """, unsafe_allow_html=True)
 
 # --- サイドバー設定 ---
@@ -213,7 +176,14 @@ tickers_input = st.text_area(
     height=150
 )
 
-sort_option = st.sidebar.selectbox("並べ替え順", ["AIスコア順 (おすすめ)", "モメンタム順", "RSI順", "時価総額順"])
+# 並べ替えオプションにバックテストを追加
+sort_option = st.sidebar.selectbox("並べ替え順", [
+    "AIスコア順 (おすすめ)", 
+    "バックテスト成績順 (勝率重視)", 
+    "モメンタム順 (上昇日数)", 
+    "RSI順", 
+    "時価総額順"
+])
 
 model_name = 'gemini-2.5-flash'
 model = None
@@ -486,7 +456,7 @@ def get_technical_summary(ticker):
             "backtest": backtest_result_str,
             "momentum": momentum_str,
             "up_days": up_days_count,
-            "real_vol": current_vol # リアルタイム出来高（AIへの情報提供用）
+            "real_vol": current_vol # リアルタイム出来高
         }
     except Exception:
         return None
@@ -520,21 +490,22 @@ def generate_ranking_table(high_score_list, low_score_list):
     
     【重要：表のフォーマット】
     - 以下の**全14列**のMarkdown表を作成してください。
-    - **「<br>」タグは絶対に使用しないでください。** 代わりに `(前日比)` のように括弧を使って改行を回避してください。
+    - 「買い推奨・注目ゾーン」と「様子見・警戒ゾーン」の2つの表を必ず作成してください。
+    - データがない場合でも、表のヘッダーだけは表示してください。
     
     【出力構成】
     **【買い推奨・注目ゾーン】**
-    | 順位 | コード | 企業名 | 時価総額 | スコア | 戦略 | RSI | 出来高(前日比) | 現在値 | 推奨買値(残) | 利確(半/全) | バックテスト | PER/PBR | アイの所感 |
+    | 順位 | コード | 企業名 | 時価総額 | スコア | 戦略 | RSI | 出来高<br>(前日比) | 現在値 | 推奨買値<br>(残) | 利確<br>(半/全) | バック<br>テスト | PER<br>PBR | アイの所感 |
     |:---:|:---:|:---|---:|:---:|:---:|:---:|---:|---:|---:|---:|---:|---:|:---|
     | ... | ... | ... | ... | ... | ... | ... | ... | ... | ... | ... | ... | ... | ... |
 
     **【様子見・警戒ゾーン】**
-    | 順位 | コード | 企業名 | 時価総額 | スコア | 戦略 | RSI | 出来高(前日比) | 現在値 | 推奨買値(残) | 利確(半/全) | バックテスト | PER/PBR | アイの所感 |
+    | 順位 | コード | 企業名 | 時価総額 | スコア | 戦略 | RSI | 出来高<br>(前日比) | 現在値 | 推奨買値<br>(残) | 利確<br>(半/全) | バック<br>テスト | PER<br>PBR | アイの所感 |
     |:---:|:---:|:---|---:|:---:|:---:|:---:|---:|---:|---:|---:|---:|---:|:---|
     | ... | ... | ... | ... | ... | ... | ... | ... | ... | ... | ... | ... | ... | ... |
 
-    ※「バックテスト」列には、データにある `6勝2敗<br>(4%抜)` の `<br>` を削除し `6勝2敗 (4%抜)` と書いてください。
-    ※「PER/PBR」列には、データにある `15.0倍<br>1.2倍` の `<br>` を削除し `15.0倍 / 1.2倍` と書いてください。
+    ※「バックテスト」列には、データにある `6勝2敗<br>(4%抜)` のような文字列をそのまま入れてください。
+    ※「PER<br>PBR」列には、データにある `15.0倍<br>1.2倍` をそのまま入れてください。
     ※アイの所感は、80文字程度で記述してください。
 
     【データ1: 注目ゾーン】
@@ -554,13 +525,16 @@ def generate_ranking_table(high_score_list, low_score_list):
     except Exception as e:
         return f"AI Error: {str(e)}"
 
-# メイン処理
+# --- メイン処理 (状態保持ロジック) ---
 if st.button("🚀 分析開始 (アイに聞く)"):
     if not api_key:
         st.warning("APIキーを入力してください。")
     elif not tickers_input.strip():
         st.warning("銘柄コードを入力してください。")
     else:
+        # 新しいリクエスト時はデータをリセットして取得し直す
+        st.session_state.analyzed_data = [] # 初期化
+        
         normalized_input = tickers_input.replace("\n", ",").replace("、", ",").replace(" ", "")
         raw_tickers = list(set([t for t in normalized_input.split(",") if t]))
         
@@ -577,37 +551,51 @@ if st.button("🚀 分析開始 (アイに聞く)"):
                 if data:
                     data_list.append(data)
                 progress_bar.progress((i + 1) / len(raw_tickers))
-                time.sleep(1.0) 
+                time.sleep(1.0) # アクセス負荷軽減
+            
+            # 取得したデータをセッションステートに保存
+            st.session_state.analyzed_data = data_list
 
-            if data_list:
-                if sort_option == "AIスコア順 (おすすめ)":
-                    data_list.sort(key=lambda x: x['score'], reverse=True)
-                elif sort_option == "モメンタム順 (上昇日数)":
-                    data_list.sort(key=lambda x: x['up_days'], reverse=True)
-                elif sort_option == "バックテスト勝率順":
-                    def get_win_rate(s):
-                        m = re.search(r'(\d+)勝', s)
-                        return int(m.group(1)) if m else -1
-                    data_list.sort(key=lambda x: get_win_rate(x['backtest']), reverse=True)
-                elif sort_option == "RSI順":
-                    data_list.sort(key=lambda x: x['rsi_raw'])
-                elif sort_option == "時価総額順":
-                    data_list.sort(key=lambda x: x['cap'], reverse=True)
+# --- データの表示・並べ替え (セッションステートを使用) ---
+if st.session_state.analyzed_data:
+    data_list = st.session_state.analyzed_data
+    
+    # ユーザーが選んだソート順で並べ替え (再取得なし)
+    if sort_option == "AIスコア順 (おすすめ)":
+        data_list.sort(key=lambda x: x['score'], reverse=True)
+    elif sort_option == "モメンタム順 (上昇日数)":
+        data_list.sort(key=lambda x: x['up_days'], reverse=True)
+    elif sort_option == "バックテスト成績順 (勝率重視)":
+        def get_backtest_score(s):
+            # "3勝1敗" から (勝率, 勝ち数) のタプルを作ってソート
+            m = re.search(r'(\d+)勝(\d+)敗', s)
+            if m:
+                wins = int(m.group(1))
+                losses = int(m.group(2))
+                total = wins + losses
+                rate = wins / total if total > 0 else 0
+                return (rate, wins) # 勝率優先、同率なら勝ち数
+            return (-1, -1)
+        data_list.sort(key=lambda x: get_backtest_score(x['backtest']), reverse=True)
+    elif sort_option == "RSI順":
+        data_list.sort(key=lambda x: x['rsi_raw'])
+    elif sort_option == "時価総額順":
+        data_list.sort(key=lambda x: x['cap'], reverse=True)
 
-                high_score_list = [d for d in data_list if d['score'] >= 60 and d['strategy'] != "👀様子見"]
-                low_score_list = [d for d in data_list if d not in high_score_list]
+    # リスト分割
+    high_score_list = [d for d in data_list if d['score'] >= 60 and d['strategy'] != "👀様子見"]
+    low_score_list = [d for d in data_list if d not in high_score_list]
 
-                for idx, d in enumerate(high_score_list): d['rank'] = idx + 1
-                for idx, d in enumerate(low_score_list): d['rank'] = idx + 1
+    # 順位付け
+    for idx, d in enumerate(high_score_list): d['rank'] = idx + 1
+    for idx, d in enumerate(low_score_list): d['rank'] = idx + 1
 
-                status_text.text("🤖 アイが分析レポートを作成中...")
-                result = generate_ranking_table(high_score_list, low_score_list)
-                
-                st.success("分析完了")
-                st.markdown("### 📊 アイ推奨ポートフォリオ")
-                st.markdown(result, unsafe_allow_html=True)
-                
-                with st.expander("詳細データリスト"):
-                    st.dataframe(pd.DataFrame(data_list)[['code', 'name', 'price', 'cap_disp', 'score', 'rsi_str', 'vol_str', 'backtest']])
-            else:
-                st.error("有効なデータが取得できませんでした。")
+    # AIに表を作らせる (ここだけAPIを呼ぶ)
+    with st.spinner("🤖 アイが分析レポートを作成中... (並べ替え反映)"):
+        result = generate_ranking_table(high_score_list, low_score_list)
+    
+    st.markdown("### 📊 アイ推奨ポートフォリオ")
+    st.markdown(result, unsafe_allow_html=True)
+    
+    with st.expander("詳細データリスト"):
+        st.dataframe(pd.DataFrame(data_list)[['code', 'name', 'price', 'cap_disp', 'score', 'rsi_str', 'vol_str', 'backtest']])
