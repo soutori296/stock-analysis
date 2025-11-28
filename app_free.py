@@ -11,23 +11,15 @@ import re
 ICON_URL = "https://raw.githubusercontent.com/soutori296/stock-analysis/main/aisan.png"
 
 # ページ設定
-st.set_page_config(page_title="教えて！AIさん 2", page_icon="aisan.png", layout="wide")
+st.set_page_config(page_title="教えて！AIさん 2", page_icon="🤖", layout="wide")
 
-# --- 時間管理ロジック (JST / 2024年11月～の新市場ルール対応) ---
+# --- 時間管理ロジック (JST) ---
 def get_market_status():
-    """
-    現在の日本時間(JST)を取得し、市場の状態を判定する
-    - 東証の取引終了: 15:30
-    - 株情報サイトの更新(20分遅れ): 15:50
-    """
     jst_now = datetime.datetime.utcnow() + datetime.timedelta(hours=9)
     current_time = jst_now.time()
-    
     start_time = datetime.time(9, 0)
-    # 【修正】15:30終了 + 20分ディレイ = 15:50 までは「進行中」とみなす
-    end_time = datetime.time(15, 50)
+    end_time = datetime.time(15, 50) # 15:30終了+20分遅延
     
-    # 土日は休み
     if jst_now.weekday() >= 5:
         return "休日(確定値)", jst_now
     
@@ -37,7 +29,7 @@ def get_market_status():
         return "引け後(確定値)", jst_now
 
 status_label, jst_now = get_market_status()
-status_color = "#d32f2f" if "進行中" in status_label else "#1976d2" # 赤 / 青
+status_color = "#d32f2f" if "進行中" in status_label else "#1976d2"
 
 # --- タイトルエリア ---
 col_icon, col_title = st.columns([1.5, 8.5])
@@ -86,7 +78,7 @@ with col_title:
         th:nth-child(5), td:nth-child(5) {{ width: 45px; text-align: center; }} /* スコア */
         th:nth-child(6), td:nth-child(6) {{ width: 70px; font-size: 12px; }} /* 戦略 */
         th:nth-child(7), td:nth-child(7) {{ width: 65px; text-align: center; }} /* RSI */
-        th:nth-child(8), td:nth-child(8) {{ width: 75px; font-size: 12px; text-align: right; }} /* 出来高 */
+        th:nth-child(8), td:nth-child(8) {{ width: 85px; font-size: 12px; text-align: right; }} /* 出来高 */
         th:nth-child(9), td:nth-child(9) {{ width: 80px; text-align: right; font-weight: bold; }} /* 現在値 */
         th:nth-child(10), td:nth-child(10) {{ width: 100px; font-size: 12px; }} /* 推奨買値 */
         th:nth-child(11), td:nth-child(11) {{ width: 110px; font-size: 11px; }} /* 利確 */
@@ -100,36 +92,36 @@ with col_title:
     </p>
     """, unsafe_allow_html=True)
 
-    # --- 完全取扱説明書 ---
-    with st.expander("📘 完全取扱説明書 (データソース・ロジック・スコア計算) を読む"):
-        st.markdown(f"""
-        ### 1. データ取得と時間の仕組み
-        
-        <!-- ここで列幅を調整できます (合計100%になるように設定) -->
-        <table style="width:100%; font-size:14px;">
-          <thead>
-            <tr>
-              <th style="width: 20%;">項目</th>
-              <th style="width: 15%;">取得元</th>
-              <th style="width: 20%;">状態</th>
-              <th style="width: 45%;">解説</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td><b>現在値・出来高</b></td>
-              <td><b>株探</b></td>
-              <td><b>{status_label}</b></td>
-              <td>15:50までは「途中経過」です。15:50以降は「確定値」となります。(東証15:30終了+20分遅延)</td>
-            </tr>
-            <tr>
-              <td><b>テクニカル</b></td>
-              <td><b>Stooq</b></td>
-              <td><b>前日確定</b></td>
-              <td>トレンド判定やバックテストは、ダマシを防ぐため「前日終値」基準で行います。</td>
-            </tr>
-          </tbody>
-        </table>
+# --- 完全取扱説明書 (HTMLタグ対応版) ---
+with st.expander("📘 完全取扱説明書 (データソース・ロジック・スコア計算) を読む"):
+    # ここに unsafe_allow_html=True を入れることで表が正しく描画されます
+    st.markdown(f"""
+    ### 1. データ取得と時間の仕組み
+    <table style="width:100%; font-size:14px;">
+      <thead>
+        <tr>
+          <th style="width: 20%;">項目</th>
+          <th style="width: 15%;">取得元</th>
+          <th style="width: 20%;">状態</th>
+          <th style="width: 45%;">解説</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><b>現在値・出来高</b></td>
+          <td><b>株探</b></td>
+          <td><b>{status_label}</b></td>
+          <td>15:50までは「途中経過」です。15:50以降は「確定値」となります。(東証15:30終了+20分遅延)</td>
+        </tr>
+        <tr>
+          <td><b>テクニカル</b></td>
+          <td><b>Stooq</b></td>
+          <td><b>前日確定</b></td>
+          <td>トレンド判定やバックテストは、ダマシを防ぐため「前日終値」基準で行います。</td>
+        </tr>
+      </tbody>
+    </table>
+
     ### 2. 分析ロジック詳細
     #### ① 戦略判定 (Trend vs Rebound)
     - **🔥 順張り**: 移動平均線が「5日 ＞ 25日 ＞ 75日」の上昇トレンドにある銘柄。押し目を狙います。
@@ -157,7 +149,7 @@ with col_title:
     - **利確ターゲット**:
         - **半益**: 25MA + 10% (順張り) / 5MA回復 (逆張り)
         - **全益**: 25MA + 20% (順張り) / 25MA回帰 (逆張り)
-    """)
+    """, unsafe_allow_html=True) # ← これが重要です！
 
 # --- サイドバー設定 ---
 st.sidebar.header("設定")
@@ -186,7 +178,7 @@ if api_key:
         st.error(f"System Error: {e}")
 
 def get_stock_info_from_kabutan(code):
-    """ 株情報サイトから情報を取得 """
+    """ 株探から情報を取得 """
     url = f"https://kabutan.jp/stock/?code={code}"
     headers = {"User-Agent": "Mozilla/5.0"}
     data = {"name": "不明", "per": "-", "pbr": "-", "price": None, "volume": None, "cap": 0}
@@ -339,6 +331,7 @@ def get_technical_summary(ticker):
         ma75 = last_day['SMA75']
         rsi = last_day['RSI']
         
+        # 出来高倍率 (前日確定値ベース)
         vol_sma5_prev = last_day['Vol_SMA5']
         vol_ratio = 0
         vol_str = "-"
@@ -573,11 +566,3 @@ if st.button("🚀 分析開始 (アイに聞く)"):
                     st.dataframe(pd.DataFrame(data_list)[['code', 'name', 'price', 'cap_disp', 'score', 'rsi_str', 'vol_str', 'backtest']])
             else:
                 st.error("有効なデータが取得できませんでした。")
-
-
-
-
-
-
-
-
