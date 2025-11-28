@@ -58,7 +58,7 @@ with col_title:
         table {{ 
             width: 100%; 
             border-collapse: collapse; 
-            table-layout: fixed; 
+            table-layout: fixed; /* 列幅固定を強制 */
             font-family: "Meiryo", sans-serif;
         }}
         
@@ -69,78 +69,83 @@ with col_title:
             font-weight: bold; 
             text-align: center !important; 
             border: 1px solid #bbbbbb;
-            padding: 4px 2px !important; /* パディングを少し減らす */
-            font-size: 11px !important; /* ヘッダー文字を少し小さくして改行を防ぐ */
+            padding: 4px 1px !important; /* 左右の余白を極限まで削る */
+            font-size: 11px !important; 
             vertical-align: middle !important;
+            line-height: 1.1 !important;
         }}
         
-        /* データセル (全体的に文字サイズを12pxに統一してスッキリさせる) */
+        /* データセル */
         td {{ 
-            font-size: 12px !important; 
+            font-size: 11px !important; /* 全体の文字を小さくして幅を稼ぐ */
             vertical-align: middle !important; 
-            padding: 6px 3px !important; 
-            line-height: 1.3 !important;
+            padding: 4px 2px !important; /* 余白を削る */
+            line-height: 1.2 !important;
             word-wrap: break-word; 
             border: 1px solid #cccccc;
             color: inherit;
         }}
 
-        /* --- 列幅の最適化バランス --- */
+        /* --- 列幅の極限調整 --- */
         
-        /* 1.順位 */
-        th:nth-child(1), td:nth-child(1) {{ width: 30px; text-align: center; }} 
+        /* 1.順位: 25px */
+        th:nth-child(1), td:nth-child(1) {{ width: 25px; text-align: center; }} 
         
-        /* 2.コード */
-        th:nth-child(2), td:nth-child(2) {{ width: 45px; text-align: center; }} 
+        /* 2.コード: 40px */
+        th:nth-child(2), td:nth-child(2) {{ width: 40px; text-align: center; }} 
         
-        /* 3.企業名 (160px確保して改行を防ぐ) */
+        /* 3.企業名: 110px (所感のために少し譲る) */
         th:nth-child(3) {{ text-align: center; }}
-        td:nth-child(3) {{ width: 160px; font-weight: bold; font-size: 13px !important; text-align: left; }} 
+        td:nth-child(3) {{ width: 110px; font-weight: bold; font-size: 12px !important; text-align: left; }} 
         
-        /* 4.時価総額 (65pxに圧縮) */
+        /* 4.時価総額: 60px (大幅縮小) */
         th:nth-child(4) {{ text-align: center; }}
-        td:nth-child(4) {{ width: 65px; text-align: right; font-size: 11px !important; }} 
+        td:nth-child(4) {{ width: 60px; text-align: right; }} 
         
-        /* 5.スコア */
-        th:nth-child(5), td:nth-child(5) {{ width: 40px; text-align: center; }} 
+        /* 5.スコア: 35px */
+        th:nth-child(5), td:nth-child(5) {{ width: 35px; text-align: center; }} 
         
-        /* 6.戦略 */
-        th:nth-child(6), td:nth-child(6) {{ width: 60px; font-size: 11px !important; text-align: center; }} 
+        /* 6.戦略: 55px */
+        th:nth-child(6), td:nth-child(6) {{ width: 55px; text-align: center; }} 
         
-        /* 7.RSI */
-        th:nth-child(7), td:nth-child(7) {{ width: 55px; text-align: center; }} 
+        /* 7.RSI: 50px (大幅縮小) */
+        th:nth-child(7), td:nth-child(7) {{ width: 50px; text-align: center; }} 
         
-        /* 8.出来高 (55px) */
+        /* 8.出来高: 55px (縮小) */
         th:nth-child(8) {{ text-align: center; }}
-        td:nth-child(8) {{ width: 55px; font-size: 11px !important; text-align: right; }} 
+        td:nth-child(8) {{ width: 55px; text-align: right; }} 
         
-        /* 9.現在値 */
+        /* 9.現在値: 60px (縮小) */
         th:nth-child(9) {{ text-align: center; }}
-        td:nth-child(9) {{ width: 65px; text-align: right; font-weight: bold; }} 
+        td:nth-child(9) {{ width: 60px; text-align: right; font-weight: bold; }} 
         
-        /* 10.推奨買値 (85px) */
+        /* 10.推奨買値: 75px (縮小) */
         th:nth-child(10) {{ text-align: center; }}
-        td:nth-child(10) {{ width: 85px; font-size: 11px !important; text-align: right; }} 
+        td:nth-child(10) {{ width: 75px; text-align: right; }} 
         
-        /* 11.利確 (120px確保) */
+        /* 11.利確: 100px (最小限確保) */
         th:nth-child(11) {{ text-align: center; }}
-        td:nth-child(11) {{ width: 120px; font-size: 11px !important; text-align: left; }} 
+        td:nth-child(11) {{ width: 100px; text-align: left; }} 
         
-        /* 12.バックテスト (70px) */
+        /* 12.バックテスト: 70px */
         th:nth-child(12), td:nth-child(12) {{ 
             width: 70px; 
-            font-size: 11px !important; 
             color: #0056b3; 
             font-weight: bold; 
             text-align: center;
         }} 
         
-        /* 13.PER/PBR (60px) */
-        th:nth-child(13), td:nth-child(13) {{ width: 60px; font-size: 11px !important; text-align: center; }} 
+        /* 13.PER/PBR: 55px (縮小) */
+        th:nth-child(13), td:nth-child(13) {{ width: 55px; text-align: center; }} 
         
-        /* 14.所感 (残り全て) */
+        /* 14.所感: 残り全て (これで広くなるはず) */
         th:nth-child(14) {{ text-align: center; }}
-        td:nth-child(14) {{ width: auto; font-size: 12px !important; text-align: left; }} 
+        td:nth-child(14) {{ 
+            width: auto; 
+            font-size: 12px !important; 
+            text-align: left; 
+            padding-left: 5px !important;
+        }} 
         
     </style>
     <p class="big-font" style="margin-top: 0px;">
@@ -533,7 +538,6 @@ def generate_ranking_table(high_score_list, low_score_list):
     
     【重要：表のフォーマット】
     - 以下の**全14列**のMarkdown表を作成してください。
-    - 「買い推奨・注目ゾーン」と「様子見・警戒ゾーン」の2つの表を必ず作成してください。
     - データがない場合でも、表のヘッダーだけは表示してください。
     
     【出力構成】
