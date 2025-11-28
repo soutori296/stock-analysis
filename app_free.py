@@ -100,36 +100,36 @@ with col_title:
     </p>
     """, unsafe_allow_html=True)
 
-# --- 完全取扱説明書 ---
-with st.expander("📘 完全取扱説明書 (データソース・ロジック・スコア計算) を読む"):
-    st.markdown(f"""
-    ### 1. データ取得と時間の仕組み
-    
-    <!-- ここで列幅を調整できます (合計100%になるように設定) -->
-    <table style="width:100%; font-size:14px;">
-      <thead>
-        <tr>
-          <th style="width: 20%;">項目</th>
-          <th style="width: 15%;">取得元</th>
-          <th style="width: 20%;">状態</th>
-          <th style="width: 45%;">解説</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td><b>現在値・出来高</b></td>
-          <td><b>株探</b></td>
-          <td><b>{status_label}</b></td>
-          <td>15:50までは「途中経過」です。15:50以降は「確定値」となります。(東証15:30終了+20分遅延)</td>
-        </tr>
-        <tr>
-          <td><b>テクニカル</b></td>
-          <td><b>Stooq</b></td>
-          <td><b>前日確定</b></td>
-          <td>トレンド判定やバックテストは、ダマシを防ぐため「前日終値」基準で行います。</td>
-        </tr>
-      </tbody>
-    </table>
+    # --- 完全取扱説明書 ---
+    with st.expander("📘 完全取扱説明書 (データソース・ロジック・スコア計算) を読む"):
+        st.markdown(f"""
+        ### 1. データ取得と時間の仕組み
+        
+        <!-- ここで列幅を調整できます (合計100%になるように設定) -->
+        <table style="width:100%; font-size:14px;">
+          <thead>
+            <tr>
+              <th style="width: 20%;">項目</th>
+              <th style="width: 15%;">取得元</th>
+              <th style="width: 20%;">状態</th>
+              <th style="width: 45%;">解説</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><b>現在値・出来高</b></td>
+              <td><b>株探</b></td>
+              <td><b>{status_label}</b></td>
+              <td>15:50までは「途中経過」です。15:50以降は「確定値」となります。(東証15:30終了+20分遅延)</td>
+            </tr>
+            <tr>
+              <td><b>テクニカル</b></td>
+              <td><b>Stooq</b></td>
+              <td><b>前日確定</b></td>
+              <td>トレンド判定やバックテストは、ダマシを防ぐため「前日終値」基準で行います。</td>
+            </tr>
+          </tbody>
+        </table>
     ### 2. 分析ロジック詳細
     #### ① 戦略判定 (Trend vs Rebound)
     - **🔥 順張り**: 移動平均線が「5日 ＞ 25日 ＞ 75日」の上昇トレンドにある銘柄。押し目を狙います。
@@ -573,6 +573,7 @@ if st.button("🚀 分析開始 (アイに聞く)"):
                     st.dataframe(pd.DataFrame(data_list)[['code', 'name', 'price', 'cap_disp', 'score', 'rsi_str', 'vol_str', 'backtest']])
             else:
                 st.error("有効なデータが取得できませんでした。")
+
 
 
 
