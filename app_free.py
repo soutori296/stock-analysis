@@ -119,7 +119,10 @@ if api_key:
         st.error(f"System Error: {e}")
 
 def get_stock_info_from_kabutan(code):
-    """株探から情報を取得"""
+    """
+    株探から情報を取得 (構造指定・確実版)
+    PER/PBRはテーブル構造を利用して確実に取得
+    """
     url = f"https://kabutan.jp/stock/?code={code}"
     headers = {"User-Agent": "Mozilla/5.0"}
     data = {"name": "不明", "per": "-", "pbr": "-", "price": None, "volume": None, "cap": 0}
@@ -127,6 +130,7 @@ def get_stock_info_from_kabutan(code):
     try:
         res = requests.get(url, headers=headers, timeout=5)
         res.encoding = res.apparent_encoding
+        # HTMLそのままで処理する部分と、テキスト化する部分を使い分ける
         html = res.text.replace("\n", "").replace("\r", "")
         text_content = re.sub(r'<[^>]+>', ' ', html)
         text_content = re.sub(r'\s+', ' ', text_content)
@@ -160,19 +164,21 @@ def get_stock_info_from_kabutan(code):
                 try: data["cap"] = int(raw_cap)
                 except: data["cap"] = 0
 
-        # 5. PER / PBR
-        def find_value_strict(keyword, text):
-            idx = text.find(keyword)
-            if idx == -1: return None
-            chunk = text[idx:idx+50]
-            match = re.search(r'([0-9\.,\-]+)\s*倍', chunk)
-            return match
+        # 5. PER / PBR (HTML構造依存で確実に取得)
+        # <div id="stockinfo_i3"> 内のテーブルを探す
+        # 1つ目のtdがPER、2つ目のtdがPBRという構造を利用
+        i3_match = re.search(r'<div id="stockinfo_i3">.*?<tbody>(.*?)</tbody>', html)
+        if i3_match:
+            tbody = i3_match.group(1)
+            tds = re.findall(r'<td.*?>(.*?)</td>', tbody)
+            
+            def clean_val(s):
+                # タグを除去して空白削除
+                return re.sub(r'<[^>]+>', '', s).strip()
 
-        m_per = find_value_strict("PER", text_content)
-        if m_per: data["per"] = m_per.group(1) + "倍"
-
-        m_pbr = find_value_strict("PBR", text_content)
-        if m_pbr: data["pbr"] = m_pbr.group(1) + "倍"
+            if len(tds) >= 2:
+                data["per"] = clean_val(tds[0])
+                data["pbr"] = clean_val(tds[1])
 
         return data
     except Exception:
@@ -373,7 +379,7 @@ def generate_ranking_table(high_score_list, low_score_list):
             txt += f"""
             [{d['code']} {d['name']}]
             - スコア:{d['score']}, 戦略:{d['strategy']}
-            - ★モメンタム: {d['momentum']} (5日間の勝敗)
+            - ★モメンタム: {d['momentum']}
             - 時価総額:{d['cap_disp']}, RSI:{d['rsi_str']}, 出来高:{d['vol_str']}
             - 裏データ(バックテスト): {d['backtest']}
             - 現在値:{d['price']:,.0f}円
@@ -460,11 +466,10 @@ if st.button("🚀 分析開始 (アイに聞く)"):
                 elif sort_option == "時価総額順":
                     data_list.sort(key=lambda x: x['cap'], reverse=True)
 
-                # --- 修正点: 様子見は強制的に下のリストへ ---
+                # 様子見は強制的に下のリストへ
                 high_score_list = [d for d in data_list if d['score'] >= 70 and d['strategy'] != "👀様子見"]
                 low_score_list = [d for d in data_list if d not in high_score_list]
 
-                # 順位付け直し
                 for idx, d in enumerate(high_score_list): d['rank'] = idx + 1
                 for idx, d in enumerate(low_score_list): d['rank'] = idx + 1
 
