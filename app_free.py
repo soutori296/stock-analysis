@@ -7,6 +7,7 @@ import requests
 import io
 import re
 import math
+import numpy as np # for np.floor/ceil
 
 # --- アイコン設定 ---
 ICON_URL = "https://raw.githubusercontent.com/soutori296/stock-analysis/main/aisan.png"
@@ -26,8 +27,7 @@ if 'error_messages' not in st.session_state:
 # --- 時間管理 (JST) ---
 def get_market_status():
     """
-    市場状態を返す（文字列と現在時刻のtuple）。
-    指示書に合わせて「15:50以降」を引け後（当日確定値）とするよう修正。
+    市場状態を返す（文字列と現在時刻のtuple）。15:50以降を引け後（当日確定値）とする。
     """
     jst_now = datetime.datetime.utcnow() + datetime.timedelta(hours=9)
     current_time = jst_now.time()
@@ -56,7 +56,6 @@ def get_volume_weight(current_dt):
     """
     出来高補正ウエイトを返す。引け後・休日は1.0。
     """
-    # 再評価用の市場状態を確認
     status, _ = get_market_status()
     if "休日" in status or "引け後" in status or current_dt.hour < 9:
         return 1.0
@@ -158,7 +157,7 @@ st.markdown(f"""
 </p>
 """, unsafe_allow_html=True)
 
-# --- 説明書 (マニュアル詳細化 - 時価総額ロジックを修正) ---
+# --- 説明書 (マニュアル詳細化 - 時価総額ロジックと利確目標を更新) ---
 with st.expander("📘 取扱説明書 (データ仕様・判定基準)"):
     st.markdown("""
     <div class="center-text">
@@ -208,7 +207,7 @@ with st.expander("📘 取扱説明書 (データ仕様・判定基準)"):
         <tr><td><b>合計</b></td><td>(各項目の合計)</td><td><b>最大100点</b></td><td>算出されたスコアが100点を超えた場合でも、<b>上限は100点</b>となります。</td></tr>
     </table>
 
-    <h5>③ 押し目勝敗数（バックテスト）</h5>
+    <h5>③ 押し目勝敗数（バックテスト）と推奨利確目標</h5>
     <table class="desc-table">
         <tr><th style="width:20%">項目</th><th style="width:80%">ロジック詳細</th></tr>
         <tr>
@@ -225,7 +224,14 @@ with st.expander("📘 取扱説明書 (データ仕様・判定基準)"):
                 <b>1兆円以上</b>：エントリー価格から<b>2.0%の上昇</b><br>
                 <b>3000億円以上 1兆円未満</b>：エントリー価格から<b>3.0%の上昇</b><br>
                 <b>500億円以上 3000億円未満</b>：エントリー価格から<b>4.0%の上昇</b><br>
-                <b>500億円未満</b>：エントリー価格から<b>6.0%の上昇</b>
+                <b>500億円未満</b>：エントリー価格から<b>5.0%の上昇</b>
+            </td>
+        </tr>
+        <tr>
+            <td><b>利確目標(半/全)</b><br><span style="font-size:12px;">(売買戦略の推奨値)</span></td>
+            <td>
+                <b>🔥 順張り</b>：半益は「時価総額別目標の50%」を計算後、<b>直近の100円節目から -5円</b> に調整。<br>
+                <b>🌊 逆張り</b>：半益は「5日移動平均線」から **-5円**、全益は「25日移動平均線」から **-5円** に調整。
             </td>
         </tr>
         <tr>
@@ -234,7 +240,7 @@ with st.expander("📘 取扱説明書 (データ仕様・判定基準)"):
         </tr>
         <tr>
             <td><b>解説</b></td>
-            <td>このロジックで過去にトレードした場合の勝敗数。利確目標は大型株と小型株で目標リターンを変えることで、現実的な売買の期待値を測ります。</td>
+            <td>このロジックで過去にトレードした場合の勝敗数。利確目標は大型株と小型株で目標リターンを変えることで、現実的な売買の期待値を測ります。心理的な節目・抵抗線手前での確実な利確を推奨するロジックを適用しています。</td>
         </tr>
     </table>
 
@@ -363,7 +369,6 @@ def get_stock_info(code):
 
         # 4本値の取得ロジック
         ohlc_map = {"始値": "open", "高値": "high", "安値": "low", "終値": "close"}
-        # 4本値のテーブル全体を検索
         ohlc_tbody_match = re.search(r'<table[^>]*>.*?<tbody>\s*(<tr>.*?</tr>\s*){4}.*?</tbody>', html, re.DOTALL)
 
         if ohlc_tbody_match:
@@ -380,7 +385,6 @@ def get_stock_info(code):
 
         return data
     except Exception as e:
-        # エラーはセッションに格納
         st.session_state.error_messages.append(f"データ取得エラー (コード:{code}): Kabutanアクセス/解析失敗。詳細: {e}")
         return data
 
@@ -388,7 +392,7 @@ def get_stock_info(code):
 def run_backtest(df, market_cap):
     """
     押し目勝敗数（バックテスト）を実行する。
-    ★ 修正: 時価総額に応じた4段階の利確目標を設定。
+    ★ 修正: 時価総額に応じた4段階の利確目標を設定 (小型株は+5.0%)。
     """
     try:
         if len(df) < 80: return "データ不足", 0
@@ -404,8 +408,8 @@ def run_backtest(df, market_cap):
             target_pct = 0.04
             cap_str = "4.0%"
         else: # 500億円未満
-            target_pct = 0.06
-            cap_str = "6.0%"
+            target_pct = 0.05 # ★ 修正: 5.0%に変更
+            cap_str = "5.0%"  # ★ 修正: 5.0%に変更
         # ★ 修正箇所ここまで
             
         wins = 0
@@ -448,21 +452,25 @@ def run_backtest(df, market_cap):
             i += 1
         
         if wins + losses == 0: return "機会なし", 0
-        # ★ 修正: HTMLを適正化
         return f"{wins}勝{losses}敗<br>(<b>{cap_str}</b>抜)", wins+losses
-    except Exception as e:
+    except Exception:
         return "計算エラー", 0
+
+# 時価総額から目標リターン%を取得するヘルパー関数
+def get_target_pct(market_cap):
+    if market_cap >= 10000: return 0.02
+    elif market_cap >= 3000: return 0.03
+    elif market_cap >= 500: return 0.04
+    else: return 0.05 # ★ 修正後の小型株リターン
 
 @st.cache_data(ttl=300) # キャッシュのTTLを5分 (300秒) に設定
 def get_stock_data(ticker):
     
-    # 実行時の市場ステータスを再取得
     status, jst_now_local = get_market_status() 
     
     ticker = str(ticker).strip().replace(".T", "").upper()
     stock_code = f"{ticker}.JP" 
     
-    # Kabutan情報取得（4本値を含む）
     info = get_stock_info(ticker) 
     
     try:
@@ -476,17 +484,17 @@ def get_stock_data(ticker):
             st.session_state.error_messages.append(f"データ不足エラー (コード:{ticker}): Stooq CSV解析失敗。詳細: {csv_e}")
             return None
         
-        df.columns = df.columns.str.strip() # カラム名の空白除去
+        df.columns = df.columns.str.strip()
         df = df.sort_index()
 
         if df.empty or 'Close' not in df.columns or len(df) < 80: 
             st.session_state.error_messages.append(f"データ不足エラー (コード:{ticker}): データ期間が短すぎます (80日未満) またはカラム不足。")
             return None
         
-        # --- ★ 修正: 引け後（15:50以降）の場合、当日確定値を結合 ---
+        # --- 2) 引け後（15:50以降）の場合、当日確定値を結合 ---
         if status == "引け後(確定値)":
             kabu_close = info.get("close")
-            if kabu_close is None: kabu_close = info.get("price") # 終値が取れない場合は現在値を代替
+            if kabu_close is None: kabu_close = info.get("price")
 
             if info.get("open") and info.get("high") and info.get("low") and info.get("volume") and kabu_close:
                 today_date = jst_now_local.strftime("%Y-%m-%d")
@@ -499,24 +507,20 @@ def get_stock_data(ticker):
                         'Close': kabu_close,
                         'Volume': info['volume']
                     }, name=pd.to_datetime(today_date))
-                    df = pd.concat([df, new_row.to_frame().T]) # 当日データを結合
-        # -------------------------------------------------------------
+                    df = pd.concat([df, new_row.to_frame().T])
         
         df = df.sort_index()
 
-        # --- ★ 修正: 現在値の決定ロジック (常に株探の最新データ) ---
+        # --- 3) 現在値の決定ロジック (常に株探の最新データ) ---
         curr_price = info.get("close")
-        if curr_price is None:
-             curr_price = info.get("price")
-        if curr_price is None:
-             curr_price = df.iloc[-1].get('Close', None)
+        if curr_price is None: curr_price = info.get("price")
+        if curr_price is None: curr_price = df.iloc[-1].get('Close', None)
         
         if curr_price is None or math.isnan(curr_price):
              st.session_state.error_messages.append(f"価格データ取得エラー (コード:{ticker}): 価格情報が見つかりませんでした。")
              return None
-        # -------------------------------------------------------------
 
-        # SMA, RSI, 勝率, バックテストの計算
+        # テクニカル指標の計算
         df['SMA5'] = df['Close'].rolling(5).mean()
         df['SMA25'] = df['Close'].rolling(25).mean()
         df['SMA75'] = df['Close'].rolling(75).mean()
@@ -533,7 +537,6 @@ def get_stock_data(ticker):
         win_rate_pct = (up_days / 5) * 100
         momentum_str = f"{win_rate_pct:.0f}%"
 
-        # run_backtest には時価総額 info["cap"] を渡すだけでOK (ロジックは run_backtest 側で完結)
         bt_str, bt_cnt = run_backtest(df, info["cap"]) 
         
         last = df.iloc[-1]
@@ -568,11 +571,20 @@ def get_stock_data(ticker):
             strategy = "🔥順張り"
             buy_target = int(ma5) 
             
-            p_half_candidate = int(ma25 * 1.10)
-            p_full_candidate = int(ma25 * 1.20)
+            target_pct = get_target_pct(info["cap"])
+            target_half_raw = curr_price * (1 + target_pct / 2) # バックテスト目標の50%
+            target_full_raw = curr_price * (1 + target_pct)      # バックテスト目標の100%
+
+            # 半益目標の節目回避ロジック（100円の節目手前-5円）
+            rounded_half = np.ceil(target_half_raw / 100) * 100
+            p_half_candidate = int(rounded_half - 5)
+            
+            # 全益目標の確定 (小数点以下切り捨て)
+            p_full_candidate = int(target_full_raw)
             
             if p_half_candidate > curr_price:
                  p_half = p_half_candidate
+                 # 全益目標も現在値より高い場合のみ採用
                  p_full = p_full_candidate if p_full_candidate > curr_price else p_half_candidate
             else:
                  p_half = 0
@@ -582,9 +594,16 @@ def get_stock_data(ticker):
         elif rsi_val <= 30 or (curr_price < ma25 * 0.9 if ma25 else False):
             strategy = "🌊逆張り"
             buy_target = int(curr_price) 
-            p_half = int(ma5) 
-            p_full = int(ma25) 
-        
+            
+            # MA手前利確ロジック（MAの価格から-5円）
+            p_half_candidate = int(ma5 - 5) if ma5 else 0
+            p_full_candidate = int(ma25 - 5) if ma25 else 0
+            
+            # 現在値より低い場合は無効
+            p_half = p_half_candidate if p_half_candidate > curr_price else 0
+            p_full = p_full_candidate if p_full_candidate > curr_price else 0
+
+        # スコア計算
         score = 50
         if "順張り" in strategy: score += 20
         if "逆張り" in strategy: score += 15
@@ -675,11 +694,7 @@ def batch_analyze_with_ai(data_list):
                 try:
                     c_code_part, c_com = line.split("|", 1)
                     c_code = c_code_part.replace("ID:", "").strip()
-                    
-                    # ★ 修正: コメントの先頭から銘柄名が不要な場合は、さらに調整が必要。
-                    # ここではAIの出力形式を信じ、ID:コードのみ除去。
                     comments[c_code] = c_com.strip()
-
                 except:
                     pass
 
@@ -713,20 +728,20 @@ if st.button("🚀 分析開始 (アイに聞く)"):
         with st.spinner("アイが全銘柄を診断中..."):
             comments_map, monologue = batch_analyze_with_ai(data_list)
             
-            # ★ 修正: コメントの先頭から「銘柄名 | 」を除去する処理を追加
+            # コメントの先頭から「銘柄名 | 」のような不要な文字列を削除する処理
             final_comments_map = {}
             for code, comment in comments_map.items():
                 target_name = next((d['name'] for d in data_list if d['code'] == code), None)
-                if target_name and comment.startswith(target_name):
-                    # "東洋電機製造 | " を除去するために、最初の "|" 以降を取得
-                    if "|" in comment:
-                         comment = comment.split("|", 1)[-1].strip()
-                    # "|" がない場合でも、銘柄名がコメント先頭にある場合は削除を試みる
+                if target_name:
+                    # コメントが「銘柄名 | コメント」の形式で始まっている場合に対応
+                    if comment.startswith(target_name) and "|" in comment:
+                        comment = comment.split("|", 1)[-1].strip()
+                    # 単に「銘柄名」で始まっている場合に対応
                     elif comment.startswith(target_name):
                         comment = comment[len(target_name):].strip()
 
                 final_comments_map[code] = comment
-            # ★ 修正ここまで
+            # 修正ここまで
 
             for d in data_list:
                 d["comment"] = final_comments_map.get(d["code"], "コメント生成失敗")
