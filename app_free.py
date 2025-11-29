@@ -465,17 +465,19 @@ def is_after_close():
     return jst_now.time() >= datetime.time(15, 50)
 
 # --- 簡易版: RSI計算（n日間） ---
-def calc_rsi(prices, period=14):
+def calc_rsi(prices: pd.Series, period: int = 14) -> pd.Series:
     delta = prices.diff()
     gain = delta.clip(lower=0)
     loss = -delta.clip(upper=0)
-
-    avg_gain = gain.rolling(window=period, min_periods=period).mean()
-    avg_loss = loss.rolling(window=period, min_periods=period).mean()
-
-    rs = avg_gain / avg_loss.replace(0, 1e-10)  # 0で割らないように小さな値で置換
+    
+    avg_gain = gain.rolling(window=period, min_periods=1).mean()
+    avg_loss = loss.rolling(window=period, min_periods=1).mean()
+    
+    rs = avg_gain / avg_loss.replace(0, np.nan)  # 0除算防止
     rsi = 100 - (100 / (1 + rs))
-    return rsi.round(0)  # 表示用に整数化
+    
+    rsi = rsi.fillna(0)  # NaNを0に置換
+    return rsi
 
 def make_backtest_string(df):
     """
@@ -873,6 +875,7 @@ if st.session_state.analyzed_data:
         if 'backtest' not in df_raw.columns and 'backtest_raw' in df_raw.columns:
             df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'})
         st.dataframe(df_raw)
+
 
 
 
