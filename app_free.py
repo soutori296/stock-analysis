@@ -466,29 +466,31 @@ def is_after_close():
     return jst_now.time() >= datetime.time(15, 50)
 
 # --- 簡易版: RSI計算（n日間） ---
-def calc_rsi(series: pd.Series, period: int = 14) -> pd.Series:
+def calc_rsi(prices: pd.Series, period: int = 14) -> pd.Series:
     """
-    Pandas Series から RSI を計算する関数
-    series: 終値のSeries
-    period: RSI計算期間
-    戻り値: RSIのSeries
+    RSIを計算する関数
+    prices: 株価終値のSeries
+    period: RSI計算期間（デフォルト14日）
+    return: RSIのSeries
     """
-    delta = series.diff()  # 価格差
-    gain = delta.where(delta > 0, 0.0)  # 上昇分のみ
-    loss = -delta.where(delta < 0, 0.0)  # 下落分のみ
+    if prices.empty:
+        return pd.Series(dtype=float)
 
-    # 平均値（ローリング計算、min_periods=1で最初の行も計算可能）
-    avg_gain = gain.rolling(window=period, min_periods=1).mean()
-    avg_loss = loss.rolling(window=period, min_periods=1).mean()
+    delta = prices.diff()  # 価格差分
+    gain = delta.clip(lower=0)  # 上昇分だけ
+    loss = -delta.clip(upper=0)  # 下落分だけ
 
-    # RS = 平均上昇 / 平均下落
-    rs = avg_gain / avg_loss.replace(0, np.nan)  # 0で割るのを避ける
+    # 平均値を計算（指数移動平均の方が一般的）
+    avg_gain = gain.rolling(window=period, min_periods=period).mean()
+    avg_loss = loss.rolling(window=period, min_periods=period).mean()
 
-    # RSI 計算
+    # RSIの計算
+    rs = avg_gain / avg_loss
     rsi = 100 - (100 / (1 + rs))
 
-    # 最初の行で計算できない場合は50に近似
-    rsi = rsi.fillna(50)
+    # 初期NaNを0やNoneに置き換える場合
+    rsi = rsi.fillna(0)
+
     return rsi
 
 def make_backtest_string(df):
@@ -887,6 +889,7 @@ if st.session_state.analyzed_data:
         if 'backtest' not in df_raw.columns and 'backtest_raw' in df_raw.columns:
             df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'})
         st.dataframe(df_raw)
+
 
 
 
