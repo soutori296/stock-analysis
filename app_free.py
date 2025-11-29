@@ -230,14 +230,15 @@ def fmt_market_cap(val):
             cho = val_int // 10000
             oku = val_int % 10000
             if oku == 0: return f"{cho}兆円"
-            else: return f"{cho}兆{oku:,}億円" # 億の部分にカンマ追加
+            # 時価総額の枠が49兆4400億円でも改行されない程度に広がるように、億のカンマ表示を削除してシンプルに。
+            else: return f"{cho}兆{oku}億円" 
         else:
-            return f"{val_int:,}億円"
+            return f"{val_int}億円"
     except:
         return "-"
 
 def get_stock_info(code):
-    """ 株情報サイトから情報を取得 (構造指定でPER/PBRを分離) """
+    """ 株情報サイトから情報を取得 (構造指定でPER/PBRを分離) - 時価総額ロジックを元のシンプルなものに戻す """
     url = f"https://kabutan.jp/stock/?code={code}"
     headers = {"User-Agent": "Mozilla/5.0"}
     data = {"name": "不明", "per": "-", "pbr": "-", "price": None, "volume": None, "cap": 0}
@@ -261,6 +262,7 @@ def get_stock_info(code):
         if m_vol: data["volume"] = float(m_vol.group(1).replace(",", ""))
 
         # 時価総額
+        # 元のシンプルな時価総額取得ロジック (改行されない程度に広げるため、表示はfmt_market_capに任せる)
         m_cap = re.search(r'時価総額</th>\s*<td[^>]*>(.*?)</td>', html)
         if m_cap:
             # <br>やその他のタグを全て除去
@@ -271,8 +273,10 @@ def get_stock_info(code):
                 trillion = float(parts[0].replace(",", ""))
                 billion = 0
                 if len(parts) > 1 and "億" in parts[1]:
+                    # 億の部分の数値のみを抽出
                     b_match = re.search(r'([0-9,]+)', parts[1])
                     if b_match: billion = float(b_match.group(1).replace(",", ""))
+                # 億単位の数値を「万」単位に変換 (1万倍)
                 val = trillion * 10000 + billion
             elif "億" in cap_str:
                 b_match = re.search(r'([0-9,]+)', cap_str)
@@ -303,9 +307,11 @@ def run_backtest(df, market_cap):
     try:
         if len(df) < 80: return "データ不足", 0
         target_pct = 0.04 
+        # 時価総額1兆円未満：エントリー価格から**4%の上昇**
         cap_str = "4%"
         if market_cap >= 10000: # 1兆円
             target_pct = 0.02
+            # 時価総額1兆円超：エントリー価格から**2%の上昇**
             cap_str = "2%"
             
         wins = 0
@@ -340,7 +346,7 @@ def run_backtest(df, market_cap):
             i += 1
         
         if wins + losses == 0: return "機会なし", 0
-        return f"{wins}勝{losses}敗<br>({cap_str}抜)", wins+losses
+        return f"{wins}勝{losses}敗<br>(**{cap_str}**抜)", wins+losses
     except:
         return "計算エラー", 0
 
@@ -418,14 +424,19 @@ def get_stock_data(ticker):
         if up_days >= 4: score += 5
         score = min(100, score) # スコアの上限を100に設定
 
+        # 大口流入表示
+        vol_disp = f"🔥{vol_ratio:.1f}倍" if vol_ratio > 1.5 else f"{vol_ratio:.1f}倍"
+
         return {
             "code": ticker,
             "name": info["name"],
             "price": curr_price,
             "cap_val": info["cap"],
+            "cap_disp": fmt_market_cap(info["cap"]),
             "per": info["per"], "pbr": info["pbr"],
             "rsi": rsi_val, "rsi_disp": f"{rsi_mark}{rsi_val:.1f}",
             "vol_ratio": vol_ratio,
+            "vol_disp": vol_disp, # 新規：大口流入表示用
             "momentum": momentum_str,
             "strategy": strategy,
             "score": score,
@@ -451,7 +462,7 @@ def batch_analyze_with_ai(data_list):
         full_pct = ((p_full / price) - 1) * 100 if price > 0 and p_full > 0 else 0
         
         # コメント生成用の情報に追加
-        prompt_text += f"ID:{d['code']} | {d['name']} | 現在:{price:,.0f} | 戦略:{d['strategy']} | RSI:{d['rsi']:.1f} | 5MA乖離率:{(price/d['buy']-1)*100 if d['buy']>0 else 0:.1f}% | 利確目標(半):{half_pct:+.1f}% | 利確目標(全):{full_pct:+.1f}%\n"
+        prompt_text += f"ID:{d['code']} | {d['name']} | 現在:{price:,.0f} | 戦略:{d['strategy']} | RSI:{d['rsi']:.1f} | 5MA乖離率:{(price/d['buy']-1)*100 if d['buy']>0 else 0:.1f}% | 利確目標(半):{half_pct:+.1f}% | 利確目標(全):{full_pct:+.1f}% | 大口流入:{d['vol_ratio']:.1f}倍\n"
     
     prompt = f"""
     あなたは「アイ」という名前のプロトレーダー（30代女性、冷静・理知的）。
@@ -461,6 +472,7 @@ def batch_analyze_with_ai(data_list):
     1.  <b>銘柄ごとに特徴を活かした、人間味のある（画一的でない）文章にしてください。</b>
     2.  戦略の根拠（パーフェクトオーダー、売られすぎ、乖離率など）と、RSIの状態を必ず具体的に盛り込んでください。
     3.  特に順張り銘柄で、利確目標(半)の乖離率が低い（+5%以下など）場合は、「目標達成が近い」または「短期的なリターンは限定的」といった**一歩踏み込んだ見解**を加えてください。
+    4.  「大口流入」が1.5倍を超えている場合は、その事実を盛り込んでください。
     
     【出力形式】
     コード | コメント
@@ -558,16 +570,20 @@ if st.session_state.analyzed_data:
             
             # backtestフィールドはHTML表示用
             bt_display = d.get("backtest", "-").replace(" (", "<br>(") 
-
-            rows += f'<tr><td class="td-center">{i+1}</td><td class="td-center">{d.get("code")}</td><td class="th-left td-bold">{d.get("name")}</td><td class="td-right">{d.get("cap_disp")}</td><td class="td-center">{d.get("score")}</td><td class="td-center">{d.get("strategy")}</td><td class="td-center">{d.get("momentum")}</td><td class="td-center">{d.get("rsi_disp")}</td><td class="td-right">{d.get("vol_ratio", 0):.1f}倍</td><td class="td-right td-bold">{price:,.0f}</td><td class="td-right">{buy:,.0f}<br><span style="font-size:10px;color:#666">{diff_txt}</span></td><td class="td-left" style="line-height:1.2;font-size:11px;">{target_txt}</td><td class="td-center td-blue">{bt_display}</td><td class="td-center">{d.get("per")}<br>{d.get("pbr")}</td><td class="th-left">{d.get("comment")}</td></tr>'
+            
+            # 大口流入の表示
+            vol_disp = d.get("vol_disp", "-")
+            
+            rows += f'<tr><td class="td-center">{i+1}</td><td class="td-center">{d.get("code")}</td><td class="th-left td-bold">{d.get("name")}</td><td class="td-right">{d.get("cap_disp")}</td><td class="td-center">{d.get("score")}</td><td class="td-center">{d.get("strategy")}</td><td class="td-center">{d.get("momentum")}</td><td class="td-center">{d.get("rsi_disp")}</td><td class="td-right">{vol_disp}</td><td class="td-right td-bold">{price:,.0f}</td><td class="td-right">{buy:,.0f}<br><span style="font-size:10px;color:#666">{diff_txt}</span></td><td class="td-left" style="line-height:1.2;font-size:11px;">{target_txt}</td><td class="td-center td-blue">{bt_display}</td><td class="td-center">{d.get("per")}<br>{d.get("pbr")}</td><td class="th-left">{d.get("comment")}</td></tr>'
 
         # ヘッダーの幅を調整
-        # 利確目標のセルに乖離率も入るため、幅を90pxから120pxに広げ、他の幅を調整
+        # 戦略: 75px (＋2文字程度)、時価総額: 100px (49兆4400億円でも改行されない程度)、利確目標: 120px
+        # 大口流入: 80px (🔥1.5倍 が入るように)
         return f'''
         <h4>{title}</h4>
         <div class="table-container"><table class="ai-table">
         <thead><tr>
-        <th style="width:25px;">No</th><th style="width:45px;">コード</th><th class="th-left" style="width:130px;">企業名</th><th style="width:90px;">時価総額</th><th style="width:35px;">点</th><th style="width:60px;">戦略</th><th style="width:50px;">直近<br>勝率</th><th style="width:50px;">RSI</th><th style="width:50px;">出来高<br>(前比)</th><th style="width:60px;">現在値</th><th style="width:70px;">推奨買値<br>(乖離)</th><th style="width:120px;">利確目標<br>(乖離率%)</th><th style="width:85px;">押し目<br>勝敗数</th><th style="width:70px;">PER<br>PBR</th><th class="th-left" style="min-width:200px;">アイの所感</th>
+        <th style="width:25px;">No</th><th style="width:45px;">コード</th><th class="th-left" style="width:130px;">企業名</th><th style="width:100px;">時価総額</th><th style="width:35px;">点</th><th style="width:75px;">戦略</th><th style="width:50px;">直近<br>勝率</th><th style="width:50px;">RSI</th><th style="width:80px;">大口<br>流入</th><th style="width:60px;">現在値</th><th style="width:70px;">推奨買値<br>(乖離)</th><th style="width:120px;">利確目標<br>(乖離率%)</th><th style="width:85px;">押し目<br>勝敗数</th><th style="width:70px;">PER<br>PBR</th><th class="th-left" style="min-width:200px;">アイの所感</th>
         </tr></thead>
         <tbody>{rows}</tbody>
         </table></div>'''
