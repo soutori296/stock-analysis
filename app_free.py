@@ -458,6 +458,11 @@ def run_backtest(df, market_cap):
         return f"{wins}勝{losses}敗<br>(<b>{cap_str}</b>抜)", wins+losses
     except Exception:
         return "計算エラー", 0
+        
+# 15:50以降かどうか判定
+def is_after_close():
+    status, _ = get_market_status()
+    return "引け後" in status
 
 def get_stock_data(ticker):
     """
@@ -856,6 +861,7 @@ if st.session_state.analyzed_data:
         if 'backtest' not in df_raw.columns and 'backtest_raw' in df_raw.columns:
             df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'})
         st.dataframe(df_raw)
+
 
 
 
