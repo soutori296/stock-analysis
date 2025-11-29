@@ -12,7 +12,8 @@ import math
 ICON_URL = "https://raw.githubusercontent.com/soutori296/stock-analysis/main/aisan.png"
 
 # --- ページ設定 ---
-st.set_page_config(page_title="教えて！AIさん 2", page_icon="🤖", layout="wide")
+# page_iconに外部URL (ICON_URL) を指定するよう修正
+st.set_page_config(page_title="教えて！AIさん 2", page_icon=ICON_URL, layout="wide") 
 
 # --- セッションステート初期化 ---
 if 'analyzed_data' not in st.session_state:
@@ -62,7 +63,7 @@ st.markdown(f"""
     /* 説明書用テーブル */
     .desc-table {{ width: 90%; margin: 0 auto; border-collapse: collapse; background-color: #fff; color: #000; font-family: "Meiryo", sans-serif; }}
     .desc-table th {{ background-color: #d0d0d0; border: 1px solid #999; padding: 8px; text-align: center !important; }}
-    .desc-table td {{ border: 1px solid #ccc; padding: 8px; text-align: center !important; }}
+    .desc-table td {{ border: 1px solid #ccc; padding: 8px; text-align: left !important; }}
 
     /* クラス定義 */
     .th-left {{ text-align: left !important; }}
@@ -83,42 +84,87 @@ st.markdown(f"""
 </p>
 """, unsafe_allow_html=True)
 
-# --- 説明書 ---
+# --- 説明書 (マニュアル詳細化) ---
 with st.expander("📘 取扱説明書 (データ仕様・判定基準)"):
     st.markdown("""
     <div class="center-text">
     
     <h4>1. データ取得と時間の仕組み</h4>
     <table class="desc-table">
-      <tr><th>項目</th><th>取得元</th><th>状態</th><th>解説</th></tr>
+      <tr><th style="width:20%">項目</th><th style="width:20%">取得元</th><th style="width:20%">状態</th><th>解説</th></tr>
       <tr>
         <td>現在値・出来高</td><td><b>株情報サイト</b></td><td><b>リアルタイム</b></td>
-        <td>データは<b>20分遅延</b>します。<br><b>15:50以降</b>が当日の確定値となります。</td>
+        <td>データは<b>20分遅延</b>します。ザラ場中は参考値、<b>15:50以降</b>が当日の確定値となります。</td>
       </tr>
       <tr>
         <td>テクニカル</td><td><b>Stooq</b></td><td><b>前日確定</b></td>
-        <td>移動平均線、RSIなどは<br>「前日終値」基準で判定します。</td>
+        <td>移動平均線、RSI、勝率などは「前日終値」基準で判定します。ザラ場中は前日までのデータで分析します。</td>
       </tr>
     </table>
     <br>
 
     <h4>2. 分析ロジック詳細</h4>
+
+    <h5>① 戦略判定（🔥順張り / 🌊逆張り）</h5>
     <table class="desc-table">
-        <tr><th colspan="2">① 戦略判定</th></tr>
+        <tr><th style="width:20%">戦略</th><th style="width:80%">判定基準と解説</th></tr>
         <tr>
-            <td width="20%"><b>🔥 順張り</b></td>
-            <td>移動平均線が「5日 ＞ 25日 ＞ 75日」の上昇トレンド。押し目狙い。</td>
+            <td><b>🔥 順張り</b></td>
+            <td><b>【判定条件】</b>移動平均線が「5日 ＞ 25日 ＞ 75日」のパーフェクトオーダーで、かつ5日移動平均線が前日より上昇している場合。<br><b>【解説】</b>明確な上昇トレンドの初期または継続と判断し、一時的な下落（押し目）でのエントリーを推奨します。</td>
         </tr>
         <tr>
             <td><b>🌊 逆張り</b></td>
-            <td>「RSIが30以下」または「25MA乖離率が-10%以下」。リバウンド狙い。</td>
+            <td><b>【判定条件】</b>「RSIが30以下」<b>または</b>「現在値が25日移動平均線から-10%以上乖離している」場合。<br><b>【解説】</b>売られすぎ水準、または短期的な急落局面と判断し、テクニカルな反発（リバウンド）を狙います。</td>
+        </tr>
+        <tr>
+            <td><b>👀 様子見</b></td>
+            <td>上記以外の条件。明確なトレンドがなく、レンジ相場や方向感が定まらないと判断します。</td>
+        </tr>
+    </table>
+    
+    <h5>② AIスコア（点数）配分</h5>
+    <table class="desc-table">
+        <tr><th style="width:20%">項目</th><th>条件</th><th>配点</th><th>備考</th></tr>
+        <tr><td><b>ベーススコア</b></td><td>-</td><td>50点</td><td>-</td></tr>
+        <tr><td><b>順張り</b></td><td>パーフェクトオーダー＆5日線上昇</td><td>+20点</td><td>強いトレンドの形成を評価</td></tr>
+        <tr><td><b>逆張り</b></td><td>RSI30以下または25MA-10%乖離</td><td>+15点</td><td>反発期待値を評価</td></tr>
+        <tr><td><b>RSI適正</b></td><td>RSI 55〜65</td><td>+10点</td><td>トレンドが最も継続しやすい水準を評価</td></tr>
+        <tr><td><b>出来高活発</b></td><td>出来高が5日平均の1.5倍超</td><td>+10点</td><td>市場の注目度とエネルギーを評価。**大口参入の可能性**を示唆します。</td></tr>
+        <tr><td><b>直近勝率</b></td><td>直近5日で4日以上上昇</td><td>+5点</td><td>短期的な上値追いの勢いを評価</td></tr>
+        <tr><td><b>合計</b></td><td>(各項目の合計)</td><td>**最大100点**</td><td>算出されたスコアが100点を超えた場合でも、**上限は100点**となります。</td></tr>
+    </table>
+
+    <h5>③ 押し目勝敗数（バックテスト）</h5>
+    <table class="desc-table">
+        <tr><th style="width:20%">項目</th><th style="width:80%">ロジック詳細</th></tr>
+        <tr>
+            <td><b>対象期間</b></td>
+            <td>直近75営業日</td>
+        </tr>
+        <tr>
+            <td><b>エントリー条件</b></td>
+            <td>「5日MA > 25日MA」の状態で、かつ終値が5日移動平均線以下に<b>タッチまたは下回った日</b>（押し目と判断）。</td>
+        </tr>
+        <tr>
+            <td><b>利確目標</b></td>
+            <td><b>時価総額1兆円未満</b>：エントリー価格から**4%の上昇**<br><b>時価総額1兆円超</b>：エントリー価格から**2%の上昇**</td>
+        </tr>
+        <tr>
+            <td><b>保有期間</b></td>
+            <td>最大10営業日。10日以内に利確目標に到達しなければ「敗北」としてカウント。</td>
+        </tr>
+        <tr>
+            <td><b>解説</b></td>
+            <td>このロジックで過去にトレードした場合の勝敗数。利確目標は大型株と小型株で目標リターンを変えることで、現実的な売買の期待値を測ります。</td>
         </tr>
     </table>
 
+    <h5>④ 各種指標の基準</h5>
     <table class="desc-table">
-        <tr><th colspan="2">② 各種指標</th></tr>
-        <tr><td><b>直近勝率</b></td><td>直近5営業日のうち、前日比プラスだった割合。<br>(例: 80% = 5日中4日上昇)</td></tr>
+        <tr><th style="width:20%">指標</th><th>解説</th></tr>
+        <tr><td><b>直近勝率</b></td><td>直近5営業日のうち、前日比プラスだった割合。 (例: 80% = 5日中4日上昇)</td></tr>
         <tr><td><b>RSI</b></td><td>🔵30以下(売られすぎ) / 🟢55-65(上昇トレンド) / 🔴70以上(過熱)</td></tr>
+        <tr><td><b>PER/PBR</b></td><td>市場の評価。低ければ割安とされるが、業績や成長性との兼ね合いが重要。</td></tr>
     </table>
     </div>
     """, unsafe_allow_html=True)
@@ -164,9 +210,9 @@ def fmt_market_cap(val):
             cho = val_int // 10000
             oku = val_int % 10000
             if oku == 0: return f"{cho}兆円"
-            else: return f"{cho}兆{oku}億円"
+            else: return f"{cho}兆{oku:,}億円" # 億の部分にカンマ追加
         else:
-            return f"{val_int}億円"
+            return f"{val_int:,}億円"
     except:
         return "-"
 
@@ -183,7 +229,8 @@ def get_stock_info(code):
         m_name = re.search(r'<title>(.*?)【', html)
         if m_name: 
             raw_name = m_name.group(1).strip()
-            data["name"] = re.sub(r'[（\(].*?[）\)]', '', raw_name)
+            # 生データに混ざる<br>などを除去
+            data["name"] = re.sub(r'[\(\（].*?[\)\）]', '', raw_name).replace("<br>", " ").strip()
 
         # 現在値
         m_price = re.search(r'現在値</th>\s*<td[^>]*>([0-9,]+)</td>', html)
@@ -196,15 +243,16 @@ def get_stock_info(code):
         # 時価総額
         m_cap = re.search(r'時価総額</th>\s*<td[^>]*>(.*?)</td>', html)
         if m_cap:
-            cap_str = re.sub(r'<[^>]+>', '', m_cap.group(1)).strip()
+            # <br>やその他のタグを全て除去
+            cap_str = re.sub(r'<[^>]+>', '', m_cap.group(1)).strip() 
             val = 0
             if "兆" in cap_str:
                 parts = cap_str.split("兆")
                 trillion = float(parts[0].replace(",", ""))
                 billion = 0
                 if len(parts) > 1 and "億" in parts[1]:
-                    b_match = re.search(r'(\d+)', parts[1])
-                    if b_match: billion = float(b_match.group(1))
+                    b_match = re.search(r'([0-9,]+)', parts[1])
+                    if b_match: billion = float(b_match.group(1).replace(",", ""))
                 val = trillion * 10000 + billion
             elif "億" in cap_str:
                 b_match = re.search(r'([0-9,]+)', cap_str)
@@ -212,18 +260,19 @@ def get_stock_info(code):
             data["cap"] = val
 
         # PER/PBR (id="stockinfo_i3" テーブル内の配置順で取得)
-        # 通常、1つ目のtdがPER、2つ目がPBR
         i3_match = re.search(r'<div id="stockinfo_i3">.*?<tbody>(.*?)</tbody>', html)
         if i3_match:
             tbody = i3_match.group(1)
             # tdタグの中身を全てリスト化
             tds = re.findall(r'<td.*?>(.*?)</td>', tbody)
             
-            def clean_tag(s): return re.sub(r'<[^>]+>', '', s).strip()
+            def clean_tag_and_br(s): 
+                # PER/PBRデータに混入する可能性のある<br>やタグを除去
+                return re.sub(r'<[^>]+>', '', s).replace("<br>", "").strip()
             
             if len(tds) >= 2:
-                data["per"] = clean_tag(tds[0]) # 1つ目
-                data["pbr"] = clean_tag(tds[1]) # 2つ目
+                data["per"] = clean_tag_and_br(tds[0]) # 1つ目
+                data["pbr"] = clean_tag_and_br(tds[1]) # 2つ目
 
         return data
     except:
@@ -235,7 +284,7 @@ def run_backtest(df, market_cap):
         if len(df) < 80: return "データ不足", 0
         target_pct = 0.04 
         cap_str = "4%"
-        if market_cap >= 10000:
+        if market_cap >= 10000: # 1兆円
             target_pct = 0.02
             cap_str = "2%"
             
@@ -248,23 +297,26 @@ def run_backtest(df, market_cap):
         
         while i < n - 5: 
             row = test_data.iloc[i]
-            if row['SMA5'] > row['SMA25'] and row['Low'] <= row['SMA5']:
-                entry_price = row['SMA5']
+            # 5日線が25日線より上 (上昇トレンド) and 終値ではなくLowが5日線にタッチ
+            if row['SMA5'] > row['SMA25'] and row['Low'] <= row['SMA5']: 
+                entry_price = row['SMA5'] # 押し目でのエントリーは5日線付近と仮定
                 target_price = entry_price * (1 + target_pct)
                 is_win = False
                 hold_days = 0
                 
+                # 最大10日間ホールド
                 for j in range(1, 11):
                     if i + j >= n: break
                     future = test_data.iloc[i + j]
                     hold_days = j
-                    if future['High'] >= target_price:
+                    # 高値が利確目標に到達
+                    if future['High'] >= target_price: 
                         is_win = True
                         break
                 
                 if is_win: wins += 1
                 else: losses += 1
-                i += hold_days
+                i += hold_days # 次のエントリーは利確/損切り後の次の日から
             i += 1
         
         if wins + losses == 0: return "機会なし", 0
@@ -320,28 +372,31 @@ def get_stock_data(ticker):
         else: rsi_mark = "⚪"
         
         strategy = "様子見"
-        ma5, ma25 = last['SMA5'], last['SMA25']
-        buy_target = int(ma25)
+        ma5, ma25, ma75 = last['SMA5'], last['SMA25'], last['SMA75']
+        buy_target = int(ma25) # 初期値
         p_half = 0; p_full = 0
-
-        if ma5 > ma25 > last['SMA75'] and ma5 > prev['SMA5']:
+        
+        # 🔥順張り判定
+        if ma5 > ma25 > ma75 and ma5 > prev['SMA5']:
             strategy = "🔥順張り"
-            buy_target = int(ma5)
+            buy_target = int(ma5) # 推奨買値は5日線
             p_half = int(ma25 * 1.10)
             p_full = int(ma25 * 1.20)
+        # 🌊逆張り判定
         elif rsi_val <= 30 or (curr_price < ma25 * 0.9):
             strategy = "🌊逆張り"
-            buy_target = int(curr_price)
+            buy_target = int(curr_price) # 推奨買値は現在値
             p_half = int(ma5)
             p_full = int(ma25)
         
+        # --- AIスコア計算 ---
         score = 50
         if "順張り" in strategy: score += 20
         if "逆張り" in strategy: score += 15
         if 55 <= rsi_val <= 65: score += 10
-        if vol_ratio > 1.5: score += 10
+        if vol_ratio > 1.5: score += 10 # 出来高活発
         if up_days >= 4: score += 5
-        score = min(100, score)
+        score = min(100, score) # スコアの上限を100に設定
 
         return {
             "code": ticker,
@@ -357,9 +412,11 @@ def get_stock_data(ticker):
             "score": score,
             "buy": buy_target,
             "p_half": p_half, "p_full": p_full,
-            "backtest": bt_str
+            "backtest": bt_str, # HTML表示用
+            "backtest_raw": bt_str.replace("<br>", " ") # 生データ表示用
         }
-    except:
+    except Exception as e:
+        # st.error(f"Error processing {ticker}: {e}") # デバッグ用
         return None
 
 def batch_analyze_with_ai(data_list):
@@ -458,15 +515,17 @@ if st.session_state.analyzed_data:
             p_half = d.get('p_half', 0)
             p_full = d.get('p_full', 0)
             target_txt = f"半:{p_half:,}<br>全:{p_full:,}" if p_half > 0 else "-"
-            bt_display = d.get("backtest", "-").replace(" (", "<br>(")
+            # backtestフィールドはHTML表示用
+            bt_display = d.get("backtest", "-").replace(" (", "<br>(") 
 
             rows += f'<tr><td class="td-center">{i+1}</td><td class="td-center">{d.get("code")}</td><td class="th-left td-bold">{d.get("name")}</td><td class="td-right">{d.get("cap_disp")}</td><td class="td-center">{d.get("score")}</td><td class="td-center">{d.get("strategy")}</td><td class="td-center">{d.get("momentum")}</td><td class="td-center">{d.get("rsi_disp")}</td><td class="td-right">{d.get("vol_ratio", 0):.1f}倍</td><td class="td-right td-bold">{price:,.0f}</td><td class="td-right">{buy:,.0f}<br><span style="font-size:10px;color:#666">{diff_txt}</span></td><td class="td-left">{target_txt}</td><td class="td-center td-blue">{bt_display}</td><td class="td-center">{d.get("per")}<br>{d.get("pbr")}</td><td class="th-left">{d.get("comment")}</td></tr>'
 
+        # ヘッダーの幅を調整
         return f'''
         <h4>{title}</h4>
         <div class="table-container"><table class="ai-table">
         <thead><tr>
-        <th style="width:25px;">No</th><th style="width:45px;">コード</th><th class="th-left" style="width:130px;">企業名</th><th style="width:80px;">時価総額</th><th style="width:35px;">点</th><th style="width:60px;">戦略</th><th style="width:50px;">直近<br>勝率</th><th style="width:50px;">RSI</th><th style="width:50px;">出来高<br>(前比)</th><th style="width:60px;">現在値</th><th style="width:70px;">推奨買値<br>(乖離)</th><th style="width:90px;">利確目標</th><th style="width:85px;">勝敗数</th><th style="width:50px;">PER<br>PBR</th><th class="th-left" style="min-width:200px;">アイの所感</th>
+        <th style="width:25px;">No</th><th style="width:45px;">コード</th><th class="th-left" style="width:130px;">企業名</th><th style="width:100px;">時価総額</th><th style="width:35px;">点</th><th style="width:60px;">戦略</th><th style="width:50px;">直近<br>勝率</th><th style="width:50px;">RSI</th><th style="width:50px;">出来高<br>(前比)</th><th style="width:60px;">現在値</th><th style="width:70px;">推奨買値<br>(乖離)</th><th style="width:90px;">利確目標</th><th style="width:85px;">押し目<br>勝敗数</th><th style="width:70px;">PER<br>PBR</th><th class="th-left" style="min-width:200px;">アイの所感</th>
         </tr></thead>
         <tbody>{rows}</tbody>
         </table></div>'''
@@ -480,6 +539,7 @@ if st.session_state.analyzed_data:
     st.markdown(st.session_state.ai_monologue)
     
     with st.expander("詳細データリスト (生データ確認用)"):
-        st.dataframe(pd.DataFrame(data))
-
-
+        # <br>を含む 'backtest' 列を削除し、<br>を含まない 'backtest_raw' を 'backtest' にリネームして表示
+        df_raw = pd.DataFrame(data).drop(columns=['backtest']) 
+        df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'}) 
+        st.dataframe(df_raw)
