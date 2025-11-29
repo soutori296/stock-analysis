@@ -578,7 +578,7 @@ def get_stock_data(ticker):
             target_half_raw = curr_price * (1 + target_pct / 2)
 
             # 全益目標の確定 (最も近い整数に丸める)
-            p_full_candidate = int(round(target_full_raw))
+            p_full_candidate = int(math.floor(target_full_raw)) # ★ 全益を確実に切り捨て
             
             # 半益目標の節目回避ロジック（10円単位で切り下げ、-1円）
             # np.floor は float を返すので int() で整数化
@@ -600,8 +600,8 @@ def get_stock_data(ticker):
             buy_target = int(curr_price) 
             
             # MA目標（調整あり）
-            p_half_candidate = int(ma5 - 1) if ma5 else 0 # MA5から-1円
-            p_full_candidate = int(ma25 - 1) if ma25 else 0 # MA25から-1円
+            p_half_candidate = int(math.floor(ma5 - 1)) if ma5 else 0 # ★ MA5から-1円し、確実に切り捨て
+            p_full_candidate = int(math.floor(ma25 - 1)) if ma25 else 0 # ★ MA25から-1円し、確実に切り捨て
             
             # 現在値より低い場合は無効
             p_half = p_half_candidate if p_half_candidate > curr_price else 0
@@ -848,5 +848,6 @@ if st.session_state.analyzed_data:
         if 'backtest_raw' in df_raw.columns:
             df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'}) 
         st.dataframe(df_raw)
+
 
 
