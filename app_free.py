@@ -190,7 +190,7 @@ with st.expander("📘 取扱説明書 (データ仕様・判定基準)"):
         <tr><td><b>順張り</b></td><td>パーフェクトオーダー＆5日線上昇</td><td>+20点</td><td>強いトレンドの形成を評価</td></tr>
         <tr><td><b>逆張り</b></td><td>RSI30以下または25MA-10%乖離</td><td>+15点</td><td>反発期待値を評価</td></tr>
         <tr><td><b>RSI適正</b></td><td>RSI 55〜65</td><td>+10点</td><td>トレンドが最も継続しやすい水準を評価</td></tr>
-        <tr><td><b>出来高活発</b></td><td>出来高が5日平均の1.5倍超</td><td>+10点</td><td>市場の注目度とエネルギーを評価。<b>大口参入の可能性</b>を示唆します。</td></tr>
+        <tr><td><b>出来高活発</b></td><td>出来高が5日平均の1.5倍超</td><td>+10点</td><td>市場の注目度とエネルギーを評価。<b>大口参入の可能性</b>を示唆します。</td></tr> 
         <tr><td><b>直近勝率</b></td><td>直近5日で4日以上上昇</td><td>+5点</td><td>短期的な上値追いの勢いを評価</td></tr>
         <tr><td><b>合計</b></td><td>(各項目の合計)</td><td><b>最大100点</b></td><td>算出されたスコアが100点を超えた場合でも、<b>上限は100点</b>となります。</td></tr>
     </table>
@@ -208,7 +208,7 @@ with st.expander("📘 取扱説明書 (データ仕様・判定基準)"):
         </tr>
         <tr>
             <td><b>利確目標</b></td>
-            <td><b>時価総額1兆円未満</b>：エントリー価格から<b>4%の上昇</b><br><b>時価総額1兆円超</b>：エントリー価格から<b>2%の上昇</b></td>
+            <td><b>時価総額1兆円未満</b>：エントリー価格から<b>4%の上昇</b><br><b>時価総額1兆円超</b>：エントリー価格から<b>2%の上昇</b></td> <!-- <b>太字</b>修正 -->
         </tr>
         <tr>
             <td><b>保有期間</b></td>
@@ -223,7 +223,7 @@ with st.expander("📘 取扱説明書 (データ仕様・判定基準)"):
     <h5>④ 各種指標の基準</h5>
     <table class="desc-table">
         <tr><th style="width:20%">指標</th><th>解説</th></tr>
-        <tr><td><b>出来高（5MA比）</b></td><td><b>当日のリアルタイム出来高</b>を**過去5日間の出来高平均**と**市場の経過時間比率**で調整した倍率。<br>市場が開いている時間帯に応じて、出来高の偏りを考慮し、公平に大口流入を評価します。</td></tr>
+        <tr><td><b>出来高（5MA比）</b></td><td><b>当日のリアルタイム出来高</b>を<b>過去5日間の出来高平均</b>と<b>市場の経過時間比率</b>で調整した倍率。<br>市場が開いている時間帯に応じて、出来高の偏りを考慮し、公平に大口流入を評価します。</td></tr> <!-- <b>太字</b>修正 -->
         <tr><td><b>直近勝率</b></td><td>直近5営業日のうち、前日比プラスだった割合。 (例: 80% = 5日中4日上昇)</td></tr>
         <tr><td><b>RSI</b></td><td>🔵30以下(売られすぎ) / 🟢55-65(上昇トレンド) / 🔴70以上(過熱)</td></tr>
         <tr><td><b>PER/PBR</b></td><td>市場の評価。低ければ割安とされるが、業績や成長性との兼ね合いが重要。</td></tr>
@@ -238,7 +238,7 @@ if "GEMINI_API_KEY" in st.secrets:
 else:
     api_key = st.sidebar.text_input("Gemini API Key", type="password")
 
-# --- キャッシュクリアボタンは削除し、TTL=300で自動クリアへ移行 ---
+# キャッシュクリアボタンは削除し、TTL=300で自動クリアへ移行済み
 
 tickers_input = st.text_area(
     "Analysing Targets (銘柄コードを入力)", 
@@ -375,7 +375,7 @@ def run_backtest(df, market_cap):
             i += 1
         
         if wins + losses == 0: return "機会なし", 0
-        # ★ 修正: **太字**を<b>太字</b>に変更
+        # ★ 修正: <br>(<b>%</b>抜) と % を追加し、HTMLを適正化
         return f"{wins}勝{losses}敗<br>(<b>{cap_str}</b>抜)", wins+losses
     except:
         return "計算エラー", 0
@@ -496,7 +496,9 @@ def get_stock_data(ticker):
             "rsi": rsi_val, "rsi_disp": f"{rsi_mark}{rsi_val:.1f}", "vol_ratio": vol_ratio,
             "vol_disp": vol_disp, "momentum": momentum_str, "strategy": strategy, "score": score,
             "buy": buy_target, "p_half": p_half, "p_full": p_full,
-            "backtest": bt_str, "backtest_raw": bt_str.replace("<br>", " ").replace("**", "") 
+            "backtest": bt_str, 
+            # ★ 修正: 生データからHTMLタグを全て削除
+            "backtest_raw": re.sub(r'<[^>]+>', '', bt_str.replace("<br>", " ")).replace("(", "").replace(")", "") 
         }
     except Exception as e:
         st.session_state.error_messages.append(f"データ処理エラー (コード:{ticker}): 予期せぬエラーが発生しました。詳細: {e}")
@@ -517,7 +519,7 @@ def batch_analyze_with_ai(data_list):
         
         # 利確目標が無効な場合はAIへの情報提供にその旨を記載
         target_info = f"利確目標(半):{half_pct:+.1f}%"
-        if p_half == 0:
+        if p_half == 0 and d['strategy'] == "🔥順張り":
             target_info = "利確目標:目標超過または無効"
         
         prompt_text += f"ID:{d['code']} | {d['name']} | 現在:{price:,.0f} | 戦略:{d['strategy']} | RSI:{d['rsi']:.1f} | 5MA乖離率:{(price/d['buy']-1)*100 if d['buy']>0 else 0:.1f}% | {target_info} | 出来高倍率:{d['vol_ratio']:.1f}倍\n"
@@ -529,7 +531,7 @@ def batch_analyze_with_ai(data_list):
     【コメント作成の指示】
     1.  <b>銘柄ごとに特徴を活かした、人間味のある（画一的でない）文章にしてください。</b>
     2.  戦略の根拠（パーフェクトオーダー、売られすぎ、乖離率など）と、RSIの状態を必ず具体的に盛り込んでください。
-    3.  **利確目標が無効**と記載されている銘柄については、「すでに利確水準を大きく超過しており、新規の買いは慎重にすべき」といった**明確な警告**を含めてください。
+    3.  **利確目標:目標超過または無効**と記載されている銘柄については、「すでに利確水準を大きく超過しており、新規の買いは慎重にすべき」といった**明確な警告**を含めてください。
     4.  出来高倍率が1.5倍を超えている場合は、「大口の買い」といった表現を使い、その事実を盛り込んでください。
     
     【出力形式】
