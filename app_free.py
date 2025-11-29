@@ -466,33 +466,30 @@ def is_after_close():
     return jst_now.time() >= datetime.time(15, 50)
 
 # --- 簡易版: RSI計算（n日間） ---
-def calc_rsi(prices: pd.Series, period: int = 14) -> pd.Series:
+def calc_rsi(prices, period=14):
     """
-    RSIを計算する関数
-    prices: 株価終値のSeries
-    period: RSI計算期間（デフォルト14日）
-    return: RSIのSeries
+    RSI を計算して Series で返す関数
+    prices: pandas.Series
+    period: 計算期間
     """
-    if prices.empty:
-        return pd.Series(dtype=float)
-
-    delta = prices.diff()  # 価格差分
-    gain = delta.clip(lower=0)  # 上昇分だけ
-    loss = -delta.clip(upper=0)  # 下落分だけ
-
-    # 平均値を計算（指数移動平均の方が一般的）
+    if prices.empty or len(prices) < period:
+        # データ不足の場合は None 返す
+        return pd.Series([np.nan]*len(prices), index=prices.index)
+    
+    delta = prices.diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    
+    # 平均値の計算（初回は単純平均）
     avg_gain = gain.rolling(window=period, min_periods=period).mean()
     avg_loss = loss.rolling(window=period, min_periods=period).mean()
-
-    # RSIの計算
+    
+    # RSI計算（Wilderの方法で指数移動平均も可能）
     rs = avg_gain / avg_loss
     rsi = 100 - (100 / (1 + rs))
-
-    # 初期NaNを0やNoneに置き換える場合
-    rsi = rsi.fillna(0)
-
+    
     return rsi
-
+    
 def make_backtest_string(df):
     """
     過去75営業日の押し目勝敗数を計算して文字列化（HTML形式）。
@@ -889,6 +886,7 @@ if st.session_state.analyzed_data:
         if 'backtest' not in df_raw.columns and 'backtest_raw' in df_raw.columns:
             df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'})
         st.dataframe(df_raw)
+
 
 
 
