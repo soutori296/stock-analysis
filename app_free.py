@@ -145,7 +145,7 @@ st.markdown(f"""
 </p>
 """, unsafe_allow_html=True)
 
-# --- 説明書 (マニュアル詳細化) ---
+# --- 説明書 (マニュアル詳細化 - 太字修正) ---
 with st.expander("📘 取扱説明書 (データ仕様・判定基準)"):
     st.markdown("""
     <div class="center-text">
@@ -190,9 +190,9 @@ with st.expander("📘 取扱説明書 (データ仕様・判定基準)"):
         <tr><td><b>順張り</b></td><td>パーフェクトオーダー＆5日線上昇</td><td>+20点</td><td>強いトレンドの形成を評価</td></tr>
         <tr><td><b>逆張り</b></td><td>RSI30以下または25MA-10%乖離</td><td>+15点</td><td>反発期待値を評価</td></tr>
         <tr><td><b>RSI適正</b></td><td>RSI 55〜65</td><td>+10点</td><td>トレンドが最も継続しやすい水準を評価</td></tr>
-        <tr><td><b>出来高活発</b></td><td>出来高が5日平均の1.5倍超</td><td>+10点</td><td>市場の注目度とエネルギーを評価。**大口参入の可能性**を示唆します。</td></tr>
+        <tr><td><b>出来高活発</b></td><td>出来高が5日平均の1.5倍超</td><td>+10点</td><td>市場の注目度とエネルギーを評価。<b>大口参入の可能性</b>を示唆します。</td></tr>
         <tr><td><b>直近勝率</b></td><td>直近5日で4日以上上昇</td><td>+5点</td><td>短期的な上値追いの勢いを評価</td></tr>
-        <tr><td><b>合計</b></td><td>(各項目の合計)</td><td>**最大100点**</td><td>算出されたスコアが100点を超えた場合でも、**上限は100点**となります。</td></tr>
+        <tr><td><b>合計</b></td><td>(各項目の合計)</td><td><b>最大100点</b></td><td>算出されたスコアが100点を超えた場合でも、<b>上限は100点</b>となります。</td></tr>
     </table>
 
     <h5>③ 押し目勝敗数（バックテスト）</h5>
@@ -208,7 +208,7 @@ with st.expander("📘 取扱説明書 (データ仕様・判定基準)"):
         </tr>
         <tr>
             <td><b>利確目標</b></td>
-            <td><b>時価総額1兆円未満</b>：エントリー価格から**4%の上昇**<br><b>時価総額1兆円超</b>：エントリー価格から**2%の上昇**</td>
+            <td><b>時価総額1兆円未満</b>：エントリー価格から<b>4%の上昇</b><br><b>時価総額1兆円超</b>：エントリー価格から<b>2%の上昇</b></td>
         </tr>
         <tr>
             <td><b>保有期間</b></td>
@@ -238,19 +238,7 @@ if "GEMINI_API_KEY" in st.secrets:
 else:
     api_key = st.sidebar.text_input("Gemini API Key", type="password")
 
-# --- キャッシュクリアボタン (サイドバー) ---
-if st.sidebar.button("Stooqデータキャッシュを強制クリア"):
-    # get_stock_dataのキャッシュをクリア
-    # st.cache_dataデコレーターを使用している関数は、.clear()メソッドでキャッシュをクリアできる
-    try:
-        # この処理はStreamlitの実行環境内でget_stock_data関数にアクセスできることが前提
-        if 'get_stock_data' in globals():
-            get_stock_data.clear()
-            st.sidebar.success("Stooqのデータキャッシュをクリアしました。再分析ボタンを押してください。")
-            st.stop() # 画面を再読み込み
-    except Exception:
-        st.sidebar.error("キャッシュクリアに失敗しました。")
-        
+# --- キャッシュクリアボタンは削除し、TTL=300で自動クリアへ移行 ---
 
 tickers_input = st.text_area(
     "Analysing Targets (銘柄コードを入力)", 
@@ -344,6 +332,7 @@ def get_stock_info(code):
 
         return data
     except Exception as e:
+        # エラーはセッションに格納
         st.session_state.error_messages.append(f"データ取得エラー (コード:{code}): Kabutanアクセス/解析失敗。詳細: {e}")
         return data
 
@@ -386,11 +375,12 @@ def run_backtest(df, market_cap):
             i += 1
         
         if wins + losses == 0: return "機会なし", 0
-        return f"{wins}勝{losses}敗<br>(**{cap_str}**抜)", wins+losses
+        # ★ 修正: **太字**を<b>太字</b>に変更
+        return f"{wins}勝{losses}敗<br>(<b>{cap_str}</b>抜)", wins+losses
     except:
         return "計算エラー", 0
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=300) # ★ 修正: キャッシュのTTLを5分 (300秒) に設定
 def get_stock_data(ticker):
     global jst_now 
     
@@ -466,16 +456,29 @@ def get_stock_data(ticker):
         buy_target = int(ma25) 
         p_half = 0; p_full = 0
         
+        # --- ★ 修正: 利確目標が現在値より低い場合は無効化 ★
         if ma5 > ma25 > ma75 and ma5 > prev['SMA5']:
             strategy = "🔥順張り"
             buy_target = int(ma5) 
-            p_half = int(ma25 * 1.10) 
-            p_full = int(ma25 * 1.20)
+            
+            p_half_candidate = int(ma25 * 1.10)
+            p_full_candidate = int(ma25 * 1.20)
+            
+            # 利確目標が現在値より高い場合のみ採用
+            if p_half_candidate > curr_price:
+                 p_half = p_half_candidate
+                 p_full = p_full_candidate if p_full_candidate > curr_price else p_half_candidate
+            else:
+                 # 利確目標が無効な場合（すでに目標を大きく超過）
+                 p_half = 0
+                 p_full = 0
+                 
         elif rsi_val <= 30 or (curr_price < ma25 * 0.9):
             strategy = "🌊逆張り"
             buy_target = int(curr_price) 
             p_half = int(ma5) 
             p_full = int(ma25) 
+        # --- ★ 利確目標の適正化 修正ここまで ★
         
         score = 50
         if "順張り" in strategy: score += 20
@@ -493,7 +496,7 @@ def get_stock_data(ticker):
             "rsi": rsi_val, "rsi_disp": f"{rsi_mark}{rsi_val:.1f}", "vol_ratio": vol_ratio,
             "vol_disp": vol_disp, "momentum": momentum_str, "strategy": strategy, "score": score,
             "buy": buy_target, "p_half": p_half, "p_full": p_full,
-            "backtest": bt_str, "backtest_raw": bt_str.replace("<br>", " ") 
+            "backtest": bt_str, "backtest_raw": bt_str.replace("<br>", " ").replace("**", "") 
         }
     except Exception as e:
         st.session_state.error_messages.append(f"データ処理エラー (コード:{ticker}): 予期せぬエラーが発生しました。詳細: {e}")
@@ -512,7 +515,12 @@ def batch_analyze_with_ai(data_list):
         half_pct = ((p_half / price) - 1) * 100 if price > 0 and p_half > 0 else 0
         full_pct = ((p_full / price) - 1) * 100 if price > 0 and p_full > 0 else 0
         
-        prompt_text += f"ID:{d['code']} | {d['name']} | 現在:{price:,.0f} | 戦略:{d['strategy']} | RSI:{d['rsi']:.1f} | 5MA乖離率:{(price/d['buy']-1)*100 if d['buy']>0 else 0:.1f}% | 利確目標(半):{half_pct:+.1f}% | 利確目標(全):{full_pct:+.1f}% | 出来高倍率:{d['vol_ratio']:.1f}倍\n"
+        # 利確目標が無効な場合はAIへの情報提供にその旨を記載
+        target_info = f"利確目標(半):{half_pct:+.1f}%"
+        if p_half == 0:
+            target_info = "利確目標:目標超過または無効"
+        
+        prompt_text += f"ID:{d['code']} | {d['name']} | 現在:{price:,.0f} | 戦略:{d['strategy']} | RSI:{d['rsi']:.1f} | 5MA乖離率:{(price/d['buy']-1)*100 if d['buy']>0 else 0:.1f}% | {target_info} | 出来高倍率:{d['vol_ratio']:.1f}倍\n"
     
     prompt = f"""
     あなたは「アイ」という名前のプロトレーダー（30代女性、冷静・理知的）。
@@ -521,7 +529,7 @@ def batch_analyze_with_ai(data_list):
     【コメント作成の指示】
     1.  <b>銘柄ごとに特徴を活かした、人間味のある（画一的でない）文章にしてください。</b>
     2.  戦略の根拠（パーフェクトオーダー、売られすぎ、乖離率など）と、RSIの状態を必ず具体的に盛り込んでください。
-    3.  特に順張り銘柄で、利確目標(半)の乖離率が低い（+5%以下など）場合は、「目標達成が近い」または「短期的なリターンは限定的」といった**一歩踏み込んだ見解**を加えてください。
+    3.  **利確目標が無効**と記載されている銘柄については、「すでに利確水準を大きく超過しており、新規の買いは慎重にすべき」といった**明確な警告**を含めてください。
     4.  出来高倍率が1.5倍を超えている場合は、「大口の買い」といった表現を使い、その事実を盛り込んでください。
     
     【出力形式】
@@ -641,6 +649,8 @@ if st.session_state.analyzed_data:
             if p_half > 0:
                 # 目標価格と現在の値からの乖離率を両方表示
                 target_txt = f"半:{p_half:,} ({half_pct:+.1f}%)<br>全:{p_full:,} ({full_pct:+.1f}%)"
+            else:
+                 target_txt = "目標超過/無効" # 利確目標が無効な場合の表示
             
             # backtestフィールドはHTML表示用
             bt_display = d.get("backtest", "-").replace(" (", "<br>(") 
