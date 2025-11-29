@@ -9,6 +9,28 @@ import re
 import math
 
 _stooq_daily_cache = {}
+
+@st.cache_data(ttl=300)  # 過去データも含めてキャッシュ
+def fetch_stooq_daily(ticker):
+    """
+    Stooq から日足データを取得し、DataFrame で返す。
+    index: 日付, columns: Open, High, Low, Close, Volume
+    """
+    try:
+        url = f"https://stooq.com/q/d/l/?s={ticker}.jp&i=d"  # JP株
+        res = requests.get(url, timeout=5)
+        res.raise_for_status()
+        df = pd.read_csv(io.StringIO(res.text))
+        # Stooq は古い順なのでソート
+        df = df[::-1].reset_index(drop=True)
+        df.rename(columns=lambda x: x.capitalize(), inplace=True)
+        return df
+    except Exception as e:
+        st.session_state.error_messages.append(
+            f"Stooq取得エラー (コード:{ticker}): {e}"
+        )
+        return None
+
 # --- アイコン設定 ---
 ICON_URL = "https://raw.githubusercontent.com/soutori296/stock-analysis/main/aisan.png"
 
@@ -437,7 +459,6 @@ def run_backtest(df, market_cap):
     except Exception:
         return "計算エラー", 0
 
-@st.cache_data(ttl=300)  # キャッシュTTL 5分
 def get_stock_data(ticker):
     """
     Kabutan（現在値・出来高・当日OHLC優先）＋ Stooq（過去データ）
@@ -835,6 +856,7 @@ if st.session_state.analyzed_data:
         if 'backtest' not in df_raw.columns and 'backtest_raw' in df_raw.columns:
             df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'})
         st.dataframe(df_raw)
+
 
 
 
