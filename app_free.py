@@ -45,7 +45,6 @@ TIME_WEIGHTS = {
 }
 
 def get_volume_weight(current_dt):
-    # 既存のロジック (割愛) ...
     if "休日" in status_label or "引け後" in status_label or current_dt.hour < 9:
         return 1.0
     
@@ -75,7 +74,7 @@ def get_volume_weight(current_dt):
     return 1.0
 
 
-# --- CSSスタイル (干渉回避版) ---
+# --- CSSスタイル (干渉回避版) --- (変更なし)
 st.markdown(f"""
 <style>
     /* Streamlit標準のフォント設定を邪魔しないように限定的に適用 */
@@ -239,6 +238,20 @@ if "GEMINI_API_KEY" in st.secrets:
 else:
     api_key = st.sidebar.text_input("Gemini API Key", type="password")
 
+# --- キャッシュクリアボタン (サイドバー) ---
+if st.sidebar.button("Stooqデータキャッシュを強制クリア"):
+    # get_stock_dataのキャッシュをクリア
+    # st.cache_dataデコレーターを使用している関数は、.clear()メソッドでキャッシュをクリアできる
+    try:
+        # この処理はStreamlitの実行環境内でget_stock_data関数にアクセスできることが前提
+        if 'get_stock_data' in globals():
+            get_stock_data.clear()
+            st.sidebar.success("Stooqのデータキャッシュをクリアしました。再分析ボタンを押してください。")
+            st.stop() # 画面を再読み込み
+    except Exception:
+        st.sidebar.error("キャッシュクリアに失敗しました。")
+        
+
 tickers_input = st.text_area(
     "Analysing Targets (銘柄コードを入力)", 
     value="", 
@@ -331,7 +344,6 @@ def get_stock_info(code):
 
         return data
     except Exception as e:
-        # エラーはセッションに格納
         st.session_state.error_messages.append(f"データ取得エラー (コード:{code}): Kabutanアクセス/解析失敗。詳細: {e}")
         return data
 
@@ -384,8 +396,8 @@ def get_stock_data(ticker):
     
     ticker = str(ticker).strip().replace(".T", "").upper()
     
-    # Stooqコード形式を ".T" に変更
-    stock_code = f"{ticker}.T" 
+    # Stooqコード形式を元の ".JP" に戻す 
+    stock_code = f"{ticker}.JP" 
     
     info = get_stock_info(ticker) 
     
@@ -393,8 +405,8 @@ def get_stock_data(ticker):
         csv_url = f"https://stooq.com/q/d/l/?s={stock_code}&i=d"
         res = requests.get(csv_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
         
+        # --- CSV読み込み時のエラーハンドリングを強化 ---
         try:
-            # CSV読み込み時のエラーハンドリングを強化
             df = pd.read_csv(io.BytesIO(res.content), parse_dates=True)
         except Exception as csv_e:
             st.session_state.error_messages.append(f"データ不足エラー (コード:{ticker}): Stooq CSV解析失敗。詳細: {csv_e}")
@@ -558,9 +570,6 @@ if st.button("🚀 分析開始 (アイに聞く)"):
         
         _, jst_now = get_market_status() 
         
-        # Stooqのキャッシュをクリアするように、処理前にクリアボタンを押すか、st.cache_dataを削除することを推奨。
-        # get_stock_data.clear() # <- これを実行するとサーバー負荷が高まるため、手動でキャッシュをクリアしてください。
-        
         for i, t in enumerate(raw_tickers):
             d = get_stock_data(t)
             if d: data_list.append(d)
@@ -580,7 +589,11 @@ if st.button("🚀 分析開始 (アイに聞く)"):
         
         # --- エラーメッセージ一括表示 ---
         if st.session_state.error_messages:
-            st.error(f"❌ 警告: 以下のエラーにより{len(raw_tickers) - len(st.session_state.analyzed_data)}銘柄の処理がスキップされました。")
+            processed_count = len(st.session_state.analyzed_data)
+            skipped_count = len(raw_tickers) - processed_count
+            if skipped_count < 0: skipped_count = len(raw_tickers) 
+            
+            st.error(f"❌ 警告: 以下のエラーにより{skipped_count}銘柄の処理がスキップされました。")
             with st.expander("詳細エラーメッセージ"):
                 for msg in st.session_state.error_messages:
                     st.markdown(f'<p style="color: red; margin-left: 20px;">- {msg}</p>', unsafe_allow_html=True)
@@ -659,4 +672,3 @@ if st.session_state.analyzed_data:
         df_raw = pd.DataFrame(data).drop(columns=['backtest']) 
         df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'}) 
         st.dataframe(df_raw)
-
