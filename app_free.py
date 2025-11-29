@@ -464,6 +464,24 @@ def is_after_close():
     status, _ = get_market_status()
     return "引け後" in status
 
+def calc_rsi(series, period=14):
+    """
+    RSI (Relative Strength Index) 計算
+    series: pandas.Series の株価終値
+    period: 計算期間 (デフォルト14日)
+    """
+    delta = series.diff()
+    up = delta.clip(lower=0)
+    down = -1 * delta.clip(upper=0)
+
+    # 移動平均 (単純平均でも指数平均でも可)
+    roll_up = up.rolling(period).mean()
+    roll_down = down.rolling(period).mean()
+
+    rs = roll_up / roll_down
+    rsi = 100 - (100 / (1 + rs))
+    return rsi.iloc[-1]  # 最新日だけ返す
+
 def get_stock_data(ticker):
     """
     Kabutan（現在値・出来高・当日OHLC優先）＋ Stooq（過去データ）
@@ -861,6 +879,7 @@ if st.session_state.analyzed_data:
         if 'backtest' not in df_raw.columns and 'backtest_raw' in df_raw.columns:
             df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'})
         st.dataframe(df_raw)
+
 
 
 
