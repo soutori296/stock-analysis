@@ -377,6 +377,8 @@ def run_backtest(df, market_cap):
     except:
         return "計算エラー", 0
 
+# ... (前略) ...
+
 @st.cache_data(ttl=3600)
 def get_stock_data(ticker):
     global jst_now 
@@ -388,14 +390,30 @@ def get_stock_data(ticker):
     try:
         csv_url = f"https://stooq.com/q/d/l/?s={stock_code}&i=d"
         res = requests.get(csv_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
-        df = pd.read_csv(io.BytesIO(res.content), index_col="Date", parse_dates=True)
-        if df.empty or len(df) < 80: 
-            st.error(f"データ不足エラー (コード:{ticker}): Stooqからのデータ取得失敗、またはデータ期間が短すぎます。")
+        
+        # --- ★ 修正箇所: CSV読み込み時のエラーハンドリングを強化 ★ ---
+        try:
+            # index_colを指定せず、一旦全てのカラムを読み込む
+            df = pd.read_csv(io.BytesIO(res.content), parse_dates=True)
+        except Exception as csv_e:
+            st.error(f"データ不足エラー (コード:{ticker}): Stooq CSV解析失敗。データが不正な可能性があります。詳細: {csv_e}")
             return None
         
-        # ... (中略: データ処理ロジック) ...
+        # 'Date'カラムの存在をチェックし、存在すればそれをインデックスに設定
+        if 'Date' not in df.columns:
+            st.error(f"データ不足エラー (コード:{ticker}): Stooqデータに 'Date' カラムがありません。データが存在しません。")
+            return None
 
+        # Dateをインデックスに設定し、データが少ないかチェック
+        df = df.set_index('Date')
+        if df.empty or len(df) < 80: 
+            st.error(f"データ不足エラー (コード:{ticker}): Stooqからのデータ取得失敗、またはデータ期間が短すぎます (80日未満)。")
+            return None
+        # --- ★ 修正箇所ここまで ★ ---
+        
         df = df.sort_index()
+        # ... (中略: データ処理ロジック) ...
+        
         df['SMA5'] = df['Close'].rolling(5).mean()
         df['SMA25'] = df['Close'].rolling(25).mean()
         df['SMA75'] = df['Close'].rolling(75).mean()
@@ -467,8 +485,7 @@ def get_stock_data(ticker):
             "backtest": bt_str, "backtest_raw": bt_str.replace("<br>", " ") 
         }
     except Exception as e:
-        # データ取得失敗時のエラーを出力
-        st.error(f"データ処理エラー (コード:{ticker}): {e}")
+        st.error(f"データ処理エラー (コード:{ticker}): 予期せぬエラーが発生しました。詳細: {e}")
         return None
 
 def batch_analyze_with_ai(data_list):
@@ -634,3 +651,4 @@ if st.session_state.analyzed_data:
         df_raw = pd.DataFrame(data).drop(columns=['backtest']) 
         df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'}) 
         st.dataframe(df_raw)
+
