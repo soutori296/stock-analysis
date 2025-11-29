@@ -1,3 +1,5 @@
+--- START OF FILE 最新版_改訂版.txt ---
+
 import streamlit as st
 import pandas as pd
 import google.generativeai as genai
@@ -204,6 +206,7 @@ with st.expander("📘 取扱説明書 (データ仕様・判定基準)"):
         <tr><td><b>RSI適正</b></td><td>RSI 55〜65</td><td>+10点</td><td>トレンドが最も継続しやすい水準を評価</td></tr>
         <tr><td><b>出来高活発</b></td><td>出来高が5日平均の1.5倍超。出来高時間配分ロジックを使いリサーチ時点の出来高を評価します。</td><td>+10点</td><td>市場の注目度とエネルギーを評価。<b>大口参入の可能性</b>を示唆します。</td></tr> 
         <tr><td><b>直近勝率</b></td><td>直近5日で4日以上上昇</td><td>+5点</td><td>短期的な上値追いの勢いを評価</td></tr>
+        <tr><td><b>リスク減点</b></td><td>最大ドローダウン高 or SL余地小</td><td>-5点 / -5点</td><td>リスク許容度を超える銘柄、または長期サポートラインとの乖離が小さく損切り余地が少ない銘柄を減点します。</td></tr> <!-- ★ 説明書にリスク減点を追記 -->
         <tr><td><b>合計</b></td><td>(各項目の合計)</td><td><b>最大100点</b></td><td>算出されたスコアが100点を超えた場合でも、<b>上限は100点</b>となります。</td></tr>
     </table>
 
@@ -253,6 +256,8 @@ with st.expander("📘 取扱説明書 (データ仕様・判定基準)"):
         <tr><td><b>直近勝率</b></td><td>直近5営業日のうち、前日比プラスだった割合。 (例: 80% = 5日中4日上昇)</td></tr>
         <tr><td><b>RSI</b></td><td>🔵30以下(売られすぎ) / 🟢55-65(上昇トレンド) / 🔴70以上(過熱)</td></tr>
         <tr><td><b>PER/PBR</b></td><td>市場の評価。低ければ割安とされるが、業績や成長性との兼ね合いが重要。</td></tr>
+        <tr><td><b>最大MDD %</b></td><td>過去75日のバックテストにおける「敗北トレード」の、<b>エントリー価格から期間中最安値までの最大下落率</b>。値が大きいほど過去の損失リスクが高かったことを示します。</td></tr> <!-- ★ MDDの解説を追加 -->
+        <tr><td><b>SL乖離率</b></td><td>現在の株価が、長期サポートラインとされる<b>75日移動平均線からどれだけ乖離しているか</b>を示す率。マイナス幅が大きいほど、損切りラインまでの余地が大きい（安心感がある）と解釈できます。</td></tr> <!-- ★ SL乖離率の解説を追加 -->
     </table>
     </div>
     """, unsafe_allow_html=True)
@@ -391,12 +396,15 @@ def get_stock_info(code):
         return data
 
 
+# 【★ 修正箇所 1: run_backtest 関数の改修】
 def run_backtest(df, market_cap):
     """
     押し目勝敗数（バックテスト）を実行する。時価総額に応じた4段階の利確目標を設定 (小型株は+5.0%)。
+    返り値に「最大ドローダウン率 (MDD)」を追加。
     """
     try:
-        if len(df) < 80: return "データ不足", 0
+        # ★ 返り値に MDD(0.0) を追加
+        if len(df) < 80: return "データ不足", 0, 0.0 
         
         # 時価総額に応じた4段階の利確目標
         if market_cap >= 10000: # 1兆円以上 (10000億円)
@@ -414,6 +422,7 @@ def run_backtest(df, market_cap):
             
         wins = 0
         losses = 0
+        max_dd_pct = 0.0 # ★ 最大ドローダウン率を初期化
         test_data = df.tail(75)
         
         i = 0
@@ -435,26 +444,43 @@ def run_backtest(df, market_cap):
                 target_price = entry_price * (1 + target_pct)
                 is_win = False
                 hold_days = 0
+                trade_min_low = entry_price # ★ トレード中の最安値をエントリー価格で初期化
                 
                 for j in range(1, 11):
                     if i + j >= n: break
                     future = test_data.iloc[i + j]
                     future_high = future.get('High') if 'High' in future.index else future.get('high', None)
+                    future_low = future.get('Low') if 'Low' in future.index else future.get('low', None) # ★ 最安値を取得
 
                     hold_days = j
+                    
+                    # ★ MDD算出のために期間中最安値を更新
+                    if future_low is not None:
+                        trade_min_low = min(trade_min_low, future_low)
+
                     if future_high is not None and future_high >= target_price: 
                         is_win = True
                         break
                 
-                if is_win: wins += 1
-                else: losses += 1
+                if is_win: 
+                    wins += 1
+                else: 
+                    losses += 1
+                    # ★ 敗北の場合、最大ドローダウンを計算し更新
+                    if entry_price > 0 and trade_min_low < entry_price:
+                        # 下落率を計算 (マイナス値になる)
+                        dd_pct = ((trade_min_low / entry_price) - 1) * 100 
+                        # max_dd_pctは常にマイナス値なので、minでより大きなマイナス（より大きな下落）を記録
+                        max_dd_pct = min(max_dd_pct, dd_pct) 
+                    
                 i += max(1, hold_days) 
             i += 1
         
-        if wins + losses == 0: return "機会なし", 0
-        return f"{wins}勝{losses}敗<br>(<b>{cap_str}</b>抜)", wins+losses
+        # ★ MDDを返す
+        if wins + losses == 0: return "機会なし", 0, 0.0
+        return f"{wins}勝{losses}敗<br>(<b>{cap_str}</b>抜)", wins+losses, max_dd_pct 
     except Exception:
-        return "計算エラー", 0
+        return "計算エラー", 0, 0.0
 
 # 時価総額から目標リターン%を取得するヘルパー関数
 def get_target_pct(market_cap):
@@ -539,7 +565,8 @@ def get_stock_data(ticker):
         win_rate_pct = (up_days / 5) * 100
         momentum_str = f"{win_rate_pct:.0f}%"
 
-        bt_str, bt_cnt = run_backtest(df, info["cap"]) 
+        # 【★ 修正箇所 2.1: run_backtest から MDD を受け取る】
+        bt_str, bt_cnt, max_dd_pct = run_backtest(df, info["cap"]) 
         
         last = df.iloc[-1]
         prev = df.iloc[-2] if len(df) >= 2 else last
@@ -562,7 +589,7 @@ def get_stock_data(ticker):
         strategy = "様子見"
         ma5 = last['SMA5'] if not pd.isna(last['SMA5']) else 0
         ma25 = last['SMA25'] if not pd.isna(last['SMA25']) else 0
-        ma75 = last['SMA75'] if not pd.isna(last['SMA75']) else 0
+        ma75 = last['SMA75'] if not pd.isna(last['SMA75']) else 0 # SMA75を確実に取得
         buy_target = int(ma25) 
         p_half = 0; p_full = 0
         
@@ -613,6 +640,11 @@ def get_stock_data(ticker):
             if p_half > 0 and p_full > 0 and p_half > p_full:
                  p_half = p_full - 1 # 全益目標の手前1円に設定
 
+        # 【★ 修正箇所 2.2: 損切り乖離率の算出】
+        sl_pct = 0.0 # 損切りライン (SMA75) からの乖離率を初期化
+        if curr_price > 0 and ma75 > 0:
+            sl_pct = ((curr_price / ma75) - 1) * 100
+            
         # スコア計算
         score = 50
         if "順張り" in strategy: score += 20
@@ -620,6 +652,19 @@ def get_stock_data(ticker):
         if 55 <= rsi_val <= 65: score += 10
         if vol_ratio > 1.5: score += 10 
         if up_days >= 4: score += 5
+        
+        # --- 【★ 追加箇所 2.3: リスクによる減点ロジック】 ---
+        # 1. バックテストMDDが一定水準を超える場合 (絶対値で10%超)
+        if abs(max_dd_pct) > 10.0: 
+            score -= 5
+            
+        # 2. 現在値がSMA75に近すぎる場合 (SL余地が小さい、乖離率が3%未満)
+        if ma75 > 0 and abs(sl_pct) < 3.0: # SMA75の±3%以内にいる場合
+             # 順張り戦略ではリスク高とみなし減点
+             if "順張り" in strategy: score -= 5 
+             # 逆張り戦略ではサポート近くなので減点しない
+        # --------------------------------------------------
+        
         score = min(100, score) 
 
         vol_disp = f"🔥{vol_ratio:.1f}倍" if vol_ratio > 1.5 else f"{vol_ratio:.1f}倍"
@@ -632,6 +677,9 @@ def get_stock_data(ticker):
             "buy": buy_target, "p_half": p_half, "p_full": p_full,
             "backtest": bt_str, 
             "backtest_raw": re.sub(r'<[^>]+>', '', bt_str.replace("<br>", " ")).replace("(", "").replace(")", ""),
+            # 【★ 追加項目 1: MDDとSMA75乖離率】
+            "max_dd_pct": max_dd_pct,
+            "sl_pct": sl_pct,
             "kabutan_open": info.get("open"),
             "kabutan_high": info.get("high"),
             "kabutan_low": info.get("low"),
@@ -642,6 +690,7 @@ def get_stock_data(ticker):
         st.session_state.error_messages.append(f"データ処理エラー (コード:{ticker}): 予期せぬエラーが発生しました。詳細: {e}")
         return None
 
+# 【★ 修正箇所 3: batch_analyze_with_ai 関数の改修】
 def batch_analyze_with_ai(data_list):
     if not model: 
         return {}, "⚠️ AIモデルが設定されていません。APIキーを確認してください。"
@@ -661,7 +710,12 @@ def batch_analyze_with_ai(data_list):
         buy_target = d.get('buy', 0)
         ma_div = (price/buy_target-1)*100 if buy_target > 0 and price > 0 else 0
 
-        prompt_text += f"ID:{d['code']} | {d['name']} | 現在:{price:,.0f} | 戦略:{d['strategy']} | RSI:{d['rsi']:.1f} | 5MA乖離率:{ma_div:.1f}% | {target_info} | 出来高倍率:{d['vol_ratio']:.1f}倍\n"
+        # 【★ 追加情報: リスク指標】
+        mdd = d.get('max_dd_pct', 0.0)
+        sl_pct = d.get('sl_pct', 0.0)
+        
+        # ★ プロンプトにリスク情報を追加
+        prompt_text += f"ID:{d['code']} | {d['name']} | 現在:{price:,.0f} | 戦略:{d['strategy']} | RSI:{d['rsi']:.1f} | 5MA乖離率:{ma_div:.1f}% | {target_info} | 出来高倍率:{d['vol_ratio']:.1f}倍 | リスク情報: MDD:{mdd:+.1f}%, MA75乖離率:{sl_pct:+.1f}%\n" 
     
     prompt = f"""
     あなたは「アイ」という名前のプロトレーダー（30代女性、冷静・理知的）。
@@ -676,6 +730,7 @@ def batch_analyze_with_ai(data_list):
     3.  戦略の根拠（パーフェクトオーダー、売られすぎ、乖離率など）と、RSIの状態を必ず具体的に盛り込んでください。
     4.  **利確目標:目標超過または無効**と記載されている銘柄については、「既に利確水準を大きく超過しており、新規の買いは慎重にすべき」といった**明確な警告**を含めてください。
     5.  出来高倍率が1.5倍を超えている場合は、「大口の買い」といった表現を使い、その事実を盛り込んでください。
+    6.  **【★ 最重要: リスク情報】** リスク情報として提供された **MDD (最大ドローダウン)** や **MA75乖離率** を参照し、**リスク管理の重要性（損切りの必要性）**に関する言及を必ず含めてください。特に、MDDが-8.0%を超える（下落幅が大きい）場合は「過去の損失リスクが高い」旨を明確に伝えてください。
     
     【出力形式】
     ID:コード | コメント
@@ -827,14 +882,21 @@ if st.session_state.analyzed_data:
             # 出来高（5MA比）の表示
             vol_disp = d.get("vol_disp", "-")
             
-            rows += f'<tr><td class="td-center">{i+1}</td><td class="td-center">{d.get("code")}</td><td class="th-left td-bold">{d.get("name")}</td><td class="td-right">{d.get("cap_disp")}</td><td class="td-center">{d.get("score")}</td><td class="td-center">{d.get("strategy")}</td><td class="td-center">{d.get("momentum")}</td><td class="td-center">{d.get("rsi_disp")}</td><td class="td-right">{vol_disp}</td><td class="td-right td-bold">{price_disp}</td><td class="td-right">{buy:,.0f}<br><span style="font-size:10px;color:#666">{diff_txt}</span></td><td class="td-left" style="line-height:1.2;font-size:11px;">{target_txt}</td><td class="td-center td-blue">{bt_display}</td><td class="td-center">{d.get("per")}<br>{d.get("pbr")}</td><td class="th-left">{d.get("comment")}</td></tr>'
+            # 【★ 表示項目 1: MDDと推奨SL乖離率】
+            # MDDはマイナス値で、損切り目安（MA75からの下落余地）もマイナス値（乖離率）で表示されるのが一般的
+            mdd_disp = f"{d.get('max_dd_pct', 0.0):.1f}%"
+            sl_pct_disp = f"{d.get('sl_pct', 0.0):.1f}%"
+
+            # 【★ 表示項目 2: テーブル行の追加】
+            rows += f'<tr><td class="td-center">{i+1}</td><td class="td-center">{d.get("code")}</td><td class="th-left td-bold">{d.get("name")}</td><td class="td-right">{d.get("cap_disp")}</td><td class="td-center">{d.get("score")}</td><td class="td-center">{d.get("strategy")}</td><td class="td-center">{d.get("momentum")}</td><td class="td-center">{d.get("rsi_disp")}</td><td class="td-right">{vol_disp}</td><td class="td-right td-bold">{price_disp}</td><td class="td-right">{buy:,.0f}<br><span style="font-size:10px;color:#666">{diff_txt}</span></td><td class="td-left" style="line-height:1.2;font-size:11px;">{target_txt}</td><td class="td-center td-blue">{bt_display}</td><td class="td-center">{d.get("per")}<br>{d.get("pbr")}</td><td class="td-right">{mdd_disp}<br>{sl_pct_disp}</td><td class="th-left">{d.get("comment")}</td></tr>'
+
 
         # ヘッダーの幅を調整
         return f'''
         <h4>{title}</h4>
         <div class="table-container"><table class="ai-table">
         <thead><tr>
-        <th style="width:25px;">No</th><th style="width:45px;">コード</th><th class="th-left" style="width:130px;">企業名</th><th style="width:100px;">時価総額</th><th style="width:35px;">点</th><th style="width:75px;">戦略</th><th style="width:50px;">直近<br>勝率</th><th style="width:50px;">RSI</th><th style="width:80px;">出来高<br>(5MA比)</th><th style="width:60px;">現在値</th><th style="width:70px;">推奨買値<br>(乖離)</th><th style="width:120px;">利確目標<br>(乖離率%)</th><th style="width:85px;">押し目<br>勝敗数</th><th style="width:70px;">PER<br>PBR</th><th class="th-left" style="min-width:200px;">アイの所感</th>
+        <th style="width:25px;">No</th><th style="width:45px;">コード</th><th class="th-left" style="width:130px;">企業名</th><th style="width:100px;">時価総額</th><th style="width:35px;">点</th><th style="width:75px;">戦略</th><th style="width:50px;">直近<br>勝率</th><th style="width:50px;">RSI</th><th style="width:80px;">出来高<br>(5MA比)</th><th style="width:60px;">現在値</th><th style="width:70px;">推奨買値<br>(乖離)</th><th style="width:120px;">利確目標<br>(乖離率%)</th><th style="width:85px;">押し目<br>勝敗数</th><th style="width:70px;">PER<br>PBR</th><th style="width:70px;">MDD %<br>SL乖離率</th><th class="th-left" style="min-width:200px;">アイの所感</th>
         </tr></thead>
         <tbody>{rows}</tbody>
         </table></div>'''
@@ -854,10 +916,3 @@ if st.session_state.analyzed_data:
         if 'backtest_raw' in df_raw.columns:
             df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'}) 
         st.dataframe(df_raw)
-
-
-
-
-
-
-
