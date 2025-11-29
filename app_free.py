@@ -230,8 +230,10 @@ with st.expander("📘 取扱説明書 (データ仕様・判定基準)"):
         <tr>
             <td><b>利確目標(半/全)</b><br><span style="font-size:12px;">(売買戦略の推奨値)</span></td>
             <td>
-                <b>🔥 順張り</b>：半益は「時価総額別目標の50%」を計算後、<b>直近の100円節目から -5円</b> に調整。<br>
-                <b>🌊 逆張り</b>：半益は「5日移動平均線」から <b>-5円</b>、全益は「25日移動平均線」から <b>-5円</b> に調整。
+                <b>🔥 順張り</b>：<br>
+                - 全益は「時価総額別目標の100%」<br>
+                - 半益は「全益価格の50%」を計算後、<b>直近の100円節目から -5円</b> に調整。<br>
+                <b>🌊 逆張り</b>：半益は<b>「5日移動平均線」</b>の価格、全益は<b>「25日移動平均線」</b>の価格とする。（※調整なし）
             </td>
         </tr>
         <tr>
@@ -240,7 +242,7 @@ with st.expander("📘 取扱説明書 (データ仕様・判定基準)"):
         </tr>
         <tr>
             <td><b>解説</b></td>
-            <td>このロジックで過去にトレードした場合の勝敗数。利確目標は大型株と小型株で目標リターンを変えることで、現実的な売買の期待値を測ります。心理的な節目・抵抗線手前での確実な利確を推奨するロジックを適用しています。</td>
+            <td>このロジックで過去にトレードした場合の勝敗数。利確目標は大型株と小型株で目標リターンを変えることで、現実的な売買の期待値を測ります。順張り戦略では心理的な節目手前での確実な利確を推奨するロジックを適用しています。</td>
         </tr>
     </table>
 
@@ -391,13 +393,12 @@ def get_stock_info(code):
 
 def run_backtest(df, market_cap):
     """
-    押し目勝敗数（バックテスト）を実行する。
-    ★ 修正: 時価総額に応じた4段階の利確目標を設定 (小型株は+5.0%)。
+    押し目勝敗数（バックテスト）を実行する。時価総額に応じた4段階の利確目標を設定 (小型株は+5.0%)。
     """
     try:
         if len(df) < 80: return "データ不足", 0
         
-        # ★ 修正箇所：時価総額に応じた4段階の利確目標
+        # 時価総額に応じた4段階の利確目標
         if market_cap >= 10000: # 1兆円以上 (10000億円)
             target_pct = 0.02
             cap_str = "2.0%"
@@ -408,9 +409,8 @@ def run_backtest(df, market_cap):
             target_pct = 0.04
             cap_str = "4.0%"
         else: # 500億円未満
-            target_pct = 0.05 # ★ 修正: 5.0%に変更
-            cap_str = "5.0%"  # ★ 修正: 5.0%に変更
-        # ★ 修正箇所ここまで
+            target_pct = 0.05
+            cap_str = "5.0%"
             
         wins = 0
         losses = 0
@@ -461,7 +461,7 @@ def get_target_pct(market_cap):
     if market_cap >= 10000: return 0.02
     elif market_cap >= 3000: return 0.03
     elif market_cap >= 500: return 0.04
-    else: return 0.05 # ★ 修正後の小型株リターン
+    else: return 0.05
 
 @st.cache_data(ttl=300) # キャッシュのTTLを5分 (300秒) に設定
 def get_stock_data(ticker):
@@ -572,20 +572,25 @@ def get_stock_data(ticker):
             buy_target = int(ma5) 
             
             target_pct = get_target_pct(info["cap"])
-            target_half_raw = curr_price * (1 + target_pct / 2) # バックテスト目標の50%
-            target_full_raw = curr_price * (1 + target_pct)      # バックテスト目標の100%
+            # 全益目標の計算 (時価総額に応じたリターン)
+            target_full_raw = curr_price * (1 + target_pct)
+            # 半益目標の計算 (全益目標の50%相当)
+            target_half_raw = curr_price * (1 + target_pct / 2)
 
+            # 全益目標の確定 (小数点以下切り捨て)
+            p_full_candidate = int(target_full_raw)
+            
             # 半益目標の節目回避ロジック（100円の節目手前-5円）
             rounded_half = np.ceil(target_half_raw / 100) * 100
             p_half_candidate = int(rounded_half - 5)
             
-            # 全益目標の確定 (小数点以下切り捨て)
-            p_full_candidate = int(target_full_raw)
-            
+            # 利確目標が現在値より高い場合のみ採用
             if p_half_candidate > curr_price:
                  p_half = p_half_candidate
-                 # 全益目標も現在値より高い場合のみ採用
-                 p_full = p_full_candidate if p_full_candidate > curr_price else p_half_candidate
+                 # 全益目標が現在値より高い、かつ半益より高い場合のみ採用 (逆転防止)
+                 p_full = p_full_candidate if p_full_candidate > p_half else p_half_candidate + 1
+                 # ここで p_full が curr_price より低い可能性はないが、念のため最終チェック
+                 if p_full <= curr_price: p_full = 0; p_half = 0
             else:
                  p_half = 0
                  p_full = 0
@@ -595,13 +600,17 @@ def get_stock_data(ticker):
             strategy = "🌊逆張り"
             buy_target = int(curr_price) 
             
-            # MA手前利確ロジック（MAの価格から-5円）
-            p_half_candidate = int(ma5 - 5) if ma5 else 0
-            p_full_candidate = int(ma25 - 5) if ma25 else 0
+            # MA目標（調整なしの元のロジック）
+            p_half_candidate = int(ma5) 
+            p_full_candidate = int(ma25)
             
             # 現在値より低い場合は無効
             p_half = p_half_candidate if p_half_candidate > curr_price else 0
             p_full = p_full_candidate if p_full_candidate > curr_price else 0
+            
+            # 半益が全益より高くなる逆転防止
+            if p_half > 0 and p_full > 0 and p_half > p_full:
+                 p_half = p_full # 全益目標を超える半益目標は無効、または全益に合わせる
 
         # スコア計算
         score = 50
@@ -733,15 +742,12 @@ if st.button("🚀 分析開始 (アイに聞く)"):
             for code, comment in comments_map.items():
                 target_name = next((d['name'] for d in data_list if d['code'] == code), None)
                 if target_name:
-                    # コメントが「銘柄名 | コメント」の形式で始まっている場合に対応
                     if comment.startswith(target_name) and "|" in comment:
                         comment = comment.split("|", 1)[-1].strip()
-                    # 単に「銘柄名」で始まっている場合に対応
                     elif comment.startswith(target_name):
                         comment = comment[len(target_name):].strip()
 
                 final_comments_map[code] = comment
-            # 修正ここまで
 
             for d in data_list:
                 d["comment"] = final_comments_map.get(d["code"], "コメント生成失敗")
@@ -843,4 +849,3 @@ if st.session_state.analyzed_data:
         if 'backtest_raw' in df_raw.columns:
             df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'}) 
         st.dataframe(df_raw)
-
