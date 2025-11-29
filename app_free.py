@@ -58,7 +58,7 @@ def get_volume_weight(current_dt):
 
     # ザラ場開始前
     if current_minutes < (9 * 60):
-        return 0.0 # 9時前は出来高は0とみなす（評価対象外だが念のため）
+        return 0.01 # 9時前は0では割り算で問題が出るため最低値を設定
 
     # 現在の進捗ウェイトを検索
     last_weight = 0.0
@@ -66,8 +66,7 @@ def get_volume_weight(current_dt):
 
     for end_minutes, weight in TIME_WEIGHTS.items():
         if current_minutes <= end_minutes:
-            # 線形補間: (現在の時間 - 前の区切り) / (次の区切り - 前の区切り) * (次のウェイト - 前のウェイト) + 前のウェイト
-            if end_minutes == last_minutes: # 最初の区間または時間帯が同じ場合
+            if end_minutes == last_minutes:
                  return weight
 
             progress = (current_minutes - last_minutes) / (end_minutes - last_minutes)
@@ -119,7 +118,7 @@ st.markdown(f"""
     .td-bold {{ font-weight: bold; }}
     .td-blue {{ color: #0056b3; font-weight: bold; }}
     
-    /* タイトルアイコン用のカスタムスタイル (50%に相当する18pxに設定) */
+    /* タイトルアイコン用のカスタムスタイル (高さ指定を削除し、オリジナルサイズで表示) */
     .custom-title {{
         display: flex; 
         align-items: center;
@@ -128,7 +127,8 @@ st.markdown(f"""
         margin-bottom: 1rem;
     }}
     .custom-title img {{
-        height: 18px; /* 36pxの50%に設定 */
+        height: auto; /* オリジナルサイズ */
+        max-height: 50px; /* あまりに巨大な場合の保険 */
         margin-right: 15px;
         vertical-align: middle;
     }}
@@ -308,7 +308,6 @@ def get_stock_info(code):
         if m_vol: data["volume"] = float(m_vol.group(1).replace(",", ""))
 
         # 時価総額
-        # 元のシンプルな時価総額取得ロジック
         m_cap = re.search(r'時価総額</th>\s*<td[^>]*>(.*?)</td>', html)
         if m_cap:
             cap_str = re.sub(r'<[^>]+>', '', m_cap.group(1)).strip() 
@@ -431,7 +430,7 @@ def get_stock_data(ticker):
         vol_ratio = 0
         volume_weight = get_volume_weight(jst_now) # 出来高進捗ウェイトを取得
         
-        if info["volume"] and last['Vol_SMA5'] and volume_weight > 0:
+        if info["volume"] and last['Vol_SMA5'] and volume_weight > 0.0001: # ほぼ0の場合は計算しない
             # 調整済み出来高倍率 = 当日出来高 / (5日平均出来高 * 出来高進捗ウェイト)
             adjusted_vol_avg = last['Vol_SMA5'] * volume_weight
             vol_ratio = info["volume"] / adjusted_vol_avg
@@ -560,6 +559,9 @@ if st.button("🚀 分析開始 (アイに聞く)"):
         data_list = []
         bar = st.progress(0)
         
+        # 念のため、ボタンクリック時にも最新の時刻を取得
+        _, jst_now = get_market_status() 
+        
         for i, t in enumerate(raw_tickers):
             d = get_stock_data(t)
             if d: data_list.append(d)
@@ -622,7 +624,6 @@ if st.session_state.analyzed_data:
             rows += f'<tr><td class="td-center">{i+1}</td><td class="td-center">{d.get("code")}</td><td class="th-left td-bold">{d.get("name")}</td><td class="td-right">{d.get("cap_disp")}</td><td class="td-center">{d.get("score")}</td><td class="td-center">{d.get("strategy")}</td><td class="td-center">{d.get("momentum")}</td><td class="td-center">{d.get("rsi_disp")}</td><td class="td-right">{vol_disp}</td><td class="td-right td-bold">{price:,.0f}</td><td class="td-right">{buy:,.0f}<br><span style="font-size:10px;color:#666">{diff_txt}</span></td><td class="td-left" style="line-height:1.2;font-size:11px;">{target_txt}</td><td class="td-center td-blue">{bt_display}</td><td class="td-center">{d.get("per")}<br>{d.get("pbr")}</td><td class="th-left">{d.get("comment")}</td></tr>'
 
         # ヘッダーの幅を調整
-        # 出来高（5MA比）の幅を80pxに
         return f'''
         <h4>{title}</h4>
         <div class="table-container"><table class="ai-table">
@@ -638,7 +639,8 @@ if st.session_state.analyzed_data:
     
     st.markdown("---")
     st.markdown(f"**【アイの独り言】**")
-    st.markdown(st.session_session.ai_monologue)
+    # ここを修正: st.session_session.ai_monologue -> st.session_state.ai_monologue
+    st.markdown(st.session_state.ai_monologue) 
     
     with st.expander("詳細データリスト (生データ確認用)"):
         # 'backtest' 列を削除し、<br>を含まない 'backtest_raw' を 'backtest' にリネームして表示
