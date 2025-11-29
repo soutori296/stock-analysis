@@ -658,4 +658,5 @@ if st.session_state.analyzed_data:
     with st.expander("詳細データリスト (生データ確認用)"):
         df_raw = pd.DataFrame(data).drop(columns=['backtest']) 
         df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'}) 
-        st.dataframe(df_raw)```
+        st.dataframe(df_raw)
+
