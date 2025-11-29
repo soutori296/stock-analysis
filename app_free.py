@@ -446,7 +446,7 @@ def get_stock_data(ticker):
         # -------------------------------------------------------
         # Kabutan（株探）データ → 最優先で使用
         # -------------------------------------------------------
-        info = get_kabutan_realtime(ticker)  # あなたの既存関数
+        info = get_stock_info(ticker)
         if not info:
             raise ValueError("Kabutan データ取得に失敗")
 
@@ -834,6 +834,7 @@ if st.session_state.analyzed_data:
         if 'backtest' not in df_raw.columns and 'backtest_raw' in df_raw.columns:
             df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'})
         st.dataframe(df_raw)
+
 
 
 
