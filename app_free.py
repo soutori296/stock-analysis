@@ -588,7 +588,7 @@ if st.button("🚀 分析開始 (アイに聞く)"):
             bar.progress((i+1)/len(raw_tickers))
             time.sleep(0.5)
             
-        with st.spinner("🤖 アイが全銘柄を診断中..."):
+        with st.spinner("アイが全銘柄を診断中..."):
             comments_map, monologue = batch_analyze_with_ai(data_list)
             for d in data_list:
                 d["comment"] = comments_map.get(d["code"], "コメント生成失敗")
@@ -686,4 +686,5 @@ if st.session_state.analyzed_data:
         df_raw = pd.DataFrame(data).drop(columns=['backtest']) 
         df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'}) 
         st.dataframe(df_raw)
+
 
