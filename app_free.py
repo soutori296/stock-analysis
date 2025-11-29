@@ -7,6 +7,7 @@ import requests
 import io
 import re
 import math
+import numpy as np
 
 _stooq_daily_cache = {}
 
@@ -875,6 +876,7 @@ if st.session_state.analyzed_data:
         if 'backtest' not in df_raw.columns and 'backtest_raw' in df_raw.columns:
             df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'})
         st.dataframe(df_raw)
+
 
 
 
