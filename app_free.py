@@ -639,30 +639,20 @@ def get_stock_data(ticker):
 def batch_analyze_with_ai(data_list):
     if not model: 
         return {}, "⚠️ AIモデルが設定されていません。APIキーを確認してください。"
-        
-    prompt_text = "【銘柄リスト】\n"
-    
+
+    # ---------------------------
+    # 銘柄リスト文字列を構築
+    # ---------------------------
+    prompt_text = ""
     for d in data_list:
 
-        # ★ Kabutan 終値ベースの price を使う（get_stock_data が保証しているが念のため）
         kabu_price = d.get("price")
         price_disp = f"{kabu_price:,.0f}" if kabu_price else "-"
 
-        # 利確目標
         p_half = d.get("p_half", 0)
         p_full = d.get("p_full", 0)
 
-        # ★ 利確目標乖離率（安全処理）
-        if kabu_price and p_half:
-            try:
-                half_pct = ((p_half / kabu_price) - 1) * 100
-                half_pct_disp = f"{half_pct:+.1f}%"
-            except:
-                half_pct_disp = "無効"
-        else:
-            half_pct_disp = "無効"
-
-        # ★ 5MA 乖離率（Kabutan 終値基準）
+        # 5MA乖離率
         if kabu_price and d.get("buy", 0) > 0:
             try:
                 buy_div = (kabu_price / d["buy"] - 1) * 100
@@ -672,62 +662,98 @@ def batch_analyze_with_ai(data_list):
         else:
             buy_div_disp = "-"
 
-        # ★ 順張りで利確目標が無効
+        # 利確半分
+        if p_half and kabu_price:
+            try:
+                half_pct = ((p_half / kabu_price) - 1) * 100
+                half_pct_disp = f"{half_pct:+.1f}%"
+            except:
+                half_pct_disp = "無効"
+        else:
+            half_pct_disp = "無効"
+
+        # 順張りで無効
         if p_half == 0 and d["strategy"] == "🔥順張り":
-            target_info = "利確目標:目標超過または無効"
+            target_info = "利確目標:目標超過/無効"
         else:
             target_info = f"利確目標(半):{half_pct_disp}"
 
-        # ★ プロンプト行（1銘柄）
+        # 行生成
         prompt_text += (
-            f"ID:{d['code']} | {d['name']} | "
+            f"{d['code']} | {d['name']} | "
             f"現在:{price_disp} | 戦略:{d['strategy']} | "
-            f"RSI:{d['rsi']:.1f} | "
-            f"5MA乖離率:{buy_div_disp} | "
+            f"RSI:{d['rsi']:.1f} | 5MA乖離率:{buy_div_disp} | "
             f"{target_info} | 出来高倍率:{d['vol_ratio']:.1f}倍\n"
         )
 
-    # --- AIへのプロンプト本文 ---
+    # ---------------------------
+    # AI へのプロンプト（完全固定形式）
+    # ---------------------------
     prompt = f"""
-    あなたは「アイ」という名前のプロトレーダー。
-    以下の【銘柄リスト】を基に、各銘柄の所感コメント（80文字）を書いてください。
-    
-    【銘柄リスト】
-    {prompt_text}
+あなたはプロトレーダー「アイ」です。
+以下の【銘柄リスト】について、各銘柄ごとに80文字以内で所感を書きなさい。
 
-    END_OF_LIST の後に、アイの独り言（3行程度、常体）も書いてください。
-    """
+★出力フォーマット（必ず厳守）★
 
+(1) 銘柄コメント一覧（銘柄ごとに1行）
+ID:コード | コメント文
+
+（例）
+ID:7203 | トレンド継続で押し目が浅く強い。出来高も良好で買い優勢。
+
+(2) END_OF_LIST
+（この行を必ず書く）
+
+(3) アイの独り言（常体で3行以内）
+
+【銘柄リスト】
+{prompt_text}
+"""
+
+    # ---------------------------
+    # AI の応答生成
+    # ---------------------------
     try:
         res = model.generate_content(prompt)
         text = res.text
 
+        # END_OF_LIST が無い場合は失敗扱い
+        if "END_OF_LIST" not in text:
+            raise ValueError("AI応答に END_OF_LIST が存在しません")
+
+        # コメント部分と独り言部分で分割
+        main_part, monologue_part = text.split("END_OF_LIST", 1)
+
+        # ---------------------------
+        # コメント解析
+        # ---------------------------
         comments = {}
-        monologue = ""
+        for line in main_part.split("\n"):
+            line = line.strip()
 
-        # --- 解析処理 ---
-        parts = text.split("END_OF_LIST")
-        lines = parts[0].strip().split("\n")
-
-        for line in lines:
-            # 「ID:7203 | コメント…」形式を安全に解析
-            if "|" in line and "ID:" in line:
+            # 形式：ID:コード | コメント
+            if line.startswith("ID:") and "|" in line:
                 try:
                     left, right = line.split("|", 1)
                     code = left.replace("ID:", "").strip()
                     comment = right.strip()
-                    comments[code] = comment
+
+                    # 空行はスキップ
+                    if comment:
+                        comments[code] = comment
                 except:
                     pass
 
-        if len(parts) > 1:
-            monologue = parts[1].strip().replace("```", "")
+        # ---------------------------
+        # アイの独り言
+        # ---------------------------
+        monologue = monologue_part.strip().replace("```", "")
 
         return comments, monologue
 
     except Exception as e:
         st.session_state.error_messages.append(
-            f"AI分析エラー: Gemini応答解析に失敗。詳細: {e}"
+            f"AI分析エラー: {e}"
         )
         return {}, "AI分析失敗"
 
@@ -855,4 +881,5 @@ if st.session_state.analyzed_data:
         if 'backtest' not in df_raw.columns and 'backtest_raw' in df_raw.columns:
             df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'})
         st.dataframe(df_raw)
+
 
