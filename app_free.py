@@ -463,7 +463,7 @@ def get_target_pct(market_cap):
     elif market_cap >= 500: return 0.04
     else: return 0.05
 
-@st.cache_data(ttl=300) # キャッシュのTTLを5分 (300秒) に設定
+#@st.cache_data(ttl=300) # キャッシュのTTLを5分 (300秒) に設定
 def get_stock_data(ticker):
     
     status, jst_now_local = get_market_status() 
@@ -848,3 +848,4 @@ if st.session_state.analyzed_data:
         if 'backtest_raw' in df_raw.columns:
             df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'}) 
         st.dataframe(df_raw)
+
