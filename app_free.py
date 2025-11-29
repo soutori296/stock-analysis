@@ -478,6 +478,48 @@ def calc_rsi(series, n=14):
     rs = avg_gain / avg_loss
     return 100 - (100 / (1 + rs))
 
+def make_backtest_string(df):
+    """
+    過去75営業日の押し目勝敗数を計算して文字列化（HTML形式）。
+    dfは日足データ（Open, High, Low, Close, Volumeなどを含むDataFrame）
+    """
+    try:
+        # 75日分だけ取得
+        df = df.tail(75).copy()
+        if len(df) < 10:
+            return "データ不足"
+
+        wins = 0
+        losses = 0
+
+        for i in range(len(df)-1):
+            row = df.iloc[i]
+            low = row.get('Low', row.get('low', None))
+            sma5 = row.get('SMA5', None)
+            sma25 = row.get('SMA25', None)
+            if sma5 is None or sma25 is None or low is None:
+                continue
+            if sma5 > sma25 and low <= sma5:
+                # エントリー条件を満たす日
+                target_price = sma5 * 1.04  # 仮に4%上昇で勝利判定
+                is_win = False
+                for j in range(1, min(11, len(df)-i)):
+                    future_high = df.iloc[i+j].get('High', df.iloc[i+j].get('high', None))
+                    if future_high and future_high >= target_price:
+                        is_win = True
+                        break
+                if is_win:
+                    wins += 1
+                else:
+                    losses += 1
+
+        if wins + losses == 0:
+            return "機会なし"
+        return f"{wins}勝{losses}敗"
+    except Exception:
+        return "計算エラー"
+
+
 def get_stock_data(ticker):
     try:
         info = get_stock_info(ticker)
@@ -832,6 +874,7 @@ if st.session_state.analyzed_data:
         if 'backtest' not in df_raw.columns and 'backtest_raw' in df_raw.columns:
             df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'})
         st.dataframe(df_raw)
+
 
 
 
