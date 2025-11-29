@@ -461,67 +461,49 @@ def run_backtest(df, market_cap):
         
 # 15:50以降かどうか判定
 def is_after_close():
-    status, _ = get_market_status()
-    return "引け後" in status
+    jst_now = datetime.datetime.utcnow() + datetime.timedelta(hours=9)
+    return jst_now.time() >= datetime.time(15, 50)
 
-def calc_rsi(series, period=14):
-    """
-    RSI (Relative Strength Index) 計算
-    series: pandas.Series の株価終値
-    period: 計算期間 (デフォルト14日)
-    """
+# --- 簡易版: RSI計算（n日間） ---
+def calc_rsi(series, n=14):
+    if len(series) < n + 1:
+        return 50  # データ不足の場合は50固定
     delta = series.diff()
-    up = delta.clip(lower=0)
-    down = -1 * delta.clip(upper=0)
-
-    # 移動平均 (単純平均でも指数平均でも可)
-    roll_up = up.rolling(period).mean()
-    roll_down = down.rolling(period).mean()
-
-    rs = roll_up / roll_down
-    rsi = 100 - (100 / (1 + rs))
-    return rsi.iloc[-1]  # 最新日だけ返す
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    avg_gain = gain.rolling(n).mean().iloc[-1]
+    avg_loss = loss.rolling(n).mean().iloc[-1]
+    if avg_loss == 0:
+        return 100
+    rs = avg_gain / avg_loss
+    return 100 - (100 / (1 + rs))
 
 def get_stock_data(ticker):
-    """
-    Kabutan（現在値・出来高・当日OHLC優先）＋ Stooq（過去データ）
-    を統合して 1 銘柄分の情報を返す。
-    """
     try:
-        # -------------------------------------------------------
-        # Kabutan（株探）データ → 最優先で使用
-        # -------------------------------------------------------
         info = get_stock_info(ticker)
         if not info:
             raise ValueError("Kabutan データ取得に失敗")
 
-        kabu_price  = info.get("price")     # 現在値
-        cap         = info.get("market_cap")
+        kabu_price  = info.get("price")
+        cap         = info.get("cap") or 0       # None → 0 に置換
         per         = info.get("per")
         pbr         = info.get("pbr")
-
-        # 当日 OHLC
         kabu_open   = info.get("open")
         kabu_high   = info.get("high")
         kabu_low    = info.get("low")
         kabu_close  = info.get("close")
         kabu_volume = info.get("volume")
 
-        # -------------------------------------------------------
-        # Stooq（日足） → 過去データ用（テクニカル計算用）
-        # -------------------------------------------------------
+        # Stooqデータ取得
         df = _stooq_daily_cache.get(ticker)
         if df is None:
-            df = fetch_stooq_daily(ticker)      # あなたの既存関数
+            df = fetch_stooq_daily(ticker)  # 既存関数
             _stooq_daily_cache[ticker] = df
-
         if df is None or len(df) < 10:
             raise ValueError("Stooq 過去データが不足")
 
-        # -------------------------------------------------------
-        # 引け後（15:50以降）は株探の当日OHLCを連結する
-        # -------------------------------------------------------
-        if is_after_close():  # 15:50 判定（あなたの既存関数）
+        # 引け後なら当日OHLCを連結
+        if is_after_close():
             new_row = {
                 "Open": kabu_open,
                 "High": kabu_high,
@@ -529,41 +511,31 @@ def get_stock_data(ticker):
                 "Close": kabu_close,
                 "Volume": kabu_volume,
             }
-            df = df.iloc[:-1].append(new_row, ignore_index=True)
+            df = pd.concat([df.iloc[:-1], pd.DataFrame([new_row])], ignore_index=True)
 
-        # -------------------------------------------------------
-        # RSI 計算（Stooq + 当日OHLC）
-        # -------------------------------------------------------
+        # RSI計算
         rsi_val = calc_rsi(df["Close"], 14)
 
-        # -------------------------------------------------------
-        # 過去 5 日の上昇日数 → momentum 判定
-        # -------------------------------------------------------
+        # 直近5日上昇日数
         up_days = sum(df["Close"].diff().tail(5) > 0)
 
-        # -------------------------------------------------------
-        # 出来高倍率（当日 / 5日平均）→ Kabutan優先
-        # -------------------------------------------------------
+        # 出来高倍率
         vol_ratio = 0
         if kabu_volume and df["Volume"].tail(5).mean() > 0:
             vol_ratio = kabu_volume / df["Volume"].tail(5).mean()
 
-        # -------------------------------------------------------
-        # ★ 株価クラス（大型/中型/小型） ← マニュアル通り
-        # -------------------------------------------------------
+        # 株価クラス判定
         if cap >= 1_000_000_000_000:
             class_name = "大型（1兆円以上）"
-            limit_pct  = 0.02      # 利確 2%
+            limit_pct  = 0.02
         elif cap >= 100_000_000_000:
             class_name = "中型（1000〜1兆）"
-            limit_pct  = 0.04      # 利確 4%
+            limit_pct  = 0.04
         else:
             class_name = "小型（〜1000億）"
-            limit_pct  = 0.06      # 利確 6%
+            limit_pct  = 0.06
 
-        # -------------------------------------------------------
-        # 売買戦略（順張り/逆張り）
-        # -------------------------------------------------------
+        # 戦略判定
         if rsi_val > 60 and up_days >= 3:
             strategy = "🔥順張り"
             strategy_reason = f"{class_name}の順張り基準（RSI高・陽線優勢）"
@@ -571,53 +543,34 @@ def get_stock_data(ticker):
             strategy = "💧逆張り"
             strategy_reason = f"{class_name}の逆張り基準（売られすぎ or 調整）"
 
-        # -------------------------------------------------------
-        # buy / p_half / p_full
-        # -------------------------------------------------------
-        buy_target = kabu_price * (1 - limit_pct)
-        p_half     = kabu_price * (1 + limit_pct)
-        p_full     = kabu_price * (1 + limit_pct * 2)
+        # 利確関連
+        buy_target = kabu_price * (1 - limit_pct) if kabu_price else 0
+        p_half     = kabu_price * (1 + limit_pct) if kabu_price else 0
+        p_full     = kabu_price * (1 + limit_pct * 2) if kabu_price else 0
 
-        # -------------------------------------------------------
-        # VBA 風 backtest（あなたの既存ロジック互換）
-        # -------------------------------------------------------
-        bt_str = make_backtest_string(df)
+        bt_str = make_backtest_string(df)  # 既存関数
 
-        # -------------------------------------------------------
-        # ★ 戻り値（UIは変えず、内部パラメータだけ追加）
-        # -------------------------------------------------------
         return {
             "code": ticker,
             "name": info.get("name"),
-
-            # 株探データ（表示用）
             "price": kabu_price,
             "cap_val": cap,
             "cap_disp": fmt_market_cap(cap),
             "per": per,
             "pbr": pbr,
-
-            # テクニカル
             "rsi": rsi_val,
             "rsi_disp": f"{'🟢' if rsi_val < 30 else '🔴' if rsi_val > 70 else '🟡'}{rsi_val:.1f}",
             "vol_ratio": vol_ratio,
             "vol_disp": f"{vol_ratio:.1f}倍",
             "momentum": f"{(up_days/5)*100:.0f}%",
-
-            # 戦略
             "strategy": strategy,
             "strategy_reason": strategy_reason,
             "class_name": class_name,
-
-            # 利確関連
             "buy": buy_target,
             "p_half": p_half,
             "p_full": p_full,
-
             "backtest": bt_str,
             "backtest_raw": re.sub(r'<[^>]+>', '', bt_str.replace("<br>", " ")),
-
-            # 当日 OHLC
             "kabutan_open": kabu_open,
             "kabutan_high": kabu_high,
             "kabutan_low": kabu_low,
@@ -879,6 +832,7 @@ if st.session_state.analyzed_data:
         if 'backtest' not in df_raw.columns and 'backtest_raw' in df_raw.columns:
             df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'})
         st.dataframe(df_raw)
+
 
 
 
