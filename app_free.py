@@ -748,52 +748,52 @@ ID:7203 | トレンド継続で買い優勢。RSIも適正で押し目が狙え�
 {prompt_text}
 """
 
-    # ------------------------------------------------------
-    # AI 実行
-    # ------------------------------------------------------
-    try:
-        res = model.generate_content(prompt)
-        text = res.text
+# ------------------------------------------------------
+# AI 実行
+# ------------------------------------------------------
+try:
+    res = model.generate_content(prompt)
+    text = res.text
 
-        # END_OF_LIST が無ければ失敗扱い（コメント崩れバグ対策）
-        if "END_OF_LIST" not in text:
-            raise ValueError("AI応答に END_OF_LIST が存在しません")
+    # END_OF_LIST が無ければ失敗扱い（コメント崩れバグ対策）
+    if "END_OF_LIST" not in text:
+        raise ValueError("AI応答に END_OF_LIST が存在しません")
 
-        # main_part = コメント一覧
-        # monologue_part = アイの独り言
-        main_part, monologue_part = text.split("END_OF_LIST", 1)
+    # main_part = コメント一覧
+    # monologue_part = アイの独り言
+    main_part, monologue_part = text.split("END_OF_LIST", 1)
 
-        # --------------------------------------------------
-        # コメント解析
-        # --------------------------------------------------
-        comments = {}
-        for line in main_part.split("\n"):
-            line = line.strip()
+    # --------------------------------------------------
+    # コメント解析
+    # --------------------------------------------------
+    comments = {}
+    for line in main_part.split("\n"):
+        line = line.strip()
 
-            # 形式：ID:コード | コメント
-            if line.startswith("ID:") and "|" in line:
-                try:
-                    left, right = line.split("|", 1)
-                    code = left.replace("ID:", "").strip()
-                    comment = right.strip()
+        # 形式：ID:コード | コメント
+        if line.startswith("ID:") and "|" in line:
+            try:
+                left, right = line.split("|", 1)
+                code = left.replace("ID:", "").strip()
+                comment = right.strip()
 
-                    if comment:
-                        comments[code] = comment
-                except:
-                    pass
+                if comment:
+                    comments[code] = comment
+            except:
+                pass
 
-        # --------------------------------------------------
-        # アイの独り言
-        # --------------------------------------------------
-        monologue = monologue_part.strip().replace("```", "")
+    # --------------------------------------------------
+    # アイの独り言
+    # --------------------------------------------------
+    monologue = monologue_part.strip().replace("```", "")
 
-        return comments, monologue
+    return comments, monologue
 
-    except Exception as e:
-        st.session_state.error_messages.append(
-            f"AI分析エラー: {e}"
-        )
-        return {}, "AI分析失敗"
+except Exception as e:
+    st.session_state.error_messages.append(
+        f"AI分析エラー: {e}"
+    )
+    return {}, "AI分析失敗"
 
 # --- メイン処理 ---
 if st.button("🚀 分析開始 (アイに聞く)"):
@@ -919,6 +919,7 @@ if st.session_state.analyzed_data:
         if 'backtest' not in df_raw.columns and 'backtest_raw' in df_raw.columns:
             df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'})
         st.dataframe(df_raw)
+
 
 
 
