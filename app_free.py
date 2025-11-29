@@ -25,13 +25,59 @@ if 'ai_monologue' not in st.session_state:
 def get_market_status():
     jst_now = datetime.datetime.utcnow() + datetime.timedelta(hours=9)
     current_time = jst_now.time()
-    if jst_now.weekday() >= 5: return "休日(確定値)"
+    if jst_now.weekday() >= 5: return "休日(確定値)", jst_now
     if datetime.time(9, 0) <= current_time <= datetime.time(15, 20):
-        return "ザラ場(進行中)"
-    return "引け後(確定値)"
+        return "ザラ場(進行中)", jst_now
+    return "引け後(確定値)", jst_now
 
-status_label = get_market_status()
+status_label, jst_now = get_market_status()
 status_color = "#d32f2f" if "進行中" in status_label else "#1976d2"
+
+# --- 出来高調整ウェイト（ご要望の出来高偏重ロジック） ---
+# キーは時間帯の終了時刻（分換算：9時=540, 15時=900）
+# 値は累積出来高比率（0.0〜1.0）
+TIME_WEIGHTS = {
+    (9 * 60 + 60): 0.60,  # 10:00: 60%
+    (12 * 60 + 30): 0.65, # 12:30: 65% (前場終了)
+    (13 * 60 + 0): 0.75,  # 13:00: 75% (後場寄り)
+    (14 * 60 + 30): 0.85, # 14:30: 85%
+    (15 * 60 + 0): 1.00   # 15:00: 100%
+}
+
+def get_volume_weight(current_dt):
+    """ 現在時刻に基づいた出来高の進捗ウェイトを返す """
+    # 休日/引け後、またはザラ場前（9時前）は1.0 (終日取引済)
+    if "休日" in status_label or "引け後" in status_label or current_dt.hour < 9:
+        return 1.0
+    
+    current_minutes = current_dt.hour * 60 + current_dt.minute
+    
+    # 取引時間外 (15時以降) は1.0
+    if current_minutes > (15 * 60):
+        return 1.0
+
+    # ザラ場開始前
+    if current_minutes < (9 * 60):
+        return 0.0 # 9時前は出来高は0とみなす（評価対象外だが念のため）
+
+    # 現在の進捗ウェイトを検索
+    last_weight = 0.0
+    last_minutes = (9 * 60) # 9:00
+
+    for end_minutes, weight in TIME_WEIGHTS.items():
+        if current_minutes <= end_minutes:
+            # 線形補間: (現在の時間 - 前の区切り) / (次の区切り - 前の区切り) * (次のウェイト - 前のウェイト) + 前のウェイト
+            if end_minutes == last_minutes: # 最初の区間または時間帯が同じ場合
+                 return weight
+
+            progress = (current_minutes - last_minutes) / (end_minutes - last_minutes)
+            interpolated_weight = last_weight + progress * (weight - last_weight)
+            return max(0.01, interpolated_weight) # ゼロ割を防ぐため最低値を設定
+
+        last_weight = weight
+        last_minutes = end_minutes
+        
+    return 1.0 # 15時以降
 
 # --- CSSスタイル (干渉回避版) ---
 st.markdown(f"""
@@ -73,7 +119,7 @@ st.markdown(f"""
     .td-bold {{ font-weight: bold; }}
     .td-blue {{ color: #0056b3; font-weight: bold; }}
     
-    /* タイトルアイコン用のカスタムスタイル */
+    /* タイトルアイコン用のカスタムスタイル (50%に相当する18pxに設定) */
     .custom-title {{
         display: flex; 
         align-items: center;
@@ -82,7 +128,7 @@ st.markdown(f"""
         margin-bottom: 1rem;
     }}
     .custom-title img {{
-        height: 36px; /* アイコンの高さ調整 */
+        height: 18px; /* 36pxの50%に設定 */
         margin-right: 15px;
         vertical-align: middle;
     }}
@@ -90,7 +136,6 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # --- タイトル ---
-# st.title("📈 教えて！AIさん 2") をカスタムHTMLに置き換え
 st.markdown(f"""
 <div class="custom-title">
     <img src="{ICON_URL}" alt="AI Icon"> 教えて！AIさん 2
@@ -182,6 +227,7 @@ with st.expander("📘 取扱説明書 (データ仕様・判定基準)"):
     <h5>④ 各種指標の基準</h5>
     <table class="desc-table">
         <tr><th style="width:20%">指標</th><th>解説</th></tr>
+        <tr><td><b>出来高（5MA比）</b></td><td><b>当日のリアルタイム出来高</b>を**過去5日間の出来高平均**と**市場の経過時間比率**で調整した倍率。<br>市場が開いている時間帯に応じて、出来高の偏りを考慮し、公平に大口流入を評価します。</td></tr>
         <tr><td><b>直近勝率</b></td><td>直近5営業日のうち、前日比プラスだった割合。 (例: 80% = 5日中4日上昇)</td></tr>
         <tr><td><b>RSI</b></td><td>🔵30以下(売られすぎ) / 🟢55-65(上昇トレンド) / 🔴70以上(過熱)</td></tr>
         <tr><td><b>PER/PBR</b></td><td>市場の評価。低ければ割安とされるが、業績や成長性との兼ね合いが重要。</td></tr>
@@ -230,7 +276,7 @@ def fmt_market_cap(val):
             cho = val_int // 10000
             oku = val_int % 10000
             if oku == 0: return f"{cho}兆円"
-            # 時価総額の枠が49兆4400億円でも改行されない程度に広がるように、億のカンマ表示を削除してシンプルに。
+            # 時価総額の枠が49兆4400億円でも改行されない程度に広がるように、億のカンマ表示を削除
             else: return f"{cho}兆{oku}億円" 
         else:
             return f"{val_int}億円"
@@ -262,10 +308,9 @@ def get_stock_info(code):
         if m_vol: data["volume"] = float(m_vol.group(1).replace(",", ""))
 
         # 時価総額
-        # 元のシンプルな時価総額取得ロジック (改行されない程度に広げるため、表示はfmt_market_capに任せる)
+        # 元のシンプルな時価総額取得ロジック
         m_cap = re.search(r'時価総額</th>\s*<td[^>]*>(.*?)</td>', html)
         if m_cap:
-            # <br>やその他のタグを全て除去
             cap_str = re.sub(r'<[^>]+>', '', m_cap.group(1)).strip() 
             val = 0
             if "兆" in cap_str:
@@ -273,10 +318,8 @@ def get_stock_info(code):
                 trillion = float(parts[0].replace(",", ""))
                 billion = 0
                 if len(parts) > 1 and "億" in parts[1]:
-                    # 億の部分の数値のみを抽出
                     b_match = re.search(r'([0-9,]+)', parts[1])
                     if b_match: billion = float(b_match.group(1).replace(",", ""))
-                # 億単位の数値を「万」単位に変換 (1万倍)
                 val = trillion * 10000 + billion
             elif "億" in cap_str:
                 b_match = re.search(r'([0-9,]+)', cap_str)
@@ -287,11 +330,9 @@ def get_stock_info(code):
         i3_match = re.search(r'<div id="stockinfo_i3">.*?<tbody>(.*?)</tbody>', html)
         if i3_match:
             tbody = i3_match.group(1)
-            # tdタグの中身を全てリスト化
             tds = re.findall(r'<td.*?>(.*?)</td>', tbody)
             
             def clean_tag_and_br(s): 
-                # PER/PBRデータに混入する可能性のある<br>やタグを除去
                 return re.sub(r'<[^>]+>', '', s).replace("<br>", "").strip()
             
             if len(tds) >= 2:
@@ -307,11 +348,9 @@ def run_backtest(df, market_cap):
     try:
         if len(df) < 80: return "データ不足", 0
         target_pct = 0.04 
-        # 時価総額1兆円未満：エントリー価格から**4%の上昇**
         cap_str = "4%"
         if market_cap >= 10000: # 1兆円
             target_pct = 0.02
-            # 時価総額1兆円超：エントリー価格から**2%の上昇**
             cap_str = "2%"
             
         wins = 0
@@ -325,24 +364,22 @@ def run_backtest(df, market_cap):
             row = test_data.iloc[i]
             # 5日線が25日線より上 (上昇トレンド) and 終値ではなくLowが5日線にタッチ
             if row['SMA5'] > row['SMA25'] and row['Low'] <= row['SMA5']: 
-                entry_price = row['SMA5'] # 押し目でのエントリーは5日線付近と仮定
+                entry_price = row['SMA5'] 
                 target_price = entry_price * (1 + target_pct)
                 is_win = False
                 hold_days = 0
                 
-                # 最大10日間ホールド
                 for j in range(1, 11):
                     if i + j >= n: break
                     future = test_data.iloc[i + j]
                     hold_days = j
-                    # 高値が利確目標に到達
                     if future['High'] >= target_price: 
                         is_win = True
                         break
                 
                 if is_win: wins += 1
                 else: losses += 1
-                i += hold_days # 次のエントリーは利確/損切り後の次の日から
+                i += hold_days 
             i += 1
         
         if wins + losses == 0: return "機会なし", 0
@@ -352,6 +389,8 @@ def run_backtest(df, market_cap):
 
 @st.cache_data(ttl=3600)
 def get_stock_data(ticker):
+    global jst_now # 現在時刻を取得
+    
     ticker = str(ticker).strip().replace(".T", "").upper()
     stock_code = f"{ticker}.JP"
     info = get_stock_info(ticker)
@@ -387,9 +426,15 @@ def get_stock_data(ticker):
         prev = df.iloc[-2]
         
         curr_price = info["price"] if info["price"] else last['Close']
+        
+        # --- 出来高ロジック修正: 時間調整係数の導入 ---
         vol_ratio = 0
-        if info["volume"] and last['Vol_SMA5']:
-            vol_ratio = info["volume"] / last['Vol_SMA5']
+        volume_weight = get_volume_weight(jst_now) # 出来高進捗ウェイトを取得
+        
+        if info["volume"] and last['Vol_SMA5'] and volume_weight > 0:
+            # 調整済み出来高倍率 = 当日出来高 / (5日平均出来高 * 出来高進捗ウェイト)
+            adjusted_vol_avg = last['Vol_SMA5'] * volume_weight
+            vol_ratio = info["volume"] / adjusted_vol_avg
         
         rsi_val = last['RSI']
         if rsi_val <= 30: rsi_mark = "🔵"
@@ -406,25 +451,25 @@ def get_stock_data(ticker):
         if ma5 > ma25 > ma75 and ma5 > prev['SMA5']:
             strategy = "🔥順張り"
             buy_target = int(ma5) # 推奨買値は5日線
-            p_half = int(ma25 * 1.10) # 25MA + 10%
-            p_full = int(ma25 * 1.20) # 25MA + 20%
+            p_half = int(ma25 * 1.10) 
+            p_full = int(ma25 * 1.20)
         # 🌊逆張り判定
         elif rsi_val <= 30 or (curr_price < ma25 * 0.9):
             strategy = "🌊逆張り"
             buy_target = int(curr_price) # 推奨買値は現在値
-            p_half = int(ma5) # 5MA
-            p_full = int(ma25) # 25MA
+            p_half = int(ma5) 
+            p_full = int(ma25) 
         
-        # --- AIスコア計算 ---
+        # --- AIスコア計算 --- (現状維持)
         score = 50
         if "順張り" in strategy: score += 20
         if "逆張り" in strategy: score += 15
         if 55 <= rsi_val <= 65: score += 10
         if vol_ratio > 1.5: score += 10 # 出来高活発
         if up_days >= 4: score += 5
-        score = min(100, score) # スコアの上限を100に設定
+        score = min(100, score) 
 
-        # 大口流入表示
+        # 出来高（5MA比）表示 (1.5倍以上で🔥マーク)
         vol_disp = f"🔥{vol_ratio:.1f}倍" if vol_ratio > 1.5 else f"{vol_ratio:.1f}倍"
 
         return {
@@ -436,14 +481,14 @@ def get_stock_data(ticker):
             "per": info["per"], "pbr": info["pbr"],
             "rsi": rsi_val, "rsi_disp": f"{rsi_mark}{rsi_val:.1f}",
             "vol_ratio": vol_ratio,
-            "vol_disp": vol_disp, # 新規：大口流入表示用
+            "vol_disp": vol_disp, 
             "momentum": momentum_str,
             "strategy": strategy,
             "score": score,
             "buy": buy_target,
             "p_half": p_half, "p_full": p_full,
-            "backtest": bt_str, # HTML表示用
-            "backtest_raw": bt_str.replace("<br>", " ") # 生データ表示用
+            "backtest": bt_str, 
+            "backtest_raw": bt_str.replace("<br>", " ") 
         }
     except Exception as e:
         # st.error(f"Error processing {ticker}: {e}") # デバッグ用
@@ -462,7 +507,7 @@ def batch_analyze_with_ai(data_list):
         full_pct = ((p_full / price) - 1) * 100 if price > 0 and p_full > 0 else 0
         
         # コメント生成用の情報に追加
-        prompt_text += f"ID:{d['code']} | {d['name']} | 現在:{price:,.0f} | 戦略:{d['strategy']} | RSI:{d['rsi']:.1f} | 5MA乖離率:{(price/d['buy']-1)*100 if d['buy']>0 else 0:.1f}% | 利確目標(半):{half_pct:+.1f}% | 利確目標(全):{full_pct:+.1f}% | 大口流入:{d['vol_ratio']:.1f}倍\n"
+        prompt_text += f"ID:{d['code']} | {d['name']} | 現在:{price:,.0f} | 戦略:{d['strategy']} | RSI:{d['rsi']:.1f} | 5MA乖離率:{(price/d['buy']-1)*100 if d['buy']>0 else 0:.1f}% | 利確目標(半):{half_pct:+.1f}% | 利確目標(全):{full_pct:+.1f}% | 出来高倍率:{d['vol_ratio']:.1f}倍\n"
     
     prompt = f"""
     あなたは「アイ」という名前のプロトレーダー（30代女性、冷静・理知的）。
@@ -472,7 +517,7 @@ def batch_analyze_with_ai(data_list):
     1.  <b>銘柄ごとに特徴を活かした、人間味のある（画一的でない）文章にしてください。</b>
     2.  戦略の根拠（パーフェクトオーダー、売られすぎ、乖離率など）と、RSIの状態を必ず具体的に盛り込んでください。
     3.  特に順張り銘柄で、利確目標(半)の乖離率が低い（+5%以下など）場合は、「目標達成が近い」または「短期的なリターンは限定的」といった**一歩踏み込んだ見解**を加えてください。
-    4.  「大口流入」が1.5倍を超えている場合は、その事実を盛り込んでください。
+    4.  出来高倍率が1.5倍を超えている場合は、「大口の買い」といった表現を使い、その事実を盛り込んでください。
     
     【出力形式】
     コード | コメント
@@ -571,19 +616,18 @@ if st.session_state.analyzed_data:
             # backtestフィールドはHTML表示用
             bt_display = d.get("backtest", "-").replace(" (", "<br>(") 
             
-            # 大口流入の表示
+            # 出来高（5MA比）の表示
             vol_disp = d.get("vol_disp", "-")
             
             rows += f'<tr><td class="td-center">{i+1}</td><td class="td-center">{d.get("code")}</td><td class="th-left td-bold">{d.get("name")}</td><td class="td-right">{d.get("cap_disp")}</td><td class="td-center">{d.get("score")}</td><td class="td-center">{d.get("strategy")}</td><td class="td-center">{d.get("momentum")}</td><td class="td-center">{d.get("rsi_disp")}</td><td class="td-right">{vol_disp}</td><td class="td-right td-bold">{price:,.0f}</td><td class="td-right">{buy:,.0f}<br><span style="font-size:10px;color:#666">{diff_txt}</span></td><td class="td-left" style="line-height:1.2;font-size:11px;">{target_txt}</td><td class="td-center td-blue">{bt_display}</td><td class="td-center">{d.get("per")}<br>{d.get("pbr")}</td><td class="th-left">{d.get("comment")}</td></tr>'
 
         # ヘッダーの幅を調整
-        # 戦略: 75px (＋2文字程度)、時価総額: 100px (49兆4400億円でも改行されない程度)、利確目標: 120px
-        # 大口流入: 80px (🔥1.5倍 が入るように)
+        # 出来高（5MA比）の幅を80pxに
         return f'''
         <h4>{title}</h4>
         <div class="table-container"><table class="ai-table">
         <thead><tr>
-        <th style="width:25px;">No</th><th style="width:45px;">コード</th><th class="th-left" style="width:130px;">企業名</th><th style="width:100px;">時価総額</th><th style="width:35px;">点</th><th style="width:75px;">戦略</th><th style="width:50px;">直近<br>勝率</th><th style="width:50px;">RSI</th><th style="width:80px;">大口<br>流入</th><th style="width:60px;">現在値</th><th style="width:70px;">推奨買値<br>(乖離)</th><th style="width:120px;">利確目標<br>(乖離率%)</th><th style="width:85px;">押し目<br>勝敗数</th><th style="width:70px;">PER<br>PBR</th><th class="th-left" style="min-width:200px;">アイの所感</th>
+        <th style="width:25px;">No</th><th style="width:45px;">コード</th><th class="th-left" style="width:130px;">企業名</th><th style="width:100px;">時価総額</th><th style="width:35px;">点</th><th style="width:75px;">戦略</th><th style="width:50px;">直近<br>勝率</th><th style="width:50px;">RSI</th><th style="width:80px;">出来高<br>(5MA比)</th><th style="width:60px;">現在値</th><th style="width:70px;">推奨買値<br>(乖離)</th><th style="width:120px;">利確目標<br>(乖離率%)</th><th style="width:85px;">押し目<br>勝敗数</th><th style="width:70px;">PER<br>PBR</th><th class="th-left" style="min-width:200px;">アイの所感</th>
         </tr></thead>
         <tbody>{rows}</tbody>
         </table></div>'''
@@ -594,10 +638,10 @@ if st.session_state.analyzed_data:
     
     st.markdown("---")
     st.markdown(f"**【アイの独り言】**")
-    st.markdown(st.session_state.ai_monologue)
+    st.markdown(st.session_session.ai_monologue)
     
     with st.expander("詳細データリスト (生データ確認用)"):
-        # <br>を含む 'backtest' 列を削除し、<br>を含まない 'backtest_raw' を 'backtest' にリネームして表示
+        # 'backtest' 列を削除し、<br>を含まない 'backtest_raw' を 'backtest' にリネームして表示
         df_raw = pd.DataFrame(data).drop(columns=['backtest']) 
         df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'}) 
         st.dataframe(df_raw)
