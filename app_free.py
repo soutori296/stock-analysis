@@ -12,7 +12,7 @@ import math
 ICON_URL = "https://raw.githubusercontent.com/soutori296/stock-analysis/main/aisan.png"
 
 # --- ページ設定 ---
-# page_iconに外部URL (ICON_URL) を指定するよう修正
+# page_iconに外部URL (ICON_URL) を指定
 st.set_page_config(page_title="教えて！AIさん 2", page_icon=ICON_URL, layout="wide") 
 
 # --- セッションステート初期化 ---
@@ -72,11 +72,31 @@ st.markdown(f"""
     .td-left {{ text-align: left; }}
     .td-bold {{ font-weight: bold; }}
     .td-blue {{ color: #0056b3; font-weight: bold; }}
+    
+    /* タイトルアイコン用のカスタムスタイル */
+    .custom-title {{
+        display: flex; 
+        align-items: center;
+        font-size: 2.25rem; /* st.title の標準フォントサイズ */
+        font-weight: 600; /* st.title の標準フォントウェイト */
+        margin-bottom: 1rem;
+    }}
+    .custom-title img {{
+        height: 36px; /* アイコンの高さ調整 */
+        margin-right: 15px;
+        vertical-align: middle;
+    }}
 </style>
 """, unsafe_allow_html=True)
 
 # --- タイトル ---
-st.title("📈 教えて！AIさん 2")
+# st.title("📈 教えて！AIさん 2") をカスタムHTMLに置き換え
+st.markdown(f"""
+<div class="custom-title">
+    <img src="{ICON_URL}" alt="AI Icon"> 教えて！AIさん 2
+</div>
+""", unsafe_allow_html=True)
+
 st.markdown(f"""
 <p class="big-font">
     あなたの提示した銘柄についてアイが分析して売買戦略を伝えます。<br>
@@ -380,14 +400,14 @@ def get_stock_data(ticker):
         if ma5 > ma25 > ma75 and ma5 > prev['SMA5']:
             strategy = "🔥順張り"
             buy_target = int(ma5) # 推奨買値は5日線
-            p_half = int(ma25 * 1.10)
-            p_full = int(ma25 * 1.20)
+            p_half = int(ma25 * 1.10) # 25MA + 10%
+            p_full = int(ma25 * 1.20) # 25MA + 20%
         # 🌊逆張り判定
         elif rsi_val <= 30 or (curr_price < ma25 * 0.9):
             strategy = "🌊逆張り"
             buy_target = int(curr_price) # 推奨買値は現在値
-            p_half = int(ma5)
-            p_full = int(ma25)
+            p_half = int(ma5) # 5MA
+            p_full = int(ma25) # 25MA
         
         # --- AIスコア計算 ---
         score = 50
@@ -403,7 +423,6 @@ def get_stock_data(ticker):
             "name": info["name"],
             "price": curr_price,
             "cap_val": info["cap"],
-            "cap_disp": fmt_market_cap(info["cap"]),
             "per": info["per"], "pbr": info["pbr"],
             "rsi": rsi_val, "rsi_disp": f"{rsi_mark}{rsi_val:.1f}",
             "vol_ratio": vol_ratio,
@@ -421,19 +440,31 @@ def get_stock_data(ticker):
 
 def batch_analyze_with_ai(data_list):
     if not model: return {}, ""
-    prompt_text = ""
+    prompt_text = "【銘柄リスト】\n"
     for d in data_list:
-        prompt_text += f"ID:{d['code']} | {d['name']} | 現在:{d['price']} | 戦略:{d['strategy']} | RSI:{d['rsi']:.1f}\n"
+        price = d['price']
+        p_half = d['p_half']
+        p_full = d['p_full']
+        
+        # 利確目標の現在値からの乖離率を計算
+        half_pct = ((p_half / price) - 1) * 100 if price > 0 and p_half > 0 else 0
+        full_pct = ((p_full / price) - 1) * 100 if price > 0 and p_full > 0 else 0
+        
+        # コメント生成用の情報に追加
+        prompt_text += f"ID:{d['code']} | {d['name']} | 現在:{price:,.0f} | 戦略:{d['strategy']} | RSI:{d['rsi']:.1f} | 5MA乖離率:{(price/d['buy']-1)*100 if d['buy']>0 else 0:.1f}% | 利確目標(半):{half_pct:+.1f}% | 利確目標(全):{full_pct:+.1f}%\n"
     
     prompt = f"""
     あなたは「アイ」という名前のプロトレーダー（30代女性、冷静・理知的）。
-    以下の銘柄リストについて、それぞれの「所感コメント（80文字程度、丁寧語）」を作成してください。
-    ※なぜその戦略なのか、テクニカル的根拠（乖離、トレンド、過熱感）を含めて具体的に書いてください。
+    以下の【銘柄リスト】に基づき、それぞれの「所感コメント（80文字程度、丁寧語）」を作成してください。
+    
+    【コメント作成の指示】
+    1.  <b>銘柄ごとに特徴を活かした、人間味のある（画一的でない）文章にしてください。</b>
+    2.  戦略の根拠（パーフェクトオーダー、売られすぎ、乖離率など）と、RSIの状態を必ず具体的に盛り込んでください。
+    3.  特に順張り銘柄で、利確目標(半)の乖離率が低い（+5%以下など）場合は、「目標達成が近い」または「短期的なリターンは限定的」といった**一歩踏み込んだ見解**を加えてください。
     
     【出力形式】
     コード | コメント
     
-    【データ】
     {prompt_text}
     
     【最後に】
@@ -449,7 +480,8 @@ def batch_analyze_with_ai(data_list):
         monologue = ""
         parts = text.split("END_OF_LIST")
         lines = parts[0].strip().split("\n")
-        for line in lines:
+        # 最初の「【銘柄リスト】」行をスキップ
+        for line in lines[1:] if lines and lines[0].startswith("【銘柄リスト】") else lines:
             if "|" in line:
                 c_code, c_com = line.split("|", 1)
                 comments[c_code.strip()] = c_com.strip()
@@ -514,18 +546,28 @@ if st.session_state.analyzed_data:
             diff_txt = f"({diff:+,.0f})" if diff != 0 else "(0)"
             p_half = d.get('p_half', 0)
             p_full = d.get('p_full', 0)
-            target_txt = f"半:{p_half:,}<br>全:{p_full:,}" if p_half > 0 else "-"
+            
+            # 利確目標乖離率の計算
+            half_pct = ((p_half / price) - 1) * 100 if price > 0 and p_half > 0 else 0
+            full_pct = ((p_full / price) - 1) * 100 if price > 0 and p_full > 0 else 0
+            
+            target_txt = "-"
+            if p_half > 0:
+                # 目標価格と現在の値からの乖離率を両方表示
+                target_txt = f"半:{p_half:,} ({half_pct:+.1f}%)<br>全:{p_full:,} ({full_pct:+.1f}%)"
+            
             # backtestフィールドはHTML表示用
             bt_display = d.get("backtest", "-").replace(" (", "<br>(") 
 
-            rows += f'<tr><td class="td-center">{i+1}</td><td class="td-center">{d.get("code")}</td><td class="th-left td-bold">{d.get("name")}</td><td class="td-right">{d.get("cap_disp")}</td><td class="td-center">{d.get("score")}</td><td class="td-center">{d.get("strategy")}</td><td class="td-center">{d.get("momentum")}</td><td class="td-center">{d.get("rsi_disp")}</td><td class="td-right">{d.get("vol_ratio", 0):.1f}倍</td><td class="td-right td-bold">{price:,.0f}</td><td class="td-right">{buy:,.0f}<br><span style="font-size:10px;color:#666">{diff_txt}</span></td><td class="td-left">{target_txt}</td><td class="td-center td-blue">{bt_display}</td><td class="td-center">{d.get("per")}<br>{d.get("pbr")}</td><td class="th-left">{d.get("comment")}</td></tr>'
+            rows += f'<tr><td class="td-center">{i+1}</td><td class="td-center">{d.get("code")}</td><td class="th-left td-bold">{d.get("name")}</td><td class="td-right">{d.get("cap_disp")}</td><td class="td-center">{d.get("score")}</td><td class="td-center">{d.get("strategy")}</td><td class="td-center">{d.get("momentum")}</td><td class="td-center">{d.get("rsi_disp")}</td><td class="td-right">{d.get("vol_ratio", 0):.1f}倍</td><td class="td-right td-bold">{price:,.0f}</td><td class="td-right">{buy:,.0f}<br><span style="font-size:10px;color:#666">{diff_txt}</span></td><td class="td-left" style="line-height:1.2;font-size:11px;">{target_txt}</td><td class="td-center td-blue">{bt_display}</td><td class="td-center">{d.get("per")}<br>{d.get("pbr")}</td><td class="th-left">{d.get("comment")}</td></tr>'
 
         # ヘッダーの幅を調整
+        # 利確目標のセルに乖離率も入るため、幅を90pxから120pxに広げ、他の幅を調整
         return f'''
         <h4>{title}</h4>
         <div class="table-container"><table class="ai-table">
         <thead><tr>
-        <th style="width:25px;">No</th><th style="width:45px;">コード</th><th class="th-left" style="width:130px;">企業名</th><th style="width:100px;">時価総額</th><th style="width:35px;">点</th><th style="width:60px;">戦略</th><th style="width:50px;">直近<br>勝率</th><th style="width:50px;">RSI</th><th style="width:50px;">出来高<br>(前比)</th><th style="width:60px;">現在値</th><th style="width:70px;">推奨買値<br>(乖離)</th><th style="width:90px;">利確目標</th><th style="width:85px;">押し目<br>勝敗数</th><th style="width:70px;">PER<br>PBR</th><th class="th-left" style="min-width:200px;">アイの所感</th>
+        <th style="width:25px;">No</th><th style="width:45px;">コード</th><th class="th-left" style="width:130px;">企業名</th><th style="width:90px;">時価総額</th><th style="width:35px;">点</th><th style="width:60px;">戦略</th><th style="width:50px;">直近<br>勝率</th><th style="width:50px;">RSI</th><th style="width:50px;">出来高<br>(前比)</th><th style="width:60px;">現在値</th><th style="width:70px;">推奨買値<br>(乖離)</th><th style="width:120px;">利確目標<br>(乖離率%)</th><th style="width:85px;">押し目<br>勝敗数</th><th style="width:70px;">PER<br>PBR</th><th class="th-left" style="min-width:200px;">アイの所感</th>
         </tr></thead>
         <tbody>{rows}</tbody>
         </table></div>'''
