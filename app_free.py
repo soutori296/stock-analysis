@@ -1,5 +1,3 @@
---- START OF FILE 最新版_最終確定版_V6.txt ---
-
 import streamlit as st
 import pandas as pd
 import google.generativeai as genai
@@ -1021,3 +1019,4 @@ if st.session_state.analyzed_data:
         if 'backtest_raw' in df_raw.columns:
             df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'}) 
         st.dataframe(df_raw)
+
