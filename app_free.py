@@ -463,7 +463,7 @@ def get_target_pct(market_cap):
     elif market_cap >= 500: return 0.04
     else: return 0.05
 
-#@st.cache_data(ttl=300) # キャッシュのTTLを5分 (300秒) に設定
+@st.cache_data(ttl=300) # キャッシュのTTLを5分 (300秒) に設定
 def get_stock_data(ticker):
     
     status, jst_now_local = get_market_status() 
@@ -497,17 +497,19 @@ def get_stock_data(ticker):
             if kabu_close is None: kabu_close = info.get("price")
 
             if info.get("open") and info.get("high") and info.get("low") and info.get("volume") and kabu_close:
-                today_date = jst_now_local.strftime("%Y-%m-%d")
+                today_date_dt = pd.to_datetime(jst_now_local.strftime("%Y-%m-%d"))
                 
-                if today_date not in df.index.strftime("%Y-%m-%d"):
+                if today_date_dt not in df.index:
                     new_row = pd.Series({
                         'Open': info['open'],
                         'High': info['high'],
                         'Low': info['low'],
                         'Close': kabu_close,
                         'Volume': info['volume']
-                    }, name=pd.to_datetime(today_date))
+                    }, name=today_date_dt) # ★ インデックス名を datetime で設定
                     df = pd.concat([df, new_row.to_frame().T])
+                else:
+                    df.loc[today_date_dt, 'Close'] = kabu_close # 終値を最新の Kabutan 値で上書き
         
         df = df.sort_index()
 
@@ -848,6 +850,7 @@ if st.session_state.analyzed_data:
         if 'backtest_raw' in df_raw.columns:
             df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'}) 
         st.dataframe(df_raw)
+
 
 
 
