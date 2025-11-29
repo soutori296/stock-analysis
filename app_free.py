@@ -660,11 +660,11 @@ def get_stock_data(ticker):
         "kabutan_volume": info.get("volume")
     }
 
-    except Exception as e:
-        st.session_state.error_messages.append(
-            f"データ処理エラー (コード:{ticker}): {e}"
-        )
-        return None
+except Exception as e:
+    st.session_state.error_messages.append(
+        f"データ処理エラー (コード:{ticker}): {e}"
+    )
+    return None
 
 def batch_analyze_with_ai(data_list):
     if not model: 
@@ -914,6 +914,7 @@ if st.session_state.analyzed_data:
         if 'backtest' not in df_raw.columns and 'backtest_raw' in df_raw.columns:
             df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'})
         st.dataframe(df_raw)
+
 
 
 
