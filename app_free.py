@@ -466,18 +466,29 @@ def is_after_close():
     return jst_now.time() >= datetime.time(15, 50)
 
 # --- 簡易版: RSI計算（n日間） ---
-def calc_rsi(prices: pd.Series, period: int = 14) -> pd.Series:
-    delta = prices.diff()
-    gain = delta.clip(lower=0)
-    loss = -delta.clip(upper=0)
-    
+def calc_rsi(series: pd.Series, period: int = 14) -> pd.Series:
+    """
+    Pandas Series から RSI を計算する関数
+    series: 終値のSeries
+    period: RSI計算期間
+    戻り値: RSIのSeries
+    """
+    delta = series.diff()  # 価格差
+    gain = delta.where(delta > 0, 0.0)  # 上昇分のみ
+    loss = -delta.where(delta < 0, 0.0)  # 下落分のみ
+
+    # 平均値（ローリング計算、min_periods=1で最初の行も計算可能）
     avg_gain = gain.rolling(window=period, min_periods=1).mean()
     avg_loss = loss.rolling(window=period, min_periods=1).mean()
-    
-    rs = avg_gain / avg_loss.replace(0, np.nan)  # 0除算防止
+
+    # RS = 平均上昇 / 平均下落
+    rs = avg_gain / avg_loss.replace(0, np.nan)  # 0で割るのを避ける
+
+    # RSI 計算
     rsi = 100 - (100 / (1 + rs))
-    
-    rsi = rsi.fillna(0)  # NaNを0に置換
+
+    # 最初の行で計算できない場合は50に近似
+    rsi = rsi.fillna(50)
     return rsi
 
 def make_backtest_string(df):
@@ -876,6 +887,7 @@ if st.session_state.analyzed_data:
         if 'backtest' not in df_raw.columns and 'backtest_raw' in df_raw.columns:
             df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'})
         st.dataframe(df_raw)
+
 
 
 
