@@ -157,7 +157,7 @@ st.markdown(f"""
 </p>
 """, unsafe_allow_html=True)
 
-# --- 説明書 (マニュアル詳細化 - 時価総額ロジックと利確目標を更新) ---
+# --- 説明書 (マニュアル詳細化 - 最終版の利確目標を更新) ---
 with st.expander("📘 取扱説明書 (データ仕様・判定基準)"):
     st.markdown("""
     <div class="center-text">
@@ -232,8 +232,8 @@ with st.expander("📘 取扱説明書 (データ仕様・判定基準)"):
             <td>
                 <b>🔥 順張り</b>：<br>
                 - 全益は「時価総額別目標の100%」<br>
-                - 半益は「全益価格の50%」を計算後、<b>直近の100円節目から -5円</b> に調整。<br>
-                <b>🌊 逆張り</b>：半益は<b>「5日移動平均線」</b>の価格、全益は<b>「25日移動平均線」</b>の価格とする。（※調整なし）
+                - 半益は「全益価格の50%」を計算後、**10円単位で切り下げ、-1円** に調整。<br>
+                <b>🌊 逆張り</b>：半益は「5日移動平均線」から **-1円**、全益は「25日移動平均線」から **-1円** に調整。
             </td>
         </tr>
         <tr>
@@ -242,7 +242,7 @@ with st.expander("📘 取扱説明書 (データ仕様・判定基準)"):
         </tr>
         <tr>
             <td><b>解説</b></td>
-            <td>このロジックで過去にトレードした場合の勝敗数。利確目標は大型株と小型株で目標リターンを変えることで、現実的な売買の期待値を測ります。順張り戦略では心理的な節目手前での確実な利確を推奨するロジックを適用しています。</td>
+            <td>このロジックで過去にトレードした場合の勝敗数。利確目標は大型株と小型株で目標リターンを変えることで、現実的な売買の期待値を測ります。心理的な節目・抵抗線手前での確実な利確を推奨するロジックを適用しています。</td>
         </tr>
     </table>
 
@@ -577,19 +577,18 @@ def get_stock_data(ticker):
             # 半益目標の計算 (全益目標の50%相当)
             target_half_raw = curr_price * (1 + target_pct / 2)
 
-            # 全益目標の確定 (小数点以下切り捨て)
-            p_full_candidate = int(target_full_raw)
+            # 全益目標の確定 (最も近い整数に丸める)
+            p_full_candidate = int(round(target_full_raw))
             
-            # 半益目標の節目回避ロジック（100円の節目手前-5円）
-            rounded_half = np.ceil(target_half_raw / 100) * 100
-            p_half_candidate = int(rounded_half - 5)
+            # 半益目標の節目回避ロジック（10円単位で切り下げ、-1円）
+            # np.floor は float を返すので int() で整数化
+            p_half_candidate = int(np.floor(target_half_raw / 10) * 10 - 1) 
             
             # 利確目標が現在値より高い場合のみ採用
             if p_half_candidate > curr_price:
                  p_half = p_half_candidate
-                 # 全益目標が現在値より高い、かつ半益より高い場合のみ採用 (逆転防止)
-                 p_full = p_full_candidate if p_full_candidate > p_half else p_half_candidate + 1
-                 # ここで p_full が curr_price より低い可能性はないが、念のため最終チェック
+                 # 全益目標が半益より高くなることを保証
+                 p_full = p_full_candidate if p_full_candidate > p_half else p_half + 1
                  if p_full <= curr_price: p_full = 0; p_half = 0
             else:
                  p_half = 0
@@ -600,9 +599,9 @@ def get_stock_data(ticker):
             strategy = "🌊逆張り"
             buy_target = int(curr_price) 
             
-            # MA目標（調整なしの元のロジック）
-            p_half_candidate = int(ma5) 
-            p_full_candidate = int(ma25)
+            # MA目標（調整あり）
+            p_half_candidate = int(ma5 - 1) if ma5 else 0 # MA5から-1円
+            p_full_candidate = int(ma25 - 1) if ma25 else 0 # MA25から-1円
             
             # 現在値より低い場合は無効
             p_half = p_half_candidate if p_half_candidate > curr_price else 0
@@ -610,7 +609,7 @@ def get_stock_data(ticker):
             
             # 半益が全益より高くなる逆転防止
             if p_half > 0 and p_full > 0 and p_half > p_full:
-                 p_half = p_full # 全益目標を超える半益目標は無効、または全益に合わせる
+                 p_half = p_full - 1 # 全益目標の手前1円に設定
 
         # スコア計算
         score = 50
