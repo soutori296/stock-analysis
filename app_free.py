@@ -12,7 +12,6 @@ import math
 ICON_URL = "https://raw.githubusercontent.com/soutori296/stock-analysis/main/aisan.png"
 
 # --- ページ設定 ---
-# page_iconに外部URL (ICON_URL) を指定
 st.set_page_config(page_title="教えて！AIさん 2", page_icon=ICON_URL, layout="wide") 
 
 # --- セッションステート初期化 ---
@@ -20,6 +19,9 @@ if 'analyzed_data' not in st.session_state:
     st.session_state.analyzed_data = []
 if 'ai_monologue' not in st.session_state:
     st.session_state.ai_monologue = ""
+if 'error_messages' not in st.session_state: # ★ 修正: エラーメッセージリストを導入
+    st.session_state.error_messages = []
+
 
 # --- 時間管理 (JST) ---
 def get_market_status():
@@ -43,7 +45,7 @@ TIME_WEIGHTS = {
 }
 
 def get_volume_weight(current_dt):
-    """ 現在時刻に基づいた出来高の進捗ウェイトを返す """
+    # 既存のロジック (割愛) ...
     if "休日" in status_label or "引け後" in status_label or current_dt.hour < 9:
         return 1.0
     
@@ -72,7 +74,8 @@ def get_volume_weight(current_dt):
         
     return 1.0
 
-# --- CSSスタイル (干渉回避版) ---
+
+# --- CSSスタイル (干渉回避版) --- (変更なし)
 st.markdown(f"""
 <style>
     /* Streamlit標準のフォント設定を邪魔しないように限定的に適用 */
@@ -143,7 +146,7 @@ st.markdown(f"""
 </p>
 """, unsafe_allow_html=True)
 
-# --- 説明書 (マニュアル詳細化) ---
+# --- 説明書 (マニュアル詳細化) --- (変更なし)
 with st.expander("📘 取扱説明書 (データ仕様・判定基準)"):
     st.markdown("""
     <div class="center-text">
@@ -263,6 +266,7 @@ if api_key:
 # --- 関数群 ---
 
 def fmt_market_cap(val):
+    # 既存のロジック (割愛) ...
     if not val or val == 0: return "-"
     try:
         val_int = int(round(val))
@@ -277,12 +281,10 @@ def fmt_market_cap(val):
         return "-"
 
 def get_stock_info(code):
-    """ 株情報サイトから情報を取得 (構造指定でPER/PBRを分離) """
+    # 既存のロジック (割愛) ...
     url = f"https://kabutan.jp/stock/?code={code}"
     headers = {"User-Agent": "Mozilla/5.0"}
     data = {"name": "不明", "per": "-", "pbr": "-", "price": None, "volume": None, "cap": 0}
-    
-    # 既存のロジック (割愛) ...
     try:
         res = requests.get(url, headers=headers, timeout=5)
         res.encoding = res.apparent_encoding
@@ -330,7 +332,8 @@ def get_stock_info(code):
 
         return data
     except Exception as e:
-        st.error(f"データ取得エラー (コード:{code}): {e}")
+        # エラーはセッションに格納し、Noneを返す
+        st.session_state.error_messages.append(f"データ取得エラー (コード:{code}): Kabutanアクセス/解析失敗。詳細: {e}")
         return data
 
 
@@ -377,43 +380,40 @@ def run_backtest(df, market_cap):
     except:
         return "計算エラー", 0
 
-# ... (前略) ...
-
 @st.cache_data(ttl=3600)
 def get_stock_data(ticker):
     global jst_now 
     
     ticker = str(ticker).strip().replace(".T", "").upper()
     stock_code = f"{ticker}.JP"
-    info = get_stock_info(ticker)
+    
+    # get_stock_infoでエラーが発生してもinfoは最低限返される
+    info = get_stock_info(ticker) 
     
     try:
         csv_url = f"https://stooq.com/q/d/l/?s={stock_code}&i=d"
         res = requests.get(csv_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
         
-        # --- ★ 修正箇所: CSV読み込み時のエラーハンドリングを強化 ★ ---
+        # --- ★ 修正: Stooqデータの読み込みチェック強化 ★ ---
         try:
             # index_colを指定せず、一旦全てのカラムを読み込む
             df = pd.read_csv(io.BytesIO(res.content), parse_dates=True)
         except Exception as csv_e:
-            st.error(f"データ不足エラー (コード:{ticker}): Stooq CSV解析失敗。データが不正な可能性があります。詳細: {csv_e}")
+            st.session_state.error_messages.append(f"データ不足エラー (コード:{ticker}): Stooq CSV解析失敗。データが不正な可能性があります。詳細: {csv_e}")
             return None
         
         # 'Date'カラムの存在をチェックし、存在すればそれをインデックスに設定
-        if 'Date' not in df.columns:
-            st.error(f"データ不足エラー (コード:{ticker}): Stooqデータに 'Date' カラムがありません。データが存在しません。")
+        if 'Date' not in df.columns or df.empty:
+            st.session_state.error_messages.append(f"データ不足エラー (コード:{ticker}): Stooqデータに 'Date' カラムがありません。データが存在しません。")
             return None
 
-        # Dateをインデックスに設定し、データが少ないかチェック
         df = df.set_index('Date')
-        if df.empty or len(df) < 80: 
-            st.error(f"データ不足エラー (コード:{ticker}): Stooqからのデータ取得失敗、またはデータ期間が短すぎます (80日未満)。")
+        if len(df) < 80: 
+            st.session_state.error_messages.append(f"データ不足エラー (コード:{ticker}): データ期間が短すぎます (80日未満)。")
             return None
         # --- ★ 修正箇所ここまで ★ ---
         
         df = df.sort_index()
-        # ... (中略: データ処理ロジック) ...
-        
         df['SMA5'] = df['Close'].rolling(5).mean()
         df['SMA25'] = df['Close'].rolling(25).mean()
         df['SMA75'] = df['Close'].rolling(75).mean()
@@ -485,14 +485,13 @@ def get_stock_data(ticker):
             "backtest": bt_str, "backtest_raw": bt_str.replace("<br>", " ") 
         }
     except Exception as e:
-        st.error(f"データ処理エラー (コード:{ticker}): 予期せぬエラーが発生しました。詳細: {e}")
+        st.session_state.error_messages.append(f"データ処理エラー (コード:{ticker}): 予期せぬエラーが発生しました。詳細: {e}")
         return None
 
 def batch_analyze_with_ai(data_list):
     if not model: 
         return {}, "⚠️ AIモデルが設定されていません。APIキーを確認してください。"
         
-    # ... (プロンプト作成ロジック) ...
     prompt_text = "【銘柄リスト】\n"
     for d in data_list:
         price = d['price']
@@ -541,12 +540,14 @@ def batch_analyze_with_ai(data_list):
             monologue = parts[1].strip().replace("```", "")
         return comments, monologue
     except Exception as e:
-        # AI分析失敗時のエラーを出力
-        st.error(f"AI分析エラー: Geminiモデルからの応答解析に失敗しました。APIキーまたはプロンプト応答を確認してください。詳細: {e}")
+        st.session_state.error_messages.append(f"AI分析エラー: Geminiモデルからの応答解析に失敗しました。詳細: {e}")
         return {}, "AI分析失敗"
 
 # --- メイン処理 ---
 if st.button("🚀 分析開始 (アイに聞く)"):
+    # ★ 修正: 分析開始時にエラーメッセージリストをクリア ★
+    st.session_state.error_messages = [] 
+    
     if not api_key:
         st.warning("APIキーを入力してください。")
     elif not tickers_input.strip():
@@ -572,12 +573,18 @@ if st.button("🚀 分析開始 (アイに聞く)"):
             st.session_state.analyzed_data = data_list
             st.session_state.ai_monologue = monologue
 
-        # --- 診断完了時のフィードバックを追加 (真っ黒回避) ---
-        if not st.session_state.analyzed_data and raw_tickers:
-            st.warning("⚠️ 全ての銘柄コードについて、データ取得またはAI分析に失敗しました。コードが正しいか、上部のエラーメッセージをご確認ください。")
-        elif st.session_state.analyzed_data:
+        # --- 診断完了時のフィードバック ---
+        if st.session_state.analyzed_data:
             st.success(f"✅ 全{len(raw_tickers)}銘柄中、{len(st.session_state.analyzed_data)}銘柄の診断が完了しました。")
-        # --- フィードバックここまで ---
+        
+        # --- ★ 修正: エラーメッセージを一括表示 ★
+        if st.session_state.error_messages:
+            st.error(f"❌ 警告: 以下のエラーにより{len(raw_tickers) - len(st.session_state.analyzed_data)}銘柄の処理がスキップされました。")
+            for msg in st.session_state.error_messages:
+                st.markdown(f'<p style="color: red; margin-left: 20px;">- {msg}</p>', unsafe_allow_html=True)
+        elif not st.session_state.analyzed_data and raw_tickers:
+            st.warning("⚠️ 全ての銘柄コードについて、データ取得またはAI分析に失敗しました。APIキーまたは入力コードをご確認ください。")
+        # --- エラーメッセージ一括表示ここまで ---
 
 
 # --- 表示 ---
@@ -647,8 +654,6 @@ if st.session_state.analyzed_data:
     st.markdown(st.session_state.ai_monologue) 
     
     with st.expander("詳細データリスト (生データ確認用)"):
-        # 'backtest' 列を削除し、<br>を含まない 'backtest_raw' を 'backtest' にリネームして表示
         df_raw = pd.DataFrame(data).drop(columns=['backtest']) 
         df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'}) 
         st.dataframe(df_raw)
-
