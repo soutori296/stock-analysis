@@ -118,7 +118,7 @@ st.markdown(f"""
     .td-bold {{ font-weight: bold; }}
     .td-blue {{ color: #0056b3; font-weight: bold; }}
     
-    /* タイトルアイコン用のカスタムスタイル (高さ指定を削除し、オリジナルサイズで表示) */
+    /* タイトルアイコン用のカスタムスタイル (オリジナルサイズで表示) */
     .custom-title {{
         display: flex; 
         align-items: center;
@@ -426,12 +426,11 @@ def get_stock_data(ticker):
         
         curr_price = info["price"] if info["price"] else last['Close']
         
-        # --- 出来高ロジック修正: 時間調整係数の導入 ---
+        # --- 出来高ロジック: 時間調整係数の導入 ---
         vol_ratio = 0
-        volume_weight = get_volume_weight(jst_now) # 出来高進捗ウェイトを取得
+        volume_weight = get_volume_weight(jst_now) 
         
-        if info["volume"] and last['Vol_SMA5'] and volume_weight > 0.0001: # ほぼ0の場合は計算しない
-            # 調整済み出来高倍率 = 当日出来高 / (5日平均出来高 * 出来高進捗ウェイト)
+        if info["volume"] and last['Vol_SMA5'] and volume_weight > 0.0001: 
             adjusted_vol_avg = last['Vol_SMA5'] * volume_weight
             vol_ratio = info["volume"] / adjusted_vol_avg
         
@@ -575,6 +574,14 @@ if st.button("🚀 分析開始 (アイに聞く)"):
             st.session_state.analyzed_data = data_list
             st.session_state.ai_monologue = monologue
 
+        # --- ★ 修正箇所: 診断完了時のフィードバックを追加 ★ ---
+        if not st.session_state.analyzed_data:
+            st.warning("⚠️ 全ての銘柄コードについて、データ取得またはAI分析に失敗しました。コードが正しいか、再度お確かめください。")
+        else:
+            st.success(f"✅ 全{len(st.session_state.analyzed_data)}銘柄の診断が完了しました。")
+        # --- ★ 修正箇所ここまで ★ ---
+
+
 # --- 表示 ---
 if st.session_state.analyzed_data:
     data = st.session_state.analyzed_data
@@ -639,7 +646,6 @@ if st.session_state.analyzed_data:
     
     st.markdown("---")
     st.markdown(f"**【アイの独り言】**")
-    # ここを修正: st.session_session.ai_monologue -> st.session_state.ai_monologue
     st.markdown(st.session_state.ai_monologue) 
     
     with st.expander("詳細データリスト (生データ確認用)"):
