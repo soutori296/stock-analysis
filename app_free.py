@@ -34,8 +34,6 @@ status_label, jst_now = get_market_status()
 status_color = "#d32f2f" if "進行中" in status_label else "#1976d2"
 
 # --- 出来高調整ウェイト（ご要望の出来高偏重ロジック） ---
-# キーは時間帯の終了時刻（分換算：9時=540, 15時=900）
-# 値は累積出来高比率（0.0〜1.0）
 TIME_WEIGHTS = {
     (9 * 60 + 60): 0.60,  # 10:00: 60%
     (12 * 60 + 30): 0.65, # 12:30: 65% (前場終了)
@@ -46,23 +44,19 @@ TIME_WEIGHTS = {
 
 def get_volume_weight(current_dt):
     """ 現在時刻に基づいた出来高の進捗ウェイトを返す """
-    # 休日/引け後、またはザラ場前（9時前）は1.0 (終日取引済)
     if "休日" in status_label or "引け後" in status_label or current_dt.hour < 9:
         return 1.0
     
     current_minutes = current_dt.hour * 60 + current_dt.minute
     
-    # 取引時間外 (15時以降) は1.0
     if current_minutes > (15 * 60):
         return 1.0
 
-    # ザラ場開始前
     if current_minutes < (9 * 60):
-        return 0.01 # 9時前は0では割り算で問題が出るため最低値を設定
+        return 0.01
 
-    # 現在の進捗ウェイトを検索
     last_weight = 0.0
-    last_minutes = (9 * 60) # 9:00
+    last_minutes = (9 * 60)
 
     for end_minutes, weight in TIME_WEIGHTS.items():
         if current_minutes <= end_minutes:
@@ -71,12 +65,12 @@ def get_volume_weight(current_dt):
 
             progress = (current_minutes - last_minutes) / (end_minutes - last_minutes)
             interpolated_weight = last_weight + progress * (weight - last_weight)
-            return max(0.01, interpolated_weight) # ゼロ割を防ぐため最低値を設定
+            return max(0.01, interpolated_weight)
 
         last_weight = weight
         last_minutes = end_minutes
         
-    return 1.0 # 15時以降
+    return 1.0
 
 # --- CSSスタイル (干渉回避版) ---
 st.markdown(f"""
@@ -122,13 +116,13 @@ st.markdown(f"""
     .custom-title {{
         display: flex; 
         align-items: center;
-        font-size: 2.25rem; /* st.title の標準フォントサイズ */
-        font-weight: 600; /* st.title の標準フォントウェイト */
+        font-size: 2.25rem; 
+        font-weight: 600; 
         margin-bottom: 1rem;
     }}
     .custom-title img {{
-        height: auto; /* オリジナルサイズ */
-        max-height: 50px; /* あまりに巨大な場合の保険 */
+        height: auto; 
+        max-height: 50px; 
         margin-right: 15px;
         vertical-align: middle;
     }}
@@ -264,7 +258,7 @@ if api_key:
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel(model_name)
     except Exception as e:
-        st.error(f"System Error: {e}")
+        st.error(f"System Error: Gemini設定時にエラーが発生しました: {e}")
 
 # --- 関数群 ---
 
@@ -276,7 +270,6 @@ def fmt_market_cap(val):
             cho = val_int // 10000
             oku = val_int % 10000
             if oku == 0: return f"{cho}兆円"
-            # 時価総額の枠が49兆4400億円でも改行されない程度に広がるように、億のカンマ表示を削除
             else: return f"{cho}兆{oku}億円" 
         else:
             return f"{val_int}億円"
@@ -284,10 +277,12 @@ def fmt_market_cap(val):
         return "-"
 
 def get_stock_info(code):
-    """ 株情報サイトから情報を取得 (構造指定でPER/PBRを分離) - 時価総額ロジックを元のシンプルなものに戻す """
+    """ 株情報サイトから情報を取得 (構造指定でPER/PBRを分離) """
     url = f"https://kabutan.jp/stock/?code={code}"
     headers = {"User-Agent": "Mozilla/5.0"}
     data = {"name": "不明", "per": "-", "pbr": "-", "price": None, "volume": None, "cap": 0}
+    
+    # 既存のロジック (割愛) ...
     try:
         res = requests.get(url, headers=headers, timeout=5)
         res.encoding = res.apparent_encoding
@@ -296,18 +291,14 @@ def get_stock_info(code):
         m_name = re.search(r'<title>(.*?)【', html)
         if m_name: 
             raw_name = m_name.group(1).strip()
-            # 生データに混ざる<br>などを除去
             data["name"] = re.sub(r'[\(\（].*?[\)\）]', '', raw_name).replace("<br>", " ").strip()
 
-        # 現在値
         m_price = re.search(r'現在値</th>\s*<td[^>]*>([0-9,]+)</td>', html)
         if m_price: data["price"] = float(m_price.group(1).replace(",", ""))
 
-        # 出来高
         m_vol = re.search(r'出来高</th>\s*<td[^>]*>([0-9,]+).*?株</td>', html)
         if m_vol: data["volume"] = float(m_vol.group(1).replace(",", ""))
 
-        # 時価総額
         m_cap = re.search(r'時価総額</th>\s*<td[^>]*>(.*?)</td>', html)
         if m_cap:
             cap_str = re.sub(r'<[^>]+>', '', m_cap.group(1)).strip() 
@@ -325,7 +316,6 @@ def get_stock_info(code):
                 if b_match: val = float(b_match.group(1).replace(",", ""))
             data["cap"] = val
 
-        # PER/PBR (id="stockinfo_i3" テーブル内の配置順で取得)
         i3_match = re.search(r'<div id="stockinfo_i3">.*?<tbody>(.*?)</tbody>', html)
         if i3_match:
             tbody = i3_match.group(1)
@@ -335,20 +325,22 @@ def get_stock_info(code):
                 return re.sub(r'<[^>]+>', '', s).replace("<br>", "").strip()
             
             if len(tds) >= 2:
-                data["per"] = clean_tag_and_br(tds[0]) # 1つ目
-                data["pbr"] = clean_tag_and_br(tds[1]) # 2つ目
+                data["per"] = clean_tag_and_br(tds[0])
+                data["pbr"] = clean_tag_and_br(tds[1])
 
         return data
-    except:
+    except Exception as e:
+        st.error(f"データ取得エラー (コード:{code}): {e}")
         return data
+
 
 def run_backtest(df, market_cap):
-    """ 実戦的バックテスト """
+    # 既存のロジック (割愛) ...
     try:
         if len(df) < 80: return "データ不足", 0
         target_pct = 0.04 
         cap_str = "4%"
-        if market_cap >= 10000: # 1兆円
+        if market_cap >= 10000: 
             target_pct = 0.02
             cap_str = "2%"
             
@@ -361,7 +353,6 @@ def run_backtest(df, market_cap):
         
         while i < n - 5: 
             row = test_data.iloc[i]
-            # 5日線が25日線より上 (上昇トレンド) and 終値ではなくLowが5日線にタッチ
             if row['SMA5'] > row['SMA25'] and row['Low'] <= row['SMA5']: 
                 entry_price = row['SMA5'] 
                 target_price = entry_price * (1 + target_pct)
@@ -388,7 +379,7 @@ def run_backtest(df, market_cap):
 
 @st.cache_data(ttl=3600)
 def get_stock_data(ticker):
-    global jst_now # 現在時刻を取得
+    global jst_now 
     
     ticker = str(ticker).strip().replace(".T", "").upper()
     stock_code = f"{ticker}.JP"
@@ -398,8 +389,12 @@ def get_stock_data(ticker):
         csv_url = f"https://stooq.com/q/d/l/?s={stock_code}&i=d"
         res = requests.get(csv_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
         df = pd.read_csv(io.BytesIO(res.content), index_col="Date", parse_dates=True)
-        if df.empty or len(df) < 80: return None
+        if df.empty or len(df) < 80: 
+            st.error(f"データ不足エラー (コード:{ticker}): Stooqからのデータ取得失敗、またはデータ期間が短すぎます。")
+            return None
         
+        # ... (中略: データ処理ロジック) ...
+
         df = df.sort_index()
         df['SMA5'] = df['Close'].rolling(5).mean()
         df['SMA25'] = df['Close'].rolling(25).mean()
@@ -412,13 +407,11 @@ def get_stock_data(ticker):
         rs = gain / loss
         df['RSI'] = 100 - (100 / (1 + rs))
         
-        # モメンタム (直近5日の勝率)
         recent = df['Close'].diff().tail(5)
         up_days = (recent > 0).sum()
         win_rate_pct = (up_days / 5) * 100
         momentum_str = f"{win_rate_pct:.0f}%"
 
-        # バックテスト
         bt_str, bt_cnt = run_backtest(df, info["cap"])
         
         last = df.iloc[-1]
@@ -426,7 +419,6 @@ def get_stock_data(ticker):
         
         curr_price = info["price"] if info["price"] else last['Close']
         
-        # --- 出来高ロジック: 時間調整係数の導入 ---
         vol_ratio = 0
         volume_weight = get_volume_weight(jst_now) 
         
@@ -442,69 +434,57 @@ def get_stock_data(ticker):
         
         strategy = "様子見"
         ma5, ma25, ma75 = last['SMA5'], last['SMA25'], last['SMA75']
-        buy_target = int(ma25) # 初期値
+        buy_target = int(ma25) 
         p_half = 0; p_full = 0
         
-        # 🔥順張り判定
         if ma5 > ma25 > ma75 and ma5 > prev['SMA5']:
             strategy = "🔥順張り"
-            buy_target = int(ma5) # 推奨買値は5日線
+            buy_target = int(ma5) 
             p_half = int(ma25 * 1.10) 
             p_full = int(ma25 * 1.20)
-        # 🌊逆張り判定
         elif rsi_val <= 30 or (curr_price < ma25 * 0.9):
             strategy = "🌊逆張り"
-            buy_target = int(curr_price) # 推奨買値は現在値
+            buy_target = int(curr_price) 
             p_half = int(ma5) 
             p_full = int(ma25) 
         
-        # --- AIスコア計算 --- (現状維持)
         score = 50
         if "順張り" in strategy: score += 20
         if "逆張り" in strategy: score += 15
         if 55 <= rsi_val <= 65: score += 10
-        if vol_ratio > 1.5: score += 10 # 出来高活発
+        if vol_ratio > 1.5: score += 10 
         if up_days >= 4: score += 5
         score = min(100, score) 
 
-        # 出来高（5MA比）表示 (1.5倍以上で🔥マーク)
         vol_disp = f"🔥{vol_ratio:.1f}倍" if vol_ratio > 1.5 else f"{vol_ratio:.1f}倍"
 
         return {
-            "code": ticker,
-            "name": info["name"],
-            "price": curr_price,
-            "cap_val": info["cap"],
-            "cap_disp": fmt_market_cap(info["cap"]),
-            "per": info["per"], "pbr": info["pbr"],
-            "rsi": rsi_val, "rsi_disp": f"{rsi_mark}{rsi_val:.1f}",
-            "vol_ratio": vol_ratio,
-            "vol_disp": vol_disp, 
-            "momentum": momentum_str,
-            "strategy": strategy,
-            "score": score,
-            "buy": buy_target,
-            "p_half": p_half, "p_full": p_full,
-            "backtest": bt_str, 
-            "backtest_raw": bt_str.replace("<br>", " ") 
+            "code": ticker, "name": info["name"], "price": curr_price, "cap_val": info["cap"],
+            "cap_disp": fmt_market_cap(info["cap"]), "per": info["per"], "pbr": info["pbr"],
+            "rsi": rsi_val, "rsi_disp": f"{rsi_mark}{rsi_val:.1f}", "vol_ratio": vol_ratio,
+            "vol_disp": vol_disp, "momentum": momentum_str, "strategy": strategy, "score": score,
+            "buy": buy_target, "p_half": p_half, "p_full": p_full,
+            "backtest": bt_str, "backtest_raw": bt_str.replace("<br>", " ") 
         }
     except Exception as e:
-        # st.error(f"Error processing {ticker}: {e}") # デバッグ用
+        # データ取得失敗時のエラーを出力
+        st.error(f"データ処理エラー (コード:{ticker}): {e}")
         return None
 
 def batch_analyze_with_ai(data_list):
-    if not model: return {}, ""
+    if not model: 
+        return {}, "⚠️ AIモデルが設定されていません。APIキーを確認してください。"
+        
+    # ... (プロンプト作成ロジック) ...
     prompt_text = "【銘柄リスト】\n"
     for d in data_list:
         price = d['price']
         p_half = d['p_half']
         p_full = d['p_full']
         
-        # 利確目標の現在値からの乖離率を計算
         half_pct = ((p_half / price) - 1) * 100 if price > 0 and p_half > 0 else 0
         full_pct = ((p_full / price) - 1) * 100 if price > 0 and p_full > 0 else 0
         
-        # コメント生成用の情報に追加
         prompt_text += f"ID:{d['code']} | {d['name']} | 現在:{price:,.0f} | 戦略:{d['strategy']} | RSI:{d['rsi']:.1f} | 5MA乖離率:{(price/d['buy']-1)*100 if d['buy']>0 else 0:.1f}% | 利確目標(半):{half_pct:+.1f}% | 利確目標(全):{full_pct:+.1f}% | 出来高倍率:{d['vol_ratio']:.1f}倍\n"
     
     prompt = f"""
@@ -535,7 +515,7 @@ def batch_analyze_with_ai(data_list):
         monologue = ""
         parts = text.split("END_OF_LIST")
         lines = parts[0].strip().split("\n")
-        # 最初の「【銘柄リスト】」行をスキップ
+        
         for line in lines[1:] if lines and lines[0].startswith("【銘柄リスト】") else lines:
             if "|" in line:
                 c_code, c_com = line.split("|", 1)
@@ -543,8 +523,10 @@ def batch_analyze_with_ai(data_list):
         if len(parts) > 1:
             monologue = parts[1].strip().replace("```", "")
         return comments, monologue
-    except:
-        return {}, "AI接続エラー"
+    except Exception as e:
+        # AI分析失敗時のエラーを出力
+        st.error(f"AI分析エラー: Geminiモデルからの応答解析に失敗しました。APIキーまたはプロンプト応答を確認してください。詳細: {e}")
+        return {}, "AI分析失敗"
 
 # --- メイン処理 ---
 if st.button("🚀 分析開始 (アイに聞く)"):
@@ -558,7 +540,6 @@ if st.button("🚀 分析開始 (アイに聞く)"):
         data_list = []
         bar = st.progress(0)
         
-        # 念のため、ボタンクリック時にも最新の時刻を取得
         _, jst_now = get_market_status() 
         
         for i, t in enumerate(raw_tickers):
@@ -574,12 +555,12 @@ if st.button("🚀 分析開始 (アイに聞く)"):
             st.session_state.analyzed_data = data_list
             st.session_state.ai_monologue = monologue
 
-        # --- ★ 修正箇所: 診断完了時のフィードバックを追加 ★ ---
-        if not st.session_state.analyzed_data:
-            st.warning("⚠️ 全ての銘柄コードについて、データ取得またはAI分析に失敗しました。コードが正しいか、再度お確かめください。")
-        else:
-            st.success(f"✅ 全{len(st.session_state.analyzed_data)}銘柄の診断が完了しました。")
-        # --- ★ 修正箇所ここまで ★ ---
+        # --- 診断完了時のフィードバックを追加 (真っ黒回避) ---
+        if not st.session_state.analyzed_data and raw_tickers:
+            st.warning("⚠️ 全ての銘柄コードについて、データ取得またはAI分析に失敗しました。コードが正しいか、上部のエラーメッセージをご確認ください。")
+        elif st.session_state.analyzed_data:
+            st.success(f"✅ 全{len(raw_tickers)}銘柄中、{len(st.session_state.analyzed_data)}銘柄の診断が完了しました。")
+        # --- フィードバックここまで ---
 
 
 # --- 表示 ---
