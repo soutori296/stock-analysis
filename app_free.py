@@ -231,7 +231,7 @@ with st.expander("📘 取扱説明書 (データ仕様・判定基準)"):
             <td><b>利確目標(半/全)</b><br><span style="font-size:12px;">(売買戦略の推奨値)</span></td>
             <td>
                 <b>🔥 順張り</b>：半益は「時価総額別目標の50%」を計算後、<b>直近の100円節目から -5円</b> に調整。<br>
-                <b>🌊 逆張り</b>：半益は「5日移動平均線」から **-5円**、全益は「25日移動平均線」から **-5円** に調整。
+                <b>🌊 逆張り</b>：半益は「5日移動平均線」から <b>-5円</b>、全益は「25日移動平均線」から <b>-5円</b> に調整。
             </td>
         </tr>
         <tr>
@@ -843,3 +843,4 @@ if st.session_state.analyzed_data:
         if 'backtest_raw' in df_raw.columns:
             df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'}) 
         st.dataframe(df_raw)
+
