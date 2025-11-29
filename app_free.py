@@ -299,10 +299,15 @@ def get_stock_info(code):
     """ 株情報サイトから情報を取得 (Kabutan) """
     url = f"https://kabutan.jp/stock/?code={code}"
     headers = {"User-Agent": "Mozilla/5.0"}
+
     data = {
-        "name": "不明", "per": "-", "pbr": "-", "price": None, "volume": None,
-        "cap": 0, "open": None, "high": None, "low": None, "close": None
+        "name": "不明", "per": "-", "pbr": "-", 
+        "price": None,   # ← 現在値
+        "volume": None,
+        "cap": 0,
+        "open": None, "high": None, "low": None, "close": None  # ← Kabutan 4本値
     }
+
     try:
         res = requests.get(url, headers=headers, timeout=5)
         res.encoding = res.apparent_encoding
@@ -310,73 +315,72 @@ def get_stock_info(code):
 
         # 企業名
         m_name = re.search(r'<title>(.*?)【', html)
-        if m_name: 
+        if m_name:
             raw_name = m_name.group(1).strip()
             data["name"] = re.sub(r'[\(\（].*?[\)\）]', '', raw_name).replace("<br>", " ").strip()
 
-        # 現在値（終値として使用）
-        m_price = re.search(r'現在値</th>\s*<td[^>]*>([0-9,]+)</td>', html)
-        if m_price: data["price"] = float(m_price.group(1).replace(",", ""))
+        # ---- 現在値（強化版） ----
+        # Kabutan は複数形式あるので網羅
+        m_price = re.search(r'(現在値|株価).*?<td[^>]*>([0-9,]+)</td>', html)
+        if m_price:
+            data["price"] = float(m_price.group(2).replace(",", ""))
 
-        # 出来高
-        m_vol = re.search(r'出来高</th>\s*<td[^>]*>([0-9,]+).*?株</td>', html)
-        if m_vol: data["volume"] = float(m_vol.group(1).replace(",", ""))
+        # ---- 出来高 ----
+        m_vol = re.search(r'出来高</th>\s*<td[^>]*>([0-9,]+).*?</td>', html)
+        if m_vol:
+            data["volume"] = float(m_vol.group(1).replace(",", ""))
 
-        # 時価総額
+        # ---- 時価総額 ----
         m_cap = re.search(r'時価総額</th>\s*<td[^>]*>(.*?)</td>', html)
         if m_cap:
-            cap_str = re.sub(r'<[^>]+>', '', m_cap.group(1)).strip() 
+            cap_str = re.sub(r'<[^>]+>', '', m_cap.group(1)).strip()
             val = 0
             if "兆" in cap_str:
-                parts = cap_str.split("兆")
-                trillion = float(parts[0].replace(",", ""))
-                billion = 0
-                if len(parts) > 1 and "億" in parts[1]:
-                    b_match = re.search(r'([0-9,]+)', parts[1])
-                    if b_match: billion = float(b_match.group(1).replace(",", ""))
+                t, o = cap_str.split("兆")
+                trillion = float(t.replace(",", ""))
+                billion = float(re.search(r'([0-9,]+)', o).group(1).replace(",", "")) if "億" in o else 0
                 val = trillion * 10000 + billion
             elif "億" in cap_str:
-                b_match = re.search(r'([0-9,]+)', cap_str)
-                if b_match: val = float(b_match.group(1).replace(",", ""))
+                val = float(re.search(r'([0-9,]+)', cap_str).group(1).replace(",", ""))
             data["cap"] = val
 
-        # PER/PBR 等
+        # ---- PER / PBR ----
         i3_match = re.search(r'<div id="stockinfo_i3">.*?<tbody>(.*?)</tbody>', html)
         if i3_match:
             tbody = i3_match.group(1)
             tds = re.findall(r'<td.*?>(.*?)</td>', tbody)
-            def clean_tag_and_br(s): 
-                return re.sub(r'<[^>]+>', '', s).replace("<br>", "").strip()
+            clean = lambda s: re.sub(r'<[^>]+>', '', s).replace("<br>", "").strip()
             if len(tds) >= 2:
-                data["per"] = clean_tag_and_br(tds[0])
-                data["pbr"] = clean_tag_and_br(tds[1])
+                data["per"] = clean(tds[0])
+                data["pbr"] = clean(tds[1])
 
-        # --- 4本値（始値・高値・安値・終値）取得ロジック ---
-        # Kabutan の該当 <tr> を走査して「始値/高値/安値/終値」を取得する
+        # ---- 4本値（始値・高値・安値・終値） ----
         ohlc_map = {"始値": "open", "高値": "high", "安値": "low", "終値": "close"}
         tr_list = re.findall(r'<tr>(.*?)</tr>', html)
+
         for tr in tr_list:
             m_th = re.search(r'<th[^>]*>(.*?)</th>', tr)
             if not m_th:
                 continue
             th_text = re.sub(r'<[^>]+>', '', m_th.group(1)).strip()
+
             if th_text not in ohlc_map:
                 continue
+
             m_td = re.findall(r'<td[^>]*>(.*?)</td>', tr)
             if not m_td:
                 continue
+
             price_raw = re.sub(r'<[^>]+>', '', m_td[0]).replace(",", "").strip()
-            # 数字＋小数対応（ただし株価は整数の場合が多い）
             if re.match(r'^[0-9]+(?:\.[0-9]+)?$', price_raw):
-                try:
-                    data[ohlc_map[th_text]] = float(price_raw)
-                except:
-                    data[ohlc_map[th_text]] = None
+                data[ohlc_map[th_text]] = float(price_raw)
 
         return data
+
     except Exception as e:
-        # エラーはセッションに格納
-        st.session_state.error_messages.append(f"データ取得エラー (コード:{code}): Kabutanアクセス/解析失敗。詳細: {e}")
+        st.session_state.error_messages.append(
+            f"データ取得エラー (コード:{code}): Kabutanアクセス失敗。詳細: {e}"
+        )
         return data
 
 def run_backtest(df, market_cap):
@@ -432,22 +436,25 @@ def run_backtest(df, market_cap):
     except Exception:
         return "計算エラー", 0
 
-@st.cache_data(ttl=300) # キャッシュのTTLを5分 (300秒)
+@st.cache_data(ttl=300)  # キャッシュTTL 5分
 def get_stock_data(ticker):
     """
     Stooq CSV を取得し、必要なら Kabutan の当日 OHLCV を結合して
     テクニカル指標（SMA, RSI 等）を計算した上で辞書を返す。
+    価格は必ず Kabutan 価格（終値→現在値）を優先する。
     """
     # 現在時刻と市場ステータス（関数内で再評価）
     status, jst_now_local = get_market_status()
 
+    # ティッカー整形
     ticker = str(ticker).strip().replace(".T", "").upper()
     stock_code = f"{ticker}.JP"
 
-    # Kabutan 情報取得（株探の価格・出来高・OHLC）
+    # ★ 株探（Kabutan）情報取得
     info = get_stock_info(ticker)
 
     try:
+        # --- 1) Stooq データ取得 ---
         csv_url = f"https://stooq.com/q/d/l/?s={stock_code}&i=d"
         res = requests.get(csv_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
 
@@ -457,50 +464,47 @@ def get_stock_data(ticker):
             st.session_state.error_messages.append(f"データ不足エラー (コード:{ticker}): Stooq CSV解析失敗。詳細: {csv_e}")
             return None
 
-        # 'Date' カラムの存在チェック
+        # 'Date' カラムチェック
         if 'Date' not in df.columns or df.empty:
-            st.session_state.error_messages.append(f"データ不足エラー (コード:{ticker}): Stooqデータに 'Date' カラムがありません。データが存在しないか、提供形式が変更されています。")
+            st.session_state.error_messages.append(
+                f"データ不足エラー (コード:{ticker}): Stooqデータに Date カラムがありません。"
+            )
             return None
 
-        # DataFrame の列名整備（大文字小文字）
-        # Stooq から取り込んだカラム名は Date, Open, High, Low, Close, Volume の想定
         df = df.rename(columns=lambda x: x.strip())
-
-        # 引け後（15:50以降）の場合、Kabutan の当日確定 OHLCV が揃っていれば
-        # Stooq データに「当日行」を追加して分析に使う（マニュアル準拠）
-        if status == "引け後(確定値)":
-            # 必要な当日データが揃っているか
-            if info.get("open") is not None and info.get("high") is not None and info.get("low") is not None:
-                # 終値は Kabutan の 'price' があればそれを当日終値として使う
-                today_close = info.get("price") if info.get("price") is not None else info.get("close")
-                today_volume = info.get("volume") if info.get("volume") is not None else None
-
-                # 当日の日付（Stooq の Date フォーマットに合わせる）
-                today_str = jst_now_local.strftime("%Y-%m-%d")
-
-                # Stooq データの最終日が today_str でない場合に追加
-                try:
-                    last_dates = set(df['Date'].dt.strftime("%Y-%m-%d").tolist())
-                except Exception:
-                    last_dates = set()
-
-                if today_str not in last_dates:
-                    new_row = {
-                        'Date': pd.to_datetime(today_str),
-                        'Open': info.get("open"),
-                        'High': info.get("high"),
-                        'Low': info.get("low"),
-                        'Close': today_close if today_close is not None else info.get("close"),
-                        'Volume': today_volume if today_volume is not None else None
-                    }
-                    # DataFrame に追加
-                    df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
-
-        # Date をインデックスにしてソート
         df = df.set_index('Date').sort_index()
 
-        # --- テクニカル計算 ---
-        # 必要カラムがあるか確認してから計算
+        # =============================
+        # ★ 2) Kabutan 当日 OHLCV 追加処理（15:50以降）
+        # =============================
+        if status == "引け後(確定値)":
+            # 当日の OHLC が揃っている場合のみ結合
+            if info.get("open") and info.get("high") and info.get("low"):
+                today_str = jst_now_local.strftime("%Y-%m-%d")
+
+                if today_str not in df.index.strftime("%Y-%m-%d"):
+                    new_row = {
+                        "Open": info.get("open"),
+                        "High": info.get("high"),
+                        "Low": info.get("low"),
+                        "Close": info.get("close") if info.get("close") else info.get("price"),
+                        "Volume": info.get("volume")
+                    }
+                    df.loc[pd.to_datetime(today_str)] = new_row
+
+        df = df.sort_index()
+
+        # ===========================================
+        # ★ 3) 価格判定（Kabutan 終値 → 現在値 → Stooq）
+        # ===========================================
+        if info.get("close") is not None:         # Kabutan 4本値「終値」
+            kabu_price = info["close"]
+        elif info.get("price") is not None:       # Kabutan 現在値
+            kabu_price = info["price"]
+        else:                                     # 最終 fallback（Stooq）
+            kabu_price = float(df.iloc[-1]["Close"])
+
+        # ===== テクニカル計算 =====
         if 'Close' not in df.columns or df['Close'].isnull().all():
             st.session_state.error_messages.append(f"データ不足エラー (コード:{ticker}): Close データがありません。")
             return None
@@ -509,65 +513,68 @@ def get_stock_data(ticker):
         df['SMA25'] = df['Close'].rolling(25, min_periods=1).mean()
         df['SMA75'] = df['Close'].rolling(75, min_periods=1).mean()
 
-        # Volume カラムが存在しない行がある場合は NaN のまま
         if 'Volume' in df.columns:
             df['Vol_SMA5'] = df['Volume'].rolling(5, min_periods=1).mean()
         else:
             df['Vol_SMA5'] = float('nan')
 
-        # RSI（14期間）計算（簡易版）
+        # RSI（14期間）
         delta = df['Close'].diff()
         gain = (delta.where(delta > 0, 0)).rolling(14, min_periods=1).mean()
         loss = (-delta.where(delta < 0, 0)).rolling(14, min_periods=1).mean()
         rs = gain / loss
         df['RSI'] = 100 - (100 / (1 + rs.replace(0, float('nan'))))
 
-        # recent up days（直近5）
+        # 直近勝率
         recent = df['Close'].diff().tail(5)
         up_days = (recent > 0).sum()
         win_rate_pct = (up_days / 5) * 100
         momentum_str = f"{win_rate_pct:.0f}%"
 
-        # バックテスト（押し目）実行
+        # バックテスト
         bt_str, bt_cnt = run_backtest(df, info.get("cap", 0))
 
-        # 最新行・その前の行
+        # 最新行・前日行
         last = df.iloc[-1]
         prev = df.iloc[-2] if len(df) >= 2 else last
 
-        # 表示用の現在値は常に Kabutan の最新データ（指示書）
-        kabu_price = info.get("price") if info.get("price") is not None else last['Close']
-        curr_price = kabu_price
-
-        # 出来高倍率（Kabutan の出来高 を Vol_SMA5 に市場時間ウェイトをかけて比較）
-        vol_ratio = 0.0
+        # ========================================
+        # ★ 4) 出来高倍率計算も Kabutan 出来高を使用
+        # ========================================
         volume_weight = get_volume_weight(jst_now_local)
-        if info.get("volume") is not None and not pd.isna(last.get('Vol_SMA5', float('nan'))) and volume_weight > 0.0001:
-            adjusted_vol_avg = float(last['Vol_SMA5']) * volume_weight
-            if adjusted_vol_avg > 0:
-                vol_ratio = info.get("volume") / adjusted_vol_avg
+        vol_ratio = 0.0
+        if info.get("volume") is not None:
+            if not pd.isna(last.get('Vol_SMA5')) and volume_weight > 0.0001:
+                adjusted_vol_avg = float(last['Vol_SMA5']) * volume_weight
+                if adjusted_vol_avg > 0:
+                    vol_ratio = info["volume"] / adjusted_vol_avg
 
-        # RSI 表示マーク
-        rsi_val = float(last['RSI']) if not pd.isna(last['RSI']) else 50.0
+        # RSI マーク
+        rsi_val = float(last['RSI']) if not pd.isna(last['RSI']) else 50
         if rsi_val <= 30: rsi_mark = "🔵"
         elif 55 <= rsi_val <= 65: rsi_mark = "🟢"
         elif rsi_val >= 70: rsi_mark = "🔴"
         else: rsi_mark = "⚪"
 
-        # 戦略判定（既存ロジックを踏襲）
+        # ------ 戦略判定 ------
         strategy = "様子見"
-        ma5, ma25, ma75 = float(last['SMA5']), float(last['SMA25']), float(last['SMA75'])
+        ma5 = float(last['SMA5'])
+        ma25 = float(last['SMA25'])
+        ma75 = float(last['SMA75'])
         buy_target = int(ma25) if not math.isnan(ma25) else 0
-        p_half = 0; p_full = 0
+        p_half = 0
+        p_full = 0
 
-        # 順張り判定
         prev_ma5 = float(prev['SMA5']) if 'SMA5' in prev.index and not pd.isna(prev['SMA5']) else ma5
+
+        # 順張り
         if ma5 > ma25 > ma75 and ma5 > prev_ma5:
             strategy = "🔥順張り"
             buy_target = int(ma5)
+
             p_half_candidate = int(ma25 * 1.10)
             p_full_candidate = int(ma25 * 1.20)
-            # 利確目標が現在値より高い場合のみ採用
+
             if p_half_candidate > kabu_price:
                 p_half = p_half_candidate
                 p_full = p_full_candidate if p_full_candidate > kabu_price else p_half_candidate
@@ -575,42 +582,58 @@ def get_stock_data(ticker):
                 p_half = 0
                 p_full = 0
 
-        elif rsi_val <= 30 or (kabu_price < ma25 * 0.9 if ma25 and ma25 > 0 else False):
+        # 逆張り
+        elif rsi_val <= 30 or (kabu_price < ma25 * 0.9 if ma25 else False):
             strategy = "🌊逆張り"
-            buy_target = int(kabu_price)   # ★ 株探価格で統一 ★
+            buy_target = int(kabu_price)
             p_half = int(ma5) if not math.isnan(ma5) else 0
             p_full = int(ma25) if not math.isnan(ma25) else 0
 
-        # スコア計算
+        # ------ スコア ------
         score = 50
         if "順張り" in strategy: score += 20
         if "逆張り" in strategy: score += 15
         if 55 <= rsi_val <= 65: score += 10
-        if vol_ratio > 1.5: score += 10 
+        if vol_ratio > 1.5: score += 10
         if up_days >= 4: score += 5
         score = min(100, score)
 
         vol_disp = f"🔥{vol_ratio:.1f}倍" if vol_ratio > 1.5 else f"{vol_ratio:.1f}倍"
 
+        # =============================
+        # ★ 返却値（price は必ず Kabutan 終値を採用）
+        # =============================
         return {
-            "code": ticker, "name": info.get("name"), "price": curr_price, "cap_val": info.get("cap", 0),
-            "cap_disp": fmt_market_cap(info.get("cap", 0)), "per": info.get("per"), "pbr": info.get("pbr"),
-            "rsi": rsi_val, "rsi_disp": f"{rsi_mark}{rsi_val:.1f}", "vol_ratio": vol_ratio,
-            "vol_disp": vol_disp, "momentum": momentum_str, "strategy": strategy, "score": score,
-            "buy": buy_target, "p_half": p_half, "p_full": p_full,
+            "code": ticker,
+            "name": info.get("name"),
+            "price": kabu_price,               # ←★ 株探終値（or 現在値）
+            "cap_val": info.get("cap", 0),
+            "cap_disp": fmt_market_cap(info.get("cap", 0)),
+            "per": info.get("per"),
+            "pbr": info.get("pbr"),
+            "rsi": rsi_val,
+            "rsi_disp": f"{rsi_mark}{rsi_val:.1f}",
+            "vol_ratio": vol_ratio,
+            "vol_disp": vol_disp,
+            "momentum": momentum_str,
+            "strategy": strategy,
+            "score": score,
+            "buy": buy_target,
+            "p_half": p_half,
+            "p_full": p_full,
             "backtest": bt_str,
-            # HTMLタグ等を除去した生データ（表示やCSV出力向け）
             "backtest_raw": re.sub(r'<[^>]+>', '', bt_str.replace("<br>", " ")).replace("(", "").replace(")", ""),
-            # Kabutan から取得した当日 OHLC/Volume を返す（必要に応じてフロントで利用）
             "kabutan_open": info.get("open"),
             "kabutan_high": info.get("high"),
             "kabutan_low": info.get("low"),
             "kabutan_close": info.get("close"),
-            "kabutan_volume": info.get("volume")
+            "kabutan_volume": info.get("volume"),
         }
 
     except Exception as e:
-        st.session_state.error_messages.append(f"データ処理エラー (コード:{ticker}): 予期せぬエラーが発生しました。詳細: {e}")
+        st.session_state.error_messages.append(
+            f"データ処理エラー (コード:{ticker}): {e}"
+        )
         return None
 
 def batch_analyze_with_ai(data_list):
@@ -621,7 +644,7 @@ def batch_analyze_with_ai(data_list):
     
     for d in data_list:
 
-        # ★ Kabutan（株探）価格を必ず利用
+        # ★ Kabutan 終値ベースの price を使う（get_stock_data が保証しているが念のため）
         kabu_price = d.get("price")
         price_disp = f"{kabu_price:,.0f}" if kabu_price else "-"
 
@@ -629,26 +652,33 @@ def batch_analyze_with_ai(data_list):
         p_half = d.get("p_half", 0)
         p_full = d.get("p_full", 0)
 
-        # ★ 利確目標の乖離率（安全）
+        # ★ 利確目標乖離率（安全処理）
         if kabu_price and p_half:
-            half_pct = ((p_half / kabu_price) - 1) * 100
-            half_pct_disp = f"{half_pct:+.1f}%"
+            try:
+                half_pct = ((p_half / kabu_price) - 1) * 100
+                half_pct_disp = f"{half_pct:+.1f}%"
+            except:
+                half_pct_disp = "無効"
         else:
             half_pct_disp = "無効"
 
-        if kabu_price and d["buy"] > 0:
-            buy_div = (kabu_price / d["buy"] - 1) * 100
-            buy_div_disp = f"{buy_div:.1f}%"
+        # ★ 5MA 乖離率（Kabutan 終値基準）
+        if kabu_price and d.get("buy", 0) > 0:
+            try:
+                buy_div = (kabu_price / d["buy"] - 1) * 100
+                buy_div_disp = f"{buy_div:.1f}%"
+            except:
+                buy_div_disp = "-"
         else:
             buy_div_disp = "-"
 
-        # ★ 利確目標が無効
+        # ★ 順張りで利確目標が無効
         if p_half == 0 and d["strategy"] == "🔥順張り":
             target_info = "利確目標:目標超過または無効"
         else:
             target_info = f"利確目標(半):{half_pct_disp}"
 
-        # ★ プロンプト行（1本化・安全）
+        # ★ プロンプト行（1銘柄）
         prompt_text += (
             f"ID:{d['code']} | {d['name']} | "
             f"現在:{price_disp} | 戦略:{d['strategy']} | "
@@ -660,7 +690,7 @@ def batch_analyze_with_ai(data_list):
     # --- AIへのプロンプト本文 ---
     prompt = f"""
     あなたは「アイ」という名前のプロトレーダー。
-    以下の【銘柄リスト】を基に各銘柄の所感コメント（80文字）を書いてください。
+    以下の【銘柄リスト】を基に、各銘柄の所感コメント（80文字）を書いてください。
     
     【銘柄リスト】
     {prompt_text}
@@ -675,13 +705,20 @@ def batch_analyze_with_ai(data_list):
         comments = {}
         monologue = ""
 
+        # --- 解析処理 ---
         parts = text.split("END_OF_LIST")
         lines = parts[0].strip().split("\n")
 
         for line in lines:
-            if "|" in line:
-                c_code, c_com = line.split("|", 1)
-                comments[c_code.strip()] = c_com.strip()
+            # 「ID:7203 | コメント…」形式を安全に解析
+            if "|" in line and "ID:" in line:
+                try:
+                    left, right = line.split("|", 1)
+                    code = left.replace("ID:", "").strip()
+                    comment = right.strip()
+                    comments[code] = comment
+                except:
+                    pass
 
         if len(parts) > 1:
             monologue = parts[1].strip().replace("```", "")
@@ -818,3 +855,4 @@ if st.session_state.analyzed_data:
         if 'backtest' not in df_raw.columns and 'backtest_raw' in df_raw.columns:
             df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'})
         st.dataframe(df_raw)
+
