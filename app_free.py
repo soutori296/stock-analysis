@@ -86,7 +86,7 @@ def get_volume_weight(current_dt):
     return 1.0
 
 
-# --- CSSスタイル (干渉回避版) + ツールチップCSS ---
+# --- CSSスタイル (干渉回避版) --- (変更なし)
 st.markdown(f"""
 <style>
     /* Streamlit標準のフォント設定を邪魔しないように限定的に適用 */
@@ -98,7 +98,7 @@ st.markdown(f"""
     
     /* 自作テーブルのみにスタイルを適用 (.ai-table配下のみ) */
     .ai-table {{ 
-        width: 100%; border-collapse: collapse; min-width: 1300px; 
+        width: 100%; border-collapse: collapse; min-width: 1200px; 
         background-color: #ffffff; color: #000000;
         font-family: "Meiryo", sans-serif;
         font-size: 13px;
@@ -107,20 +107,18 @@ st.markdown(f"""
         background-color: #e0e0e0; color: #000000;
         border: 1px solid #999; padding: 8px 4px; 
         text-align: center; vertical-align: middle; font-weight: bold; white-space: nowrap; 
-        position: relative; /* ツールチップ親要素 */
-        line-height: 1.2; /* ★ 2段組みに調整 */
     }}
     .ai-table td {{ 
         background-color: #ffffff; color: #000000;
         border: 1px solid #ccc; padding: 6px 5px; vertical-align: middle; line-height: 1.4;
     }}
 
-    /* 説明書用テーブル (変更なし) */
+    /* 説明書用テーブル */
     .desc-table {{ width: 90%; margin: 0 auto; border-collapse: collapse; background-color: #fff; color: #000; font-family: "Meiryo", sans-serif; }}
     .desc-table th {{ background-color: #d0d0d0; border: 1px solid #999; padding: 8px; text-align: center !important; }}
     .desc-table td {{ border: 1px solid #ccc; padding: 8px; text-align: left !important; }}
 
-    /* クラス定義 (変更なし) */
+    /* クラス定義 */
     .th-left {{ text-align: left !important; }}
     .td-center {{ text-align: center; }}
     .td-right {{ text-align: right; }}
@@ -128,7 +126,7 @@ st.markdown(f"""
     .td-bold {{ font-weight: bold; }}
     .td-blue {{ color: #0056b3; font-weight: bold; }}
     
-    /* タイトルアイコン用のカスタムスタイル (変更なし) */
+    /* タイトルアイコン用のカスタムスタイル (オリジナルサイズで表示) */
     .custom-title {{
         display: flex; 
         align-items: center;
@@ -142,34 +140,10 @@ st.markdown(f"""
         margin-right: 15px;
         vertical-align: middle;
     }}
-    
-    /* --- ★ ツールチップ表示用CSSの追加 --- */
-    .ai-table th.has-tooltip:hover::after {{
-        content: attr(data-tooltip);
-        position: absolute;
-        top: 100%; 
-        left: 50%;
-        transform: translateX(-50%);
-        padding: 8px 12px;
-        background-color: #333;
-        color: white;
-        border-radius: 4px;
-        font-size: 12px;
-        font-weight: normal;
-        white-space: normal; 
-        min-width: 250px;
-        max-width: 350px;
-        z-index: 10;
-        text-align: left;
-        line-height: 1.5;
-        box-shadow: 0 4px 8px rgba(0,0,0,0.3);
-    }}
-    .ai-table th.has-tooltip {{ cursor: help; }} /* ホバー時にカーソルをヘルプに変更 */
-    /* ------------------------------------- */
 </style>
 """, unsafe_allow_html=True)
 
-# --- タイトル --- (変更なし)
+# --- タイトル ---
 st.markdown(f"""
 <div class="custom-title">
     <img src="{ICON_URL}" alt="AI Icon"> 教えて！AIさん 2
@@ -183,7 +157,7 @@ st.markdown(f"""
 </p>
 """, unsafe_allow_html=True)
 
-# --- 説明書 (マニュアル詳細化 - 最終版の利確目標を更新) --- (変更なし)
+# --- 説明書 (マニュアル詳細化 - 最終版の利確目標を更新) ---
 with st.expander("📘 取扱説明書 (データ仕様・判定基準)"):
     st.markdown("""
     <div class="center-text">
@@ -202,7 +176,7 @@ with st.expander("📘 取扱説明書 (データ仕様・判定基準)"):
       <tr>
         <td>市場環境</td><td><b>外部サイト</b></td><td><b>リアルタイム</b></td>
         <td>日経平均25日騰落レシオを取得し、市場全体の過熱感を評価します。</td>
-      </tr> 
+      </tr> <!-- ★ 説明書に騰落レシオの行を追加 -->
     </table>
     <br>
 
@@ -234,37 +208,65 @@ with st.expander("📘 取扱説明書 (データ仕様・判定基準)"):
         <tr><td><b>RSI適正</b></td><td>RSI 55〜65</td><td>+10点</td><td>トレンドが最も継続しやすい水準を評価</td></tr>
         <tr><td><b>出来高活発</b></td><td>出来高が5日平均の1.5倍超。出来高時間配分ロジックを使いリサーチ時点の出来高を評価します。</td><td>+10点</td><td>市場の注目度とエネルギーを評価。<b>大口参入の可能性</b>を示唆します。</td></tr> 
         <tr><td><b>直近勝率</b></td><td>直近5日で4日以上上昇</td><td>+5点</td><td>短期的な上値追いの勢いを評価</td></tr>
-        <tr><td><b>リスク減点</b></td><td>最大ドローダウン高 or SL余地小</td><td>-5点 / -5点（市場過熱時は-10点 / -10点に強化）</td><td>最大ドローダウン(-10%超)や、損切り余地(MA75乖離率±3%以内)が少ない銘柄を減点します。市場が過熱している場合（25日騰落レシオ125%以上）は減点を強化します。</td></tr> 
+        <tr><td><b>リスク減点</b></td><td>最大ドローダウン高 or SL余地小</td><td>-5点 / -5点（市場過熱時は-10点 / -10点に強化）</td><td>最大ドローダウン(-10%超)や、損切り余地(MA75乖離率±3%以内)が少ない銘柄を減点します。市場が過熱している場合（25日騰落レシオ125%以上）は減点を強化します。</td></tr> <!-- ★ リスク減点説明を再更新 -->
         <tr><td><b>合計</b></td><td>(各項目の合計)</td><td><b>最大100点</b></td><td>算出されたスコアが100点を超えた場合でも、<b>上限は100点</b>となります。</td></tr>
     </table>
 
-    <h5>③ 押し目勝敗数（バックテスト）と推奨利確目標 (変更なし)</h5>
+    <h5>③ 押し目勝敗数（バックテスト）と推奨利確目標</h5>
     <table class="desc-table">
         <tr><th style="width:20%">項目</th><th style="width:80%">ロジック詳細</th></tr>
-        <tr><td><b>対象期間</b></td><td>直近75営業日</td></tr>
-        <tr><td><b>エントリー条件</b></td><td>「5日MA > 25日MA」の状態で、かつ終値が5日移動平均線以下に<b>タッチまたは下回った日</b>（押し目と判断）。</td></tr>
-        <tr><td><b>利確目標</b><br><span style="font-size:12px;">(時価総額別の目標リターン)</span></td><td><b>1兆円以上</b>：エントリー価格から<b>2.0%の上昇</b> / <b>500億円未満</b>：エントリー価格から<b>5.0%の上昇</b></td></tr>
-        <tr><td><b>利確目標(半/全)</b><br><span style="font-size:12px;">(売買戦略の推奨値)</span></td><td><b>🔥 順張り</b>：全益は「時価総額別目標の100%」、半益は「全益価格の50%」を計算後、<b>10円単位で切り下げ、-1円</b>に調整。 / <b>🌊 逆張り</b>：半益は「5日移動平均線」から<b>-1円</b>、全益は「25日移動平均線」から<b>-1円</b>を目安。</td></tr>
-        <tr><td><b>保有期間</b></td><td>最大10営業日。10日以内に利確目標に到達しなければ「敗北」としてカウント。</td></tr>
-        <tr><td><b>解説</b></td><td>このロジックで過去にトレードした場合の勝敗数。心理的な節目・抵抗線手前での確実な利確を推奨するロジックを適用しています。</td></tr>
+        <tr>
+            <td><b>対象期間</b></td>
+            <td>直近75営業日</td>
+        </tr>
+        <tr>
+            <td><b>エントリー条件</b></td>
+            <td>「5日MA > 25日MA」の状態で、かつ終値が5日移動平均線以下に<b>タッチまたは下回った日</b>（押し目と判断）。</td>
+        </tr>
+        <tr>
+            <td><b>利確目標</b><br><span style="font-size:12px;">(時価総額別の目標リターン)</span></td>
+            <td>
+                <b>1兆円以上</b>：エントリー価格から<b>2.0%の上昇</b><br>
+                <b>3000億円以上 1兆円未満</b>：エントリー価格から<b>3.0%の上昇</b><br>
+                <b>500億円以上 3000億円未満</b>：エントリー価格から<b>4.0%の上昇</b><br>
+                <b>500億円未満</b>：エントリー価格から<b>5.0%の上昇</b>
+            </td>
+        </tr>
+        <tr>
+            <td><b>利確目標(半/全)</b><br><span style="font-size:12px;">(売買戦略の推奨値)</span></td>
+            <td>
+                <b>🔥 順張り</b>：<br>
+                - 全益は「時価総額別目標の100%」<br>
+                - 半益は「全益価格の50%」を計算後、<b>10円単位で切り下げ、-1円</b> に調整。<br>
+                <b>🌊 逆張り</b>：半益は「5日移動平均線」から <b>-1円</b>、全益は「25日移動平均線」から <b>-1円</b> を目安とします。これは移動平均線を心理的な抵抗線とみなし、その手前での確実な利確を推奨する目標です。
+            </td>
+        </tr>
+        <tr>
+            <td><b>保有期間</b></td>
+            <td>最大10営業日。10日以内に利確目標に到達しなければ「敗北」としてカウント。</td>
+        </tr>
+        <tr>
+            <td><b>解説</b></td>
+            <td>このロジックで過去にトレードした場合の勝敗数。利確目標は大型株と小型株で目標リターンを変えることで、現実的な売買の期待値を測ります。心理的な節目・抵抗線手前での確実な利確を推奨するロジックを適用しています。</td>
+        </tr>
     </table>
 
-    <h5>④ 各種指標の基準 (変更なし)</h5>
+    <h5>④ 各種指標の基準</h5>
     <table class="desc-table">
         <tr><th style="width:20%">指標</th><th>解説</th></tr>
         <tr><td><b>出来高（5MA比）</b></td><td><b>当日のリアルタイム出来高</b>を<b>過去5日間の出来高平均</b>と<b>市場の経過時間比率</b>で調整した倍率。<br>市場が開いている時間帯に応じて、出来高の偏りを考慮し、公平に大口流入を評価します。</td></tr>
         <tr><td><b>直近勝率</b></td><td>直近5営業日のうち、前日比プラスだった割合。 (例: 80% = 5日中4日上昇)</td></tr>
         <tr><td><b>RSI</b></td><td>🔵30以下(売られすぎ) / 🟢55-65(上昇トレンド) / 🔴70以上(過熱)</td></tr>
         <tr><td><b>PER/PBR</b></td><td>市場の評価。低ければ割安とされるが、業績や成長性との兼ね合いが重要。</td></tr>
-        <tr><td><b>最大MDD %</b></td><td>過去75日の押し目トレードで、エントリーから期間中最安値までの<b>最大下落率</b>。値が大きいほど過去の損失リスクが高かったことを示します。</td></tr> 
-        <tr><td><b>SL乖離率</b></td><td>現在値と75日移動平均線との乖離率。75MAを長期サポート（損切りライン）と見た場合の<b>下落余地の目安</b>です。</td></tr> 
+        <tr><td><b>最大MDD %</b></td><td>過去75日のバックテストにおける「敗北トレード」の、<b>エントリー価格から期間中最安値までの最大下落率</b>。値が大きいほど過去の損失リスクが高かったことを示します。</td></tr> 
+        <tr><td><b>SL乖離率</b></td><td>現在の株価が、長期サポートラインとされる<b>75日移動平均線からどれだけ乖離しているか</b>を示す率。マイナス幅が大きいほど、損切りラインまでの余地が大きい（安心感がある）と解釈できます。</td></tr> 
         <tr><td><b>流動性(5MA)</b></td><td>過去5日間の平均出来高。<b>1万株未満</b>は流動性リスクが高いと判断し、AIコメントで強く警告されます。</td></tr> 
-        <tr><td><b>25日レシオ</b></td><td>日経平均の25日騰落レシオ。<b>125.0%以上で市場全体が過熱（警戒モード）</b>と判断し、個別株のリスク減点を強化します。</td></tr> 
+        <tr><td><b>25日レシオ</b></td><td>日経平均の25日騰落レシオ。<b>125.0%以上で市場全体が過熱（警戒モード）</b>と判断し、個別株のリスク減点を強化します。</td></tr> <!-- ★ 25日レシオの解説を再追加 -->
     </table>
     </div>
     """, unsafe_allow_html=True)
 
-# --- サイドバー --- (変更なし)
+# --- サイドバー ---
 if "GEMINI_API_KEY" in st.secrets:
     api_key = st.secrets["GEMINI_API_KEY"]
     st.sidebar.success("🔑 Security Clearance: OK")
@@ -297,11 +299,19 @@ if api_key:
     except Exception as e:
         st.error(f"System Error: Gemini設定時にエラーが発生しました: {e}")
 
-# --- 関数群 --- (変更なし)
+# --- 関数群 ---
 
 def fmt_market_cap(val):
     if not val or val == 0: return "-"
-    # ... (中略) ...
+    try:
+        val_int = int(round(val))
+        if val_int >= 10000:
+            cho = val_int // 10000
+            oku = val_int % 10000
+            if oku == 0: return f"{cho}兆円"
+            else: return f"{cho}兆{oku}億円" 
+        else:
+            return f"{val_int}億円"
     except:
         return "-"
 
@@ -309,7 +319,82 @@ def get_stock_info(code):
     """ 
     株情報サイトから情報を取得 (Kabutan)。4本値 (Open, High, Low, Close) の取得を含む。
     """
-    # ... (中略) ...
+    url = f"https://kabutan.jp/stock/?code={code}"
+    headers = {"User-Agent": "Mozilla/5.0"}
+    
+    data = {
+        "name": "不明", "per": "-", "pbr": "-", 
+        "price": None, "volume": None, "cap": 0,
+        "open": None, "high": None, "low": None, "close": None
+    }
+    
+    try:
+        res = requests.get(url, headers=headers, timeout=5)
+        res.encoding = res.apparent_encoding
+        html = res.text.replace("\n", "")
+        
+        # 企業名
+        m_name = re.search(r'<title>(.*?)【', html)
+        if m_name: 
+            raw_name = m_name.group(1).strip()
+            data["name"] = re.sub(r'[\(\（].*?[\)\）]', '', raw_name).replace("<br>", " ").strip()
+
+        # 現在値 (価格)
+        m_price = re.search(r'現在値</th>\s*<td[^>]*>([0-9,]+)</td>', html)
+        if m_price: data["price"] = float(m_price.group(1).replace(",", ""))
+
+        # 出来高
+        m_vol = re.search(r'出来高</th>\s*<td[^>]*>([0-9,]+).*?株</td>', html)
+        if m_vol: data["volume"] = float(m_vol.group(1).replace(",", ""))
+
+        # 時価総額
+        m_cap = re.search(r'時価総額</th>\s*<td[^>]*>(.*?)</td>', html)
+        if m_cap:
+            cap_str = re.sub(r'<[^>]+>', '', m_cap.group(1)).strip() 
+            val = 0
+            if "兆" in cap_str:
+                parts = cap_str.split("兆")
+                trillion = float(parts[0].replace(",", ""))
+                billion = 0
+                if len(parts) > 1 and "億" in parts[1]:
+                    b_match = re.search(r'([0-9,]+)', parts[1])
+                    if b_match: billion = float(b_match.group(1).replace(",", ""))
+                val = trillion * 10000 + billion
+            elif "億" in cap_str:
+                b_match = re.search(r'([0-9,]+)', cap_str)
+                if b_match: val = float(b_match.group(1).replace(",", ""))
+            data["cap"] = val
+
+        # PER/PBR
+        i3_match = re.search(r'<div id="stockinfo_i3">.*?<tbody>(.*?)</tbody>', html)
+        if i3_match:
+            tbody = i3_match.group(1)
+            tds = re.findall(r'<td.*?>(.*?)</td>', tbody)
+            
+            def clean_tag_and_br(s): 
+                return re.sub(r'<[^>]+>', '', s).replace("<br>", "").strip()
+            
+            if len(tds) >= 2:
+                data["per"] = clean_tag_and_br(tds[0])
+                data["pbr"] = clean_tag_and_br(tds[1])
+
+        # 4本値の取得ロジック
+        ohlc_map = {"始値": "open", "高値": "high", "安値": "low", "終値": "close"}
+        ohlc_tbody_match = re.search(r'<table[^>]*>.*?<tbody>\s*(<tr>.*?</tr>\s*){4}.*?</tbody>', html, re.DOTALL)
+
+        if ohlc_tbody_match:
+            ohlc_tbody = ohlc_tbody_match.group(0)
+            
+            for key, val_key in ohlc_map.items():
+                m = re.search(fr'<th[^>]*>{key}</th>\s*<td[^>]*>([0-9,]+)</td>', ohlc_tbody)
+                if m:
+                    price_raw = m.group(1).replace(",", "").strip()
+                    try:
+                        data[val_key] = float(price_raw)
+                    except ValueError:
+                        pass
+
+        return data
     except Exception as e:
         st.session_state.error_messages.append(f"データ取得エラー (コード:{code}): Kabutanアクセス/解析失敗。詳細: {e}")
         return data
@@ -348,27 +433,222 @@ market_25d_ratio = get_25day_ratio()
 # ----------------------------------------------------
 
 
-# 【★ 修正箇所 1: run_backtest 関数の改修】 (変更なし)
+# 【★ 修正箇所 1: run_backtest 関数の改修】
 def run_backtest(df, market_cap):
-    # ... (中略) ...
+    """
+    押し目勝敗数（バックテスト）を実行する。時価総額に応じた4段階の利確目標を設定 (小型株は+5.0%)。
+    返り値に「最大ドローダウン率 (MDD)」を追加。
+    """
     try:
-        # ... (中略) ...
+        # ★ 返り値に MDD(0.0) を追加
+        if len(df) < 80: return "データ不足", 0, 0.0 
+        
+        # 時価総額に応じた4段階の利確目標 (変更なし)
+        if market_cap >= 10000: 
+            target_pct = 0.02
+            cap_str = "2.0%"
+        elif market_cap >= 3000: 
+            target_pct = 0.03
+            cap_str = "3.0%"
+        elif market_cap >= 500: 
+            target_pct = 0.04
+            cap_str = "4.0%"
+        else: 
+            target_pct = 0.05
+            cap_str = "5.0%"
+            
+        wins = 0
+        losses = 0
+        max_dd_pct = 0.0 # ★ 最大ドローダウン率を初期化
+        test_data = df.tail(75)
+        
+        i = 0
+        n = len(test_data)
+        
+        while i < n - 5: 
+            row = test_data.iloc[i]
+            
+            low = row.get('Low') if 'Low' in row.index else row.get('low', None)
+            sma5 = row.get('SMA5', None)
+            sma25 = row.get('SMA25', None)
+            
+            if sma5 is None or sma25 is None or low is None or pd.isna(sma5) or pd.isna(sma25):
+                i += 1
+                continue
+            
+            if sma5 > sma25 and low <= sma5: 
+                entry_price = sma5 
+                target_price = entry_price * (1 + target_pct)
+                is_win = False
+                hold_days = 0
+                trade_min_low = entry_price # ★ トレード中の最安値をエントリー価格で初期化
+                
+                for j in range(1, 11):
+                    if i + j >= n: break
+                    future = test_data.iloc[i + j]
+                    future_high = future.get('High') if 'High' in future.index else future.get('high', None)
+                    future_low = future.get('Low') if 'Low' in future.index else future.get('low', None) 
+
+                    hold_days = j
+                    
+                    # ★ MDD算出のために期間中最安値を更新
+                    if future_low is not None:
+                        trade_min_low = min(trade_min_low, future_low)
+
+                    if future_high is not None and future_high >= target_price: 
+                        is_win = True
+                        break
+                
+                if is_win: 
+                    wins += 1
+                else: 
+                    losses += 1
+                    # ★ 敗北の場合、最大ドローダウンを計算し更新
+                    if entry_price > 0 and trade_min_low < entry_price:
+                        # 下落率を計算 (マイナス値になる)
+                        dd_pct = ((trade_min_low / entry_price) - 1) * 100 
+                        # max_dd_pctは常にマイナス値なので、minでより大きなマイナス（より大きな下落）を記録
+                        max_dd_pct = min(max_dd_pct, dd_pct) 
+                    
+                i += max(1, hold_days) 
+            i += 1
+        
+        # ★ MDDを返す
+        if wins + losses == 0: return "機会なし", 0, 0.0
         return f"{wins}勝{losses}敗<br>(<b>{cap_str}</b>抜)", wins+losses, max_dd_pct 
     except Exception:
         return "計算エラー", 0, 0.0
 
 # 時価総額から目標リターン%を取得するヘルパー関数 (変更なし)
 def get_target_pct(market_cap):
-    # ... (中略) ...
+    if market_cap >= 10000: return 0.02
+    elif market_cap >= 3000: return 0.03
+    elif market_cap >= 500: return 0.04
+    else: return 0.05
 
 @st.cache_data(ttl=300) # キャッシュのTTLを5分 (300秒) に設定
 def get_stock_data(ticker):
-    # ... (中略) ...
+    
+    status, jst_now_local = get_market_status() 
+    
+    ticker = str(ticker).strip().replace(".T", "").upper()
+    stock_code = f"{ticker}.JP" 
+    
+    info = get_stock_info(ticker) 
     
     try:
-        # ... (中略) ...
+        # --- 1) Stooq データ取得 ---
+        csv_url = f"https://stooq.com/q/d/l/?s={stock_code}&i=d"
+        res = requests.get(csv_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
         
-        # 【★ 修正箇所 2.3: リスクによる減点ロジックと警戒モード】
+        try:
+            df = pd.read_csv(io.BytesIO(res.content), parse_dates=['Date']).set_index('Date')
+        except Exception as csv_e:
+            st.session_state.error_messages.append(f"データ不足エラー (コード:{ticker}): Stooq CSV解析失敗。詳細: {csv_e}")
+            return None
+        
+        df.columns = df.columns.str.strip()
+        df = df.sort_index()
+
+        if df.empty or 'Close' not in df.columns or len(df) < 80: 
+            st.session_state.error_messages.append(f"データ不足エラー (コード:{ticker}): データ期間が短すぎます (80日未満) またはカラム不足。")
+            return None
+        
+        # --- 2) 引け後（15:50以降）の場合、当日確定値を結合 ---
+        if status == "引け後(確定値)":
+            kabu_close = info.get("close")
+            if kabu_close is None: kabu_close = info.get("price")
+
+            if info.get("open") and info.get("high") and info.get("low") and info.get("volume") and kabu_close:
+                today_date_dt = pd.to_datetime(jst_now_local.strftime("%Y-%m-%d"))
+                
+                if today_date_dt not in df.index:
+                    new_row = pd.Series({
+                        'Open': info['open'],
+                        'High': info['high'],
+                        'Low': info['low'],
+                        'Close': kabu_close,
+                        'Volume': info['volume']
+                    }, name=today_date_dt) 
+                    df = pd.concat([df, new_row.to_frame().T])
+                else:
+                    df.loc[today_date_dt, 'Close'] = kabu_close 
+        
+        df = df.sort_index()
+
+        # --- 3) 現在値の決定ロジック (常に株探の最新データ) ---
+        curr_price = info.get("close")
+        if curr_price is None: curr_price = info.get("price")
+        if curr_price is None: curr_price = df.iloc[-1].get('Close', None)
+        
+        if curr_price is None or math.isnan(curr_price):
+             st.session_state.error_messages.append(f"価格データ取得エラー (コード:{ticker}): 価格情報が見つかりませんでした。")
+             return None
+
+        # テクニカル指標の計算
+        df['SMA5'] = df['Close'].rolling(5).mean()
+        df['SMA25'] = df['Close'].rolling(25).mean()
+        df['SMA75'] = df['Close'].rolling(75).mean()
+        df['Vol_SMA5'] = df['Volume'].rolling(5).mean() # ★ 過去5日平均出来高を取得
+        
+        delta = df['Close'].diff()
+        gain = (delta.where(delta > 0, 0)).rolling(14).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
+        rs = gain / loss
+        df['RSI'] = 100 - (100 / (1 + rs))
+        
+        recent = df['Close'].diff().tail(5)
+        up_days = (recent > 0).sum()
+        win_rate_pct = (up_days / 5) * 100
+        momentum_str = f"{win_rate_pct:.0f}%"
+
+        # 【★ 修正箇所 2.1: run_backtest から MDD を受け取る】
+        bt_str, bt_cnt, max_dd_pct = run_backtest(df, info["cap"]) 
+        
+        last = df.iloc[-1]
+        prev = df.iloc[-2] if len(df) >= 2 else last
+        
+        # 出来高倍率の計算 (Kabutanの出来高が優先される) (変更なし)
+        vol_ratio = 0
+        volume_weight = get_volume_weight(jst_now_local) 
+        
+        if info.get("volume") and not pd.isna(last['Vol_SMA5']) and volume_weight > 0.0001: 
+            adjusted_vol_avg = last['Vol_SMA5'] * volume_weight
+            if adjusted_vol_avg > 0:
+                 vol_ratio = info["volume"] / adjusted_vol_avg
+        
+        rsi_val = last['RSI'] if not pd.isna(last['RSI']) else 50
+        if rsi_val <= 30: rsi_mark = "🔵"
+        elif 55 <= rsi_val <= 65: rsi_mark = "🟢"
+        elif rsi_val >= 70: rsi_mark = "🔴"
+        else: rsi_mark = "⚪"
+        
+        strategy = "様子見"
+        ma5 = last['SMA5'] if not pd.isna(last['SMA5']) else 0
+        ma25 = last['SMA25'] if not pd.isna(last['SMA25']) else 0
+        ma75 = last['SMA75'] if not pd.isna(last['SMA75']) else 0 
+        buy_target = int(ma25) 
+        p_half = 0; p_full = 0
+        
+        prev_ma5 = prev['SMA5'] if not pd.isna(prev['SMA5']) else ma5
+        
+        # 順張り/逆張りロジック (変更なし)
+        # ... (省略) ...
+
+        # 【★ 修正箇所 2.2: 損切り乖離率の算出】
+        sl_pct = 0.0 
+        if curr_price > 0 and ma75 > 0:
+            sl_pct = ((curr_price / ma75) - 1) * 100
+            
+        # スコア計算
+        score = 50
+        if "順張り" in strategy: score += 20
+        if "逆張り" in strategy: score += 15
+        if 55 <= rsi_val <= 65: score += 10
+        if vol_ratio > 1.5: score += 10 
+        if up_days >= 4: score += 5
+        
+        # --- 【★ 追加箇所 2.3: リスクによる減点ロジック】 ---
         mdd_risk_deduct = 0
         sl_risk_deduct = 0
         
@@ -378,12 +658,15 @@ def get_stock_data(ticker):
             
         # 2. 現在値がSMA75に近すぎる場合 (SL余地が小さい、乖離率が3%未満)
         if ma75 > 0 and abs(sl_pct) < 3.0: 
+             # 順張り戦略でのみリスク高とみなし減点
              if "順張り" in strategy: sl_risk_deduct = -5 
              
-        # 3. 市場警戒モード判定と減点強化
+        # 3. 【★ 市場警戒モード判定と減点強化】
+        # 25日騰落レシオが125.0%以上で警戒モード発動
         is_market_alert = market_25d_ratio >= 125.0
         
         if is_market_alert:
+            # 警戒モード発動時、リスク減点を2倍（-10点）に強化
             if mdd_risk_deduct < 0: mdd_risk_deduct = -10 
             if sl_risk_deduct < 0: sl_risk_deduct = -10
             
@@ -394,60 +677,213 @@ def get_stock_data(ticker):
         score = min(100, score) 
 
         # 【★ 追加項目 2.5: 流動性リスクの判定】
-        avg_vol_5d = last['Vol_SMA5'] if not pd.isna(last['Vol_SMA5']) else 0
-        low_liquidity_flag = avg_vol_5d < 10000
+        low_liquidity_flag = last['Vol_SMA5'] < 10000 if not pd.isna(last['Vol_SMA5']) else False
 
         vol_disp = f"🔥{vol_ratio:.1f}倍" if vol_ratio > 1.5 else f"{vol_ratio:.1f}倍"
 
         return {
-            # ... (中略) ...
+            "code": ticker, "name": info["name"], "price": curr_price, "cap_val": info["cap"],
+            "cap_disp": fmt_market_cap(info["cap"]), "per": info["per"], "pbr": info["pbr"],
+            "rsi": rsi_val, "rsi_disp": f"{rsi_mark}{rsi_val:.1f}", "vol_ratio": vol_ratio,
+            "vol_disp": vol_disp, "momentum": momentum_str, "strategy": strategy, "score": score,
+            "buy": buy_target, "p_half": p_half, "p_full": p_full,
+            "backtest": bt_str, 
+            "backtest_raw": re.sub(r'<[^>]+>', '', bt_str.replace("<br>", " ")).replace("(", "").replace(")", ""),
             "max_dd_pct": max_dd_pct,
             "sl_pct": sl_pct,
-            "avg_volume_5d": avg_vol_5d, # ★ 5日平均出来高を追加
+            "avg_volume_5d": last['Vol_SMA5'] if not pd.isna(last['Vol_SMA5']) else 0, # ★ 5日平均出来高を追加
             "is_low_liquidity": low_liquidity_flag, # ★ 低流動性フラグを追加
-            # ... (中略) ...
+            "kabutan_open": info.get("open"),
+            "kabutan_high": info.get("high"),
+            "kabutan_low": info.get("low"),
+            "kabutan_close": info.get("close"),
+            "kabutan_volume": info.get("volume"),
         }
     except Exception as e:
         st.session_state.error_messages.append(f"データ処理エラー (コード:{ticker}): 予期せぬエラーが発生しました。詳細: {e}")
         return None
 
-# 【★ 修正箇所 3: batch_analyze_with_ai 関数の改修】 (変更なし)
+# 【★ 修正箇所 3: batch_analyze_with_ai 関数の改修】
 def batch_analyze_with_ai(data_list):
-    # ... (中略) ...
-    # ... (AIプロンプトの構築、市場環境の記述はV4のロジックを維持) ...
+    if not model: 
+        return {}, "⚠️ AIモデルが設定されていません。APIキーを確認してください。"
+        
+    prompt_text = ""
+    for d in data_list:
+        price = d['price'] if d['price'] is not None else 0
+        p_half = d['p_half']
+        p_full = d['p_full']
+        
+        half_pct = ((p_half / price) - 1) * 100 if price > 0 and p_half > 0 else 0
+        
+        target_info = f"利確目標(半):{half_pct:+.1f}%"
+        if p_half == 0 and d['strategy'] == "🔥順張り":
+            target_info = "利確目標:目標超過または無効"
+        
+        buy_target = d.get('buy', 0)
+        ma_div = (price/buy_target-1)*100 if buy_target > 0 and price > 0 else 0
+
+        # 【★ 追加情報: リスク指標・流動性】
+        mdd = d.get('max_dd_pct', 0.0)
+        sl_pct = d.get('sl_pct', 0.0)
+        avg_vol = d.get('avg_volume_5d', 0)
+        low_liquidity_status = "低流動性:警告" if d.get('is_low_liquidity', False) else "流動性:問題なし"
+
+        # ★ プロンプトにリスク情報と流動性を追加
+        prompt_text += f"ID:{d['code']} | {d['name']} | 現在:{price:,.0f} | 戦略:{d['strategy']} | RSI:{d['rsi']:.1f} | 5MA乖離率:{ma_div:+.1f}% | {target_info} | 出来高倍率:{d['vol_ratio']:.1f}倍 | リスク情報: MDD:{mdd:+.1f}%, MA75乖離率:{sl_pct:+.1f}% | {low_liquidity_status}\n" 
+    
+    # 【★ 市場環境の再設定】
+    r25 = market_25d_ratio
+    market_alert_info = f"市場25日騰落レシオ: {r25:.2f}%。"
+    if r25 >= 125.0:
+        market_alert_info += "市場は【明確な過熱ゾーン】にあり、全体的な調整リスクが非常に高いです。"
+    elif r25 <= 80.0:
+        market_alert_info += "市場は【明確な底値ゾーン】にあり、全体的な反発期待が高いです。"
+    else:
+        market_alert_info += "市場の過熱感は中立的です。"
+    # -----------------------------------------------
+
+    prompt = f"""
+    あなたは「アイ」という名前のプロトレーダー（30代女性、冷静・理知的）。
+    以下の【市場環境】と【銘柄リスト】に基づき、それぞれの「所感コメント（丁寧語）」を作成してください。
+    
+    【市場環境】
+    {market_alert_info}
+    
+    【コメント作成の指示】
+    1.  <b>表現の多様性を最重視してください。</b>10銘柄あれば10通りの異なる視点やボキャブラリーを使用し、紋切り型な文章は厳禁です。
+    2.  <b>AIスコアに応じた文章量と熱量を厳格に調整してください。</b>
+        - **AIスコア 85点以上 (超高評価)**: 70文字〜90文字程度。**「注目すべき銘柄」「大口の買い」**など、熱意と期待感を示す表現を盛り込んでください。
+        - **AIスコア 75点 (高評価)**: 60文字〜80文字程度。<b>「トレンド良好」「妙味がある」</b>など、期待と冷静な分析を両立させた表現にしてください。
+        - **AIスコア 65点以下 (中立/様子見)**: 50文字〜70文字程度。<b>「様子見が賢明」「慎重な見極め」</b>など、リスクを強調し、冷静沈着なトーンを維持してください。
+    3.  市場環境が【明確な過熱ゾーン】の場合、全てのコメントのトーンを控えめにし、「市場全体が過熱しているため、この銘柄にも調整が入るリスクがある」といった**強い警戒感**を盛り込んでください。
+    4.  戦略の根拠（パーフェクトオーダー、売られすぎ、乖離率など）と、RSIの状態を必ず具体的に盛り込んでください。
+    5.  **利確目標:目標超過または無効**と記載されている銘柄については、「既に利確水準を大きく超過しており、新規の買いは慎重にすべき」といった**明確な警告**を含めてください。
+    6.  出来高倍率が1.5倍を超えている場合は、「大口の買い」といった表現を使い、その事実を盛り込んでください。
+    7.  **【最重要: リスク情報と損切り基準】** リスク情報として提供された **MDD (最大ドローダウン)** や **MA75乖離率** を参照し、**リスク管理の重要性**に言及してください。
+        - MDDが-8.0%を超える（下落幅が大きい）場合は、「過去の損失リスクが高い」旨を明確に伝えてください。
+        - **流動性:** **低流動性:警告**の銘柄については、「平均出来高が1万株未満と極めて低く、希望価格での売買が困難な**流動性リスク**を伴います。ロット調整を強く推奨します。」といった**明確な警告**を必ずコメントの冒頭に含めてください。
+        - **損切り目安:** 順張り/逆張りの別なく、「長期サポートラインである**75日移動平均線を終値で明確に割り込んだ場合**は、速やかに損切りを検討すべき」といった**撤退基準**を明示してください。
+    
+    【出力形式】
+    ID:コード | コメント
+    
+    {prompt_text}
+    
+    【最後に】
+    リストの最後に「END_OF_LIST」と書き、その後に続けて「アイの独り言（常体・独白調）」を3行程度で書いてください。
+    ※見出し不要。
+    独り言の内容：
+    現在の**市場25日騰落レシオ({r25:.2f}%)**をメインテーマとして総括する。市場が【過熱ゾーン】にある場合は「市場全体の調整リスク」を、市場が【底値ゾーン】にある場合は「絶好の仕込み場」を強調しつつ、**個別株の規律ある撤退の重要性**を合わせて説く。
+    """ 
     try:
-        # ... (中略) ...
+        res = model.generate_content(prompt)
+        text = res.text
+        comments = {}
+        monologue = ""
+        
+        if "END_OF_LIST" not in text:
+            st.session_state.error_messages.append(f"AI分析エラー: Geminiモデルからの応答にEND_OF_LISTが見つかりません。")
+            return {}, "AI分析失敗"
+
+        parts = text.split("END_OF_LIST", 1)
+        comment_lines = parts[0].strip().split("\n")
+        monologue = parts[1].strip().replace("```", "")
+        
+        for line in comment_lines:
+            line = line.strip()
+            if line.startswith("ID:") and "|" in line:
+                try:
+                    c_code_part, c_com = line.split("|", 1)
+                    c_code = c_code_part.replace("ID:", "").strip()
+                    comments[c_code] = c_com.strip()
+                except:
+                    pass
+
         return comments, monologue
     except Exception as e:
         st.session_state.error_messages.append(f"AI分析エラー: Geminiモデルからの応答解析に失敗しました。詳細: {e}")
         return {}, "AI分析失敗"
 
-# --- メイン処理 --- (変更なし)
+# --- メイン処理 ---
 if st.button("🚀 分析開始 (アイに聞く)"):
-    # ... (中略) ...
-    # ... (中略) ...
+    st.session_state.error_messages = [] 
+    
+    if not api_key:
+        st.warning("APIキーを入力してください。")
+    elif not tickers_input.strip():
+        st.warning("銘柄コードを入力してください。")
+    else:
+        st.session_state.analyzed_data = []
+        raw_tickers = list(set([t.strip() for t in tickers_input.replace("\n", ",").split(",") if t.strip()]))
+        data_list = []
+        bar = st.progress(0)
+        
+        status_label, jst_now = get_market_status() 
+        
+        for i, t in enumerate(raw_tickers):
+            d = get_stock_data(t)
+            if d: data_list.append(d)
+            bar.progress((i+1)/len(raw_tickers))
+            time.sleep(0.5)
+            
+        with st.spinner("アイが全銘柄を診断中..."):
+            comments_map, monologue = batch_analyze_with_ai(data_list)
+            
+            # コメントの先頭から「銘柄名 | 」のような不要な文字列を削除する処理
+            final_comments_map = {}
+            for code, comment in comments_map.items():
+                target_name = next((d['name'] for d in data_list if d['code'] == code), None)
+                if target_name:
+                    if comment.startswith(target_name) and "|" in comment:
+                        comment = comment.split("|", 1)[-1].strip()
+                    elif comment.startswith(target_name):
+                        comment = comment[len(target_name):].strip()
+
+                final_comments_map[code] = comment
+
+            for d in data_list:
+                d["comment"] = final_comments_map.get(d["code"], "コメント生成失敗")
+            st.session_state.analyzed_data = data_list
+            st.session_state.ai_monologue = monologue
+
+        # --- 診断完了時のフィードバック ---
+        if st.session_state.analyzed_data:
+            st.success(f"✅ 全{len(raw_tickers)}銘柄中、{len(st.session_state.analyzed_data)}銘柄の診断が完了しました。")
+        
+        # --- エラーメッセージ一括表示 ---
+        if st.session_state.error_messages:
+            processed_count = len(st.session_state.analyzed_data)
+            skipped_count = len(raw_tickers) - processed_count
+            if skipped_count < 0: skipped_count = len(raw_tickers) 
+            
+            st.error(f"❌ 警告: 以下のエラーにより{skipped_count}銘柄の処理がスキップされました。")
+            with st.expander("詳細エラーメッセージ"):
+                for msg in st.session_state.error_messages:
+                    st.markdown(f'<p style="color: red; margin-left: 20px;">- {msg}</p>', unsafe_allow_html=True)
+        elif not st.session_state.analyzed_data and raw_tickers:
+            st.warning("⚠️ 全ての銘柄コードについて、データ取得またはAI分析に失敗しました。APIキーまたは入力コードをご確認ください。")
+        # --- エラーメッセージ一括表示ここまで ---
 
 
 # --- 表示 ---
 if st.session_state.analyzed_data:
     data = st.session_state.analyzed_data
     
-    # リスト分け・ソート (変更なし)
+    # リスト分け
     rec_data = [d for d in data if d['strategy'] != "様子見"]
     watch_data = [d for d in data if d['strategy'] == "様子見"]
 
-    # ... (中略) ...
+    # ソート
+    def sort_data(lst):
+        if "スコア" in sort_option: lst.sort(key=lambda x: x.get('score', 0), reverse=True)
+        elif "時価総額" in sort_option: lst.sort(key=lambda x: x.get('cap_val', 0), reverse=True)
+        elif "RSI順 (低い" in sort_option: lst.sort(key=lambda x: x.get('rsi', 50))
+        elif "RSI順 (高い" in sort_option: lst.sort(key=lambda x: x.get('rsi', 50), reverse=True)
+        else: lst.sort(key=lambda x: x.get('code', ''))
     
-    # 【★ ヘルパー関数: 出来高の表示フォーマットと丸め処理】
-    def format_volume(volume):
-        if volume < 10000:
-            # 1万株未満: 赤字でそのまま表示 (警告)
-            return f'<span style="color:#d32f2f; font-weight:bold;">{volume:,.0f}株</span>'
-        else:
-            # 1万株以上: 万株単位で四捨五入、小数点以下なし
-            vol_man = round(volume / 10000)
-            return f'{vol_man:,.0f}万株'
-
+    sort_data(rec_data)
+    sort_data(watch_data)
 
     def create_table(d_list, title):
         if not d_list: return f"<h4>{title}: 該当なし</h4>"
@@ -462,7 +898,7 @@ if st.session_state.analyzed_data:
             p_half = d.get('p_half', 0)
             p_full = d.get('p_full', 0)
             
-            # 利確目標乖離率の計算 (変更なし)
+            # 利確目標乖離率の計算
             kabu_price = d.get("price")
             half_pct = ((p_half / kabu_price) - 1) * 100 if kabu_price > 0 and p_half > 0 else 0
             full_pct = ((p_full / kabu_price) - 1) * 100 if kabu_price > 0 and p_full > 0 else 0
@@ -479,67 +915,35 @@ if st.session_state.analyzed_data:
             # 出来高（5MA比）の表示
             vol_disp = d.get("vol_disp", "-")
             
-            # 【★ MDDと推奨SL乖離率】
+            # 【★ 表示項目: MDDと推奨SL乖離率、流動性】
             mdd_disp = f"{d.get('max_dd_pct', 0.0):.1f}%"
             sl_pct_disp = f"{d.get('sl_pct', 0.0):.1f}%"
             
-            # 【★ 出来高の統合表示】
-            avg_vol_html = format_volume(d.get('avg_volume_5d', 0))
+            # 流動性が低い場合は赤文字で警告
+            avg_vol_disp = f"{d.get('avg_volume_5d', 0):,.0f}"
+            if d.get('is_low_liquidity', False):
+                 avg_vol_disp = f'<span style="color:#d32f2f; font-weight:bold;">{avg_vol_disp}</span>'
 
-            # 【★ テーブル行の追加】
-            rows += f'<tr><td class="td-center">{i+1}</td><td class="td-center">{d.get("code")}</td><td class="th-left td-bold">{d.get("name")}</td><td class="td-right">{d.get("cap_disp")}</td><td class="td-center">{d.get("score")}</td><td class="td-center">{d.get("strategy")}</td><td class="td-center">{d.get("momentum")}</td><td class="td-center">{d.get("rsi_disp")}</td><td class="td-right">{vol_disp}<br>({avg_vol_html})</td><td class="td-right td-bold">{price_disp}</td><td class="td-right">{buy:,.0f}<br><span style="font-size:10px;color:#666">{diff_txt}</span></td><td class="td-left" style="line-height:1.2;font-size:11px;">{target_txt}</td><td class="td-center td-blue">{bt_display}</td><td class="td-center">{d.get("per")}<br>{d.get("pbr")}</td><td class="td-right">{mdd_disp}<br>{sl_pct_disp}</td><td class="th-left">{d.get("comment")}</td></tr>'
-
-
-        # ヘッダーとツールチップデータの定義
-        # ★ 2段組みに合わせてヘッダーテキストを修正
-        headers = [
-            ("No", "25px", None), 
-            ("コード", "45px", None), 
-            ("企業名", "130px", None), 
-            ("時価総額", "100px", None), 
-            ("点", "35px", "AIスコア。市場警戒モード発動時はMDD/SL減点が-10点に強化されます。"), 
-            ("戦略", "75px", "🔥順張り: パーフェクトオーダーなど、上昇トレンドの初期・継続と判断。🌊逆張り: RSI30以下など、売られすぎ・急落局面と判断。"), 
-            ("直近\n勝率", "50px", "直近5日間の前日比プラスだった日数の割合。"), 
-            ("RSI", "50px", "相対力指数。🔵30以下(売られすぎ) / 🟢55-65(上昇トレンド) / 🔴70以上(過熱)"), 
-            ("出来高\n(5MA比)", "90px", "当日の出来高と5日平均出来高（経過時間補正済み）の比率。括弧内は5日平均出来高（流動性）。1万株未満は赤字で警告。"), # ★ 統合された出来高ヘッダー
-            ("現在値", "60px", None), 
-            ("推奨買値\n(乖離)", "70px", "戦略に基づく推奨エントリー水準。順張り: 5MA、逆張り: 現在値近辺など。乖離は現在値との差額。"), # ★ 2段組み
-            ("利確目標\n(乖離率%)", "120px", "時価総額別リターンと心理的な節目（MA/10円単位）を考慮した、現実的な目標値。"), # ★ 2段組み
-            ("押し目\n勝敗数", "85px", "過去75日のバックテストにおける、推奨エントリー（押し目）での勝敗数。利確まで最大10日保有。"), # ★ 2段組み
-            ("PER\nPBR", "70px", "株価収益率/株価純資産倍率。市場の評価指標。"), # ★ 2段組み
-            ("MDD %\nSL乖離率", "80px", "<b>MDD %</b>: 過去75日の同条件トレードでの最大下落率（最大痛手）。<b>SL乖離率</b>: 75日MA（損切り目安）までの余裕。順張りで乖離小はリスク高。"), # ★ 2段組み
-            ("アイの所感", "min-width:200px;", "アイ（プロトレーダー）による分析コメント。リスクや流動性に関する警告を最優先して発言します。"),
-        ]
-
-        # ヘッダーHTMLの生成
-        th_rows = ""
-        for text, width, tooltip in headers:
-            tooltip_class = " has-tooltip" if tooltip else ""
-            tooltip_attr = f'data-tooltip="{tooltip}"' if tooltip else ''
-            
-            # 企業名とアイの所感は左寄せ
-            if "企業名" in text or "アイの所感" in text:
-                 th_rows += f'<th class="th-left{tooltip_class}" style="width:{width}" {tooltip_attr}>{text.replace("\\n", "<br>")}</th>'
-            else:
-                 # その他は中央寄せで、改行を適用
-                 th_rows += f'<th class="thdt{tooltip_class}" style="width:{width}" {tooltip_attr}>{text.replace("\\n", "<br>")}</th>'
+            # 【★ 表示項目 2: テーブル行の追加】
+            rows += f'<tr><td class="td-center">{i+1}</td><td class="td-center">{d.get("code")}</td><td class="th-left td-bold">{d.get("name")}</td><td class="td-right">{d.get("cap_disp")}</td><td class="td-center">{d.get("score")}</td><td class="td-center">{d.get("strategy")}</td><td class="td-center">{d.get("momentum")}</td><td class="td-center">{d.get("rsi_disp")}</td><td class="td-right">{vol_disp}</td><td class="td-right td-bold">{price_disp}</td><td class="td-right">{buy:,.0f}<br><span style="font-size:10px;color:#666">{diff_txt}</span></td><td class="td-left" style="line-height:1.2;font-size:11px;">{target_txt}</td><td class="td-center td-blue">{bt_display}</td><td class="td-center">{d.get("per")}<br>{d.get("pbr")}</td><td class="td-right">{mdd_disp}<br>{sl_pct_disp}</td><td class="td-right">{avg_vol_disp}</td><td class="th-left">{d.get("comment")}</td></tr>'
 
 
-        # テーブル全体のHTMLを返す
+        # ヘッダーの幅を調整
         return f'''
         <h4>{title}</h4>
         <div class="table-container"><table class="ai-table">
         <thead><tr>
-        {th_rows}
+        <th style="width:25px;">No</th><th style="width:45px;">コード</th><th class="th-left" style="width:130px;">企業名</th><th style="width:100px;">時価総額</th><th style="width:35px;">点</th><th style="width:75px;">戦略</th><th style="width:50px;">直近<br>勝率</th><th style="width:50px;">RSI</th><th style="width:80px;">出来高<br>(5MA比)</th><th style="width:60px;">現在値</th><th style="width:70px;">推奨買値<br>(乖離)</th><th style="width:120px;">利確目標<br>(乖離率%)</th><th style="width:85px;">押し目<br>勝敗数</th><th style="width:70px;">PER<br>PBR</th><th style="width:70px;">MDD %<br>SL乖離率</th><th style="width:70px;">流動性<br>(5MA株)</th><th class="th-left" style="min-width:200px;">アイの所感</th>
         </tr></thead>
         <tbody>{rows}</tbody>
-        </table></div>'''
+        </table></div>''' # ★ ヘッダーに流動性を追加
 
     st.markdown("### 📊 アイ推奨ポートフォリオ")
     # 【★ 市場騰落レシオの表示を再追加】
     r25 = market_25d_ratio
     ratio_color = "#d32f2f" if r25 >= 125.0 else ("#1976d2" if r25 <= 80.0 else "#4A4A4A")
     st.markdown(f'<p class="big-font"><b>市場環境（25日騰落レシオ）：<span style="color:{ratio_color};">{r25:.2f}%</span></b></p>', unsafe_allow_html=True)
+    # ---------------------------------
     
     st.markdown(create_table(rec_data, "🔥 推奨銘柄 (順張り / 逆張り)"), unsafe_allow_html=True)
     st.markdown(create_table(watch_data, "👀 様子見銘柄"), unsafe_allow_html=True)
