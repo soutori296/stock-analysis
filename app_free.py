@@ -397,10 +397,11 @@ def run_backtest(df, market_cap):
         
         while i < n - 5: 
             row = test_data.iloc[i]
-            # DataFrame の列名に小文字/大文字の違いがあるかもしれないため安全に取り出す
-            low = row.get('Low') if 'Low' in row.index else row.get('Low', row.get('low', None))
-            sma5 = row.get('SMA5', row.get('SMA5', None))
-            sma25 = row.get('SMA25', row.get('SMA25', None))
+            # DataFrame の列名に小文字/大文字の違いがあるかもしれないため安全に取り出す           
+            low = row.get('Low') if 'Low' in row.index else row.get('low', None)
+            sma5 = row.get('SMA5', None)
+            sma25 = row.get('SMA25', None)
+            
             if sma5 is None or sma25 is None or low is None:
                 i += 1
                 continue
@@ -493,7 +494,7 @@ def get_stock_data(ticker):
                         'Volume': today_volume if today_volume is not None else None
                     }
                     # DataFrame に追加
-                    df = df.append(new_row, ignore_index=True)
+                    df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
 
         # Date をインデックスにしてソート
         df = df.set_index('Date').sort_index()
@@ -535,7 +536,8 @@ def get_stock_data(ticker):
         prev = df.iloc[-2] if len(df) >= 2 else last
 
         # 表示用の現在値は常に Kabutan の最新データ（指示書）
-        curr_price = info.get("price") if info.get("price") else last['Close']
+        kabu_price = info.get("price") if info.get("price") is not None else last['Close']
+        curr_price = kabu_price
 
         # 出来高倍率（Kabutan の出来高 を Vol_SMA5 に市場時間ウェイトをかけて比較）
         vol_ratio = 0.0
@@ -566,15 +568,16 @@ def get_stock_data(ticker):
             p_half_candidate = int(ma25 * 1.10)
             p_full_candidate = int(ma25 * 1.20)
             # 利確目標が現在値より高い場合のみ採用
-            if p_half_candidate > curr_price:
+            if p_half_candidate > kabu_price:
                 p_half = p_half_candidate
-                p_full = p_full_candidate if p_full_candidate > curr_price else p_half_candidate
+                p_full = p_full_candidate if p_full_candidate > kabu_price else p_half_candidate
             else:
                 p_half = 0
                 p_full = 0
-        elif rsi_val <= 30 or (curr_price < ma25 * 0.9 if ma25 and ma25 > 0 else False):
+
+        elif rsi_val <= 30 or (kabu_price < ma25 * 0.9 if ma25 and ma25 > 0 else False):
             strategy = "🌊逆張り"
-            buy_target = int(curr_price)
+            buy_target = int(kabu_price)   # ★ 株探価格で統一 ★
             p_half = int(ma5) if not math.isnan(ma5) else 0
             p_full = int(ma25) if not math.isnan(ma25) else 0
 
@@ -615,59 +618,80 @@ def batch_analyze_with_ai(data_list):
         return {}, "⚠️ AIモデルが設定されていません。APIキーを確認してください。"
         
     prompt_text = "【銘柄リスト】\n"
+    
     for d in data_list:
-        price = d['price']
-        p_half = d['p_half']
-        p_full = d['p_full']
-        
-        half_pct = ((p_half / price) - 1) * 100 if price > 0 and p_half > 0 else 0
-        full_pct = ((p_full / price) - 1) * 100 if price > 0 and p_full > 0 else 0
-        
-        # 利確目標が無効な場合はAIへの情報提供にその旨を記載
-        target_info = f"利確目標(半):{half_pct:+.1f}%"
-        if p_half == 0 and d['strategy'] == "🔥順張り":
+
+        # ★ Kabutan（株探）価格を必ず利用
+        kabu_price = d.get("price")
+        price_disp = f"{kabu_price:,.0f}" if kabu_price else "-"
+
+        # 利確目標
+        p_half = d.get("p_half", 0)
+        p_full = d.get("p_full", 0)
+
+        # ★ 利確目標の乖離率（安全）
+        if kabu_price and p_half:
+            half_pct = ((p_half / kabu_price) - 1) * 100
+            half_pct_disp = f"{half_pct:+.1f}%"
+        else:
+            half_pct_disp = "無効"
+
+        if kabu_price and d["buy"] > 0:
+            buy_div = (kabu_price / d["buy"] - 1) * 100
+            buy_div_disp = f"{buy_div:.1f}%"
+        else:
+            buy_div_disp = "-"
+
+        # ★ 利確目標が無効
+        if p_half == 0 and d["strategy"] == "🔥順張り":
             target_info = "利確目標:目標超過または無効"
-        
-        prompt_text += f"ID:{d['code']} | {d['name']} | 現在:{price:,.0f} | 戦略:{d['strategy']} | RSI:{d['rsi']:.1f} | 5MA乖離率:{(price/d['buy']-1)*100 if d['buy']>0 else 0:.1f}% | {target_info} | 出来高倍率:{d['vol_ratio']:.1f}倍\n"
-    
+        else:
+            target_info = f"利確目標(半):{half_pct_disp}"
+
+        # ★ プロンプト行（1本化・安全）
+        prompt_text += (
+            f"ID:{d['code']} | {d['name']} | "
+            f"現在:{price_disp} | 戦略:{d['strategy']} | "
+            f"RSI:{d['rsi']:.1f} | "
+            f"5MA乖離率:{buy_div_disp} | "
+            f"{target_info} | 出来高倍率:{d['vol_ratio']:.1f}倍\n"
+        )
+
+    # --- AIへのプロンプト本文 ---
     prompt = f"""
-    あなたは「アイ」という名前のプロトレーダー（30代女性、冷静・理知的）。
-    以下の【銘柄リスト】に基づき、それぞれの「所感コメント（80文字程度、丁寧語）」を作成してください。
+    あなたは「アイ」という名前のプロトレーダー。
+    以下の【銘柄リスト】を基に各銘柄の所感コメント（80文字）を書いてください。
     
-    【コメント作成の指示】
-    1.  <b>銘柄ごとに特徴を活かした、人間味のある（画一的でない）文章にしてください。</b>
-    2.  戦略の根拠（パーフェクトオーダー、売られすぎ、乖離率など）と、RSIの状態を必ず具体的に盛り込んでください。
-    3.  **利確目標:目標超過または無効**と記載されている銘柄については、「すでに利確水準を大きく超過しており、新規の買いは慎重にすべき」といった**明確な警告**を含めてください。
-    4.  出来高倍率が1.5倍を超えている場合は、「大口の買い」といった表現を使い、その事実を盛り込んでください。
-    
-    【出力形式】
-    コード | コメント
-    
+    【銘柄リスト】
     {prompt_text}
-    
-    【最後に】
-    リストの最後に「END_OF_LIST」と書き、その後に続けて「アイの独り言（常体・独白調）」を3行程度で書いてください。
-    ※見出し不要。
-    独り言の内容：
-    ご自身の徹底した調査とリスク許容度に基づいて行ってください。特に、安易な高値掴みや、損失を確定できないまま持ち続けるといった行動は、長期的な資産形成を大きく阻害します。冷静な判断と規律あるトレードを心がけ、感情に流されない投資を実践していくことが、市場で生き残るために最も重要だと考えます。
+
+    END_OF_LIST の後に、アイの独り言（3行程度、常体）も書いてください。
     """
+
     try:
         res = model.generate_content(prompt)
         text = res.text
+
         comments = {}
         monologue = ""
+
         parts = text.split("END_OF_LIST")
         lines = parts[0].strip().split("\n")
-        
-        for line in lines[1:] if lines and lines[0].startswith("【銘柄リスト】") else lines:
+
+        for line in lines:
             if "|" in line:
                 c_code, c_com = line.split("|", 1)
                 comments[c_code.strip()] = c_com.strip()
+
         if len(parts) > 1:
             monologue = parts[1].strip().replace("```", "")
+
         return comments, monologue
+
     except Exception as e:
-        st.session_state.error_messages.append(f"AI分析エラー: Geminiモデルからの応答解析に失敗しました。詳細: {e}")
+        st.session_state.error_messages.append(
+            f"AI分析エラー: Gemini応答解析に失敗。詳細: {e}"
+        )
         return {}, "AI分析失敗"
 
 # --- メイン処理 ---
@@ -743,16 +767,18 @@ if st.session_state.analyzed_data:
         
         rows = ""
         for i, d in enumerate(d_list):
-            price = d.get('price', 0)
+            price = d.get('price')
+            price_disp = f"{price:,.0f}" if price else "-"
             buy = d.get('buy', 0)
             diff = price - buy if buy else 0
             diff_txt = f"({diff:+,.0f})" if diff != 0 else "(0)"
             p_half = d.get('p_half', 0)
             p_full = d.get('p_full', 0)
             
-            # 利確目標乖離率の計算（価格が0割り防止）
-            half_pct = ((p_half / price) - 1) * 100 if price and price > 0 and p_half > 0 else 0
-            full_pct = ((p_full / price) - 1) * 100 if price and price > 0 and p_full > 0 else 0
+            # 利確目標乖離率の計算
+            kabu_price = d.get("price")
+            half_pct = ((p_half / kabu_price) - 1) * 100 if kabu_price > 0 else 0
+            full_pct = ((p_full / kabu_price) - 1) * 100 if kabu_price > 0 else 0
             
             target_txt = "-"
             if p_half > 0:
@@ -766,7 +792,7 @@ if st.session_state.analyzed_data:
             # 出来高（5MA比）の表示
             vol_disp = d.get("vol_disp", "-")
             
-            rows += f'<tr><td class="td-center">{i+1}</td><td class="td-center">{d.get("code")}</td><td class="th-left td-bold">{d.get("name")}</td><td class="td-right">{d.get("cap_disp")}</td><td class="td-center">{d.get("score")}</td><td class="td-center">{d.get("strategy")}</td><td class="td-center">{d.get("momentum")}</td><td class="td-center">{d.get("rsi_disp")}</td><td class="td-right">{vol_disp}</td><td class="td-right td-bold">{price:,.0f}</td><td class="td-right">{buy:,.0f}<br><span style="font-size:10px;color:#666">{diff_txt}</span></td><td class="td-left" style="line-height:1.2;font-size:11px;">{target_txt}</td><td class="td-center td-blue">{bt_display}</td><td class="td-center">{d.get("per")}<br>{d.get("pbr")}</td><td class="th-left">{d.get("comment")}</td></tr>'
+            rows += f'<tr><td class="td-center">{i+1}</td><td class="td-center">{d.get("code")}</td><td class="th-left td-bold">{d.get("name")}</td><td class="td-right">{d.get("cap_disp")}</td><td class="td-center">{d.get("score")}</td><td class="td-center">{d.get("strategy")}</td><td class="td-center">{d.get("momentum")}</td><td class="td-center">{d.get("rsi_disp")}</td><td class="td-right">{vol_disp}</td><td class="td-right td-bold">{price_disp}</td><td class="td-right">{buy:,.0f}<br><span style="font-size:10px;color:#666">{diff_txt}</span></td><td class="td-left" style="line-height:1.2;font-size:11px;">{target_txt}</td><td class="td-center td-blue">{bt_display}</td><td class="td-center">{d.get("per")}<br>{d.get("pbr")}</td><td class="th-left">{d.get("comment")}</td></tr>'
 
         # ヘッダーの幅を調整
         return f'''
@@ -792,5 +818,3 @@ if st.session_state.analyzed_data:
         if 'backtest' not in df_raw.columns and 'backtest_raw' in df_raw.columns:
             df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'})
         st.dataframe(df_raw)
-
-# End of file
