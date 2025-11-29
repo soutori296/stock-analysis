@@ -397,6 +397,8 @@ def get_stock_info(code):
 
 # 【★ 新規追加関数: 騰落レシオ取得】
 @st.cache_data(ttl=300, show_spinner="市場騰落レシオを取得中...")
+# 【★ 修正箇所: get_market_ratios 関数の正規表現を修正】
+@st.cache_data(ttl=300, show_spinner="市場騰落レシオを取得中...")
 def get_market_ratios():
     """
     指定されたURLから最新の騰落レシオ（25日, 6日）を取得する。
@@ -410,19 +412,30 @@ def get_market_ratios():
         res.encoding = res.apparent_encoding
         html = res.text.replace("\n", "")
         
-        # 最新の日付のデータ行を抽出
-        m_row = re.search(r'<tr><td class="dtb1"><time>.*?<\/time><\/td>.*?<\/tr>', html)
+        # 1. 最新の日付のデータ行 (class="dtb1"で始まる<tr>) を抽出
+        # <tr ...> <td class="dtb1">...</td> ... </tr>
+        # 最新データ行全体を取得するため、<tr>...</tr>のブロックを捕捉
+        m_row = re.search(r'<tr[^>]*>\s*<td class="dtb1">.*?<\/td>(.*?)<\/tr>', html)
         
         if m_row:
-            row_html = m_row.group(0)
-            # class="dtb6" の値を全て抽出 (25日, 15日, 10日, 6日 の順)
-            td6_values = re.findall(r'<td class="dtb6" [^>]*>([0-9\.]+)<\/td>', row_html)
+            # 2. 最新データ行内のdtb6（騰落レシオ）の値だけを抽出
+            # <td class="dtb6" style="...">値</td>
+            row_content = m_row.group(1)
+            # tdタグの内容全体から、style属性の有無に関わらず数値のみを抽出
+            # <th>の並びから、7番目 (25日) と10番目 (6日) に注目
+            # dtb6の並び: 25日, 15日, 10日, 6日
+            
+            # tdb6クラスを持つ全ての要素の内容（数値）を抽出
+            td6_values = re.findall(r'<td class="dtb6"[^>]*>([0-9\.]+)<\/td>', row_content)
             
             if len(td6_values) >= 4:
-                # 25日騰落レシオ
+                # 0番目: 25日騰落レシオ
                 ratios["25day"] = float(td6_values[0].strip())
-                # 6日騰落レシオ
+                # 3番目: 6日騰落レシオ
                 ratios["6day"] = float(td6_values[3].strip())
+            
+            # デバッグ用（本番環境では不要だが、ここでは残しておく）
+            # st.session_state.error_messages.append(f"DEBUG: 25日レシオ={ratios['25day']:.2f}, 6日レシオ={ratios['6day']:.2f}")
 
         return ratios
     
@@ -963,3 +976,4 @@ if st.session_state.analyzed_data:
         if 'backtest_raw' in df_raw.columns:
             df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'}) 
         st.dataframe(df_raw)
+
