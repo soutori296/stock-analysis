@@ -887,63 +887,104 @@ if st.session_state.analyzed_data:
             return f'{vol_man:,.0f}万株'
 
     def create_table(d_list, title):
-        if not d_list: return f"<h4>{title}: 該当なし</h4>"
+    if not d_list: return f"<h4>{title}: 該当なし</h4>"
+    
+    rows = ""
+    for i, d in enumerate(d_list):
+        price = d.get('price')
+        price_disp = f"{price:,.0f}" if price else "-"
+        buy = d.get('buy', 0)
+        diff = price - buy if price and buy else 0
+        diff_txt = f"({diff:+,.0f})" if diff != 0 else "(0)"
+        p_half = d.get('p_half', 0)
+        p_full = d.get('p_full', 0)
         
-        rows = ""
-        for i, d in enumerate(d_list):
-            price = d.get('price')
-            # ... (中略: 既存の変数設定) ...
-            
-            # 【★ テーブル行の追加（新しい並び順と2段組み対応）】
-            # AIコメントはHTMLタグ（<b>, <span style="color:red;">）を許可
-            # ★ ここを修正: d.get("comment")を<div class="comment-scroll-box">でラップ
-            comment_html = d.get("comment")
-            
-            rows += f'<tr><td class="td-center">{i+1}</td><td class="td-center">{d.get("code")}</td><td class="th-left td-bold">{d.get("name")}</td><td class="td-right">{d.get("cap_disp")}</td><td class="td-center">{score_disp}</td><td class="td-center">{d.get("strategy")}</td><td class="td-right td-bold">{price_disp}</td><td class="td-right">{buy:,.0f}<br><span style="font-size:10px;color:#666">{diff_txt}</span></td><td class="td-right">{mdd_disp}<br>{sl_pct_disp}</td><td class="td-left" style="line-height:1.2;font-size:11px;">{target_txt}</td><td class="td-center">{d.get("rsi_disp")}</td><td class="td-right">{vol_disp}<br>({avg_vol_html})</td><td class="td-center td-blue">{bt_cell_content}</td><td class="td-center">{d.get("per")}<br>{d.get("pbr")}</td><td class="td-center">{d.get("momentum")}</td><td class="th-left"><div class="comment-scroll-box">{comment_html}</div></td></tr>'
-       
-        # ヘッダーとツールチップデータの定義 (2段組みに対応するため\nを使用)
-        headers = [
-            ("No", "25px", None), 
-            ("コード", "45px", None), 
-            ("企業名", "130px", None), 
-            ("時価総額", "85px", None), 
-            ("点", "35px", "AIスコア。市場警戒モード発動時はMDD/SL減点が-10点に強化されます。"), 
-            ("戦略", "75px", "🔥順張り: パーフェクトオーダーなど。🌊逆張り: RSI30以下など。"), 
-            ("現在値", "60px", None), 
-            ("推奨買値\n(乖離)", "65px", "戦略に基づく推奨エントリー水準。乖離は現在値との差額。"), 
-            ("最大DD率\nSL乖離率", "70px", "最大DD率: 過去の同条件トレードでの最大下落率（最大痛手）。SL乖離率: 順張り(25MA)、逆張り(75MA)までの余裕。"), # 修正
-            ("利確目標\n(乖離率)", "120px", "時価総額別リターンと心理的な節目を考慮した目標値。"), 
-            ("RSI", "50px", "相対力指数。🔵30以下(売られすぎ) / 🟢55-65(上昇トレンド) / 🔴70以上(過熱)"), 
-            ("出来高比\n（5日平均）", "80px", "上段は当日の出来高と5日平均出来高（補正済み）の比率。下段は5日平均出来高（流動性）。1万株未満は赤字で警告。"), # 修正
-            ("押し目\n勝敗数", "60px", "過去75日のバックテストにおける、推奨エントリー（押し目）での勝敗数。"), 
-            ("PER\nPBR", "60px", "株価収益率/株価純資産倍率。市場の評価指標。"), # 修正
-            ("直近\n勝率", "40px", "直近5日間の前日比プラスだった日数の割合。"), # 修正
-            ("アイの所感", "min-width:350px;", "アイ（プロトレーダー）による分析コメント。リスクや流動性に関する警告を最優先して発言します。"), 
-        ]
+        # 利確目標乖離率の計算
+        kabu_price = d.get("price")
+        half_pct = ((p_half / kabu_price) - 1) * 100 if kabu_price > 0 and p_half > 0 else 0
+        full_pct = ((p_full / kabu_price) - 1) * 100 if kabu_price > 0 and p_full > 0 else 0
+        
+        target_txt = "-"
+        if p_half > 0:
+             # ★ 利確目標の2段組み: 半益(乖離率)を1段目、全益(乖離率)を2段目
+            target_txt = f"半:{p_half:,} ({half_pct:+.1f}%)<br>全:{p_full:,} ({full_pct:+.1f}%)" 
+        else:
+             target_txt = "目標超過/無効"
+        
+        # backtestフィールドはHTML表示用
+        # 押し目勝敗数の2段組み
+        bt_display = d.get("backtest", "-").replace("<br>", " ") # 既存の<br>をスペースに置換
+        bt_parts = bt_display.split('(')
+        bt_row1 = bt_parts[0].strip()
+        bt_row2 = f'({bt_parts[1].strip()}' if len(bt_parts) > 1 else ""
+        bt_cell_content = f'{bt_row1}<br>{bt_row2}'
+        
+        # 出来高（5MA比）の表示
+        vol_disp = d.get("vol_disp", "-")
+        
+        # 【★ MDDと推奨SL乖離率】
+        mdd_disp = f"{d.get('max_dd_pct', 0.0):.1f}%"
+        sl_pct_disp = f"{d.get('sl_pct', 0.0):.1f}%"
+        
+        # 【★ 出来高の統合表示】
+        avg_vol_html = format_volume(d.get('avg_volume_5d', 0))
+        
+        # 【★ スコアの強調表示】
+        score_disp = f'{d.get("score")}'
+        if d.get("score", 0) >= 80:
+            score_disp = f'<span class="score-high">{score_disp}</span>'
 
-        # ヘッダーHTMLの生成
-        th_rows = ""
-        for text, width, tooltip in headers:
-            tooltip_class = " has-tooltip" if tooltip else ""
-            tooltip_attr = f'data-tooltip="{tooltip}"' if tooltip else ''
-            
-            # 企業名とアイの所感は左寄せ
-            if "企業名" in text or "アイの所感" in text:
-                 th_rows += f'<th class="th-left{tooltip_class}" style="width:{width}" {tooltip_attr}>{text.replace("\\n", "<br>")}</th>'
-            else:
-                 # その他は中央寄せで、改行を適用
-                 th_rows += f'<th class="thdt{tooltip_class}" style="width:{width}" {tooltip_attr}>{text.replace("\\n", "<br>")}</th>'
+        # ★ NameError を解消するためにここで定義します
+        comment_html = d.get("comment", "")
+        
+        # 【★ テーブル行の追加（新しい並び順と2段組み対応）】
+        # AIコメントを <div class="comment-scroll-box"> でラップ
+        rows += f'<tr><td class="td-center">{i+1}</td><td class="td-center">{d.get("code")}</td><td class="th-left td-bold">{d.get("name")}</td><td class="td-right">{d.get("cap_disp")}</td><td class="td-center">{score_disp}</td><td class="td-center">{d.get("strategy")}</td><td class="td-right td-bold">{price_disp}</td><td class="td-right">{buy:,.0f}<br><span style="font-size:10px;color:#666">{diff_txt}</span></td><td class="td-right">{mdd_disp}<br>{sl_pct_disp}</td><td class="td-left" style="line-height:1.2;font-size:11px;">{target_txt}</td><td class="td-center">{d.get("rsi_disp")}</td><td class="td-right">{vol_disp}<br>({avg_vol_html})</td><td class="td-center td-blue">{bt_cell_content}</td><td class="td-center">{d.get("per")}<br>{d.get("pbr")}</td><td class="td-center">{d.get("momentum")}</td><td class="th-left"><div class="comment-scroll-box">{comment_html}</div></td></tr>'
 
 
-        # テーブル全体のHTMLを返す
-        return f'''
-        <h4>{title}</h4>
-        <div class="table-container"><table class="ai-table">
-        <thead><tr>
-        {th_rows}
-        </tr></thead>
-        <tbody>{rows}</tbody>
-        </table></div>'''
+    # ヘッダーとツールチップデータの定義 (2段組みに対応するため\nを使用)
+    headers = [
+        ("No", "25px", None), 
+        ("コード", "45px", None), 
+        ("企業名", "130px", None), 
+        ("時価総額", "85px", None), 
+        ("点", "35px", "AIスコア。市場警戒モード発動時はMDD/SL減点が-10点に強化されます。"), 
+        ("戦略", "75px", "🔥順張り: パーフェクトオーダーなど。🌊逆張り: RSI30以下など。"), 
+        ("現在値", "60px", None), 
+        ("推奨買値\n(乖離)", "65px", "戦略に基づく推奨エントリー水準。乖離は現在値との差額。"), 
+        ("最大DD率\nSL乖離率", "70px", "最大DD率: 過去の同条件トレードでの最大下落率（最大痛手）。SL乖離率: 順張り(25MA)、逆張り(75MA)までの余裕。"), # 修正
+        ("利確目標\n(乖離率)", "120px", "時価総額別リターンと心理的な節目を考慮した目標値。"), 
+        ("RSI", "50px", "相対力指数。🔵30以下(売られすぎ) / 🟢55-65(上昇トレンド) / 🔴70以上(過熱)"), 
+        ("出来高比\n（5日平均）", "80px", "上段は当日の出来高と5日平均出来高（補正済み）の比率。下段は5日平均出来高（流動性）。1万株未満は赤字で警告。"), # 修正
+        ("押し目\n勝敗数", "60px", "過去75日のバックテストにおける、推奨エントリー（押し目）での勝敗数。"), 
+        ("PER\nPBR", "60px", "株価収益率/株価純資産倍率。市場の評価指標。"), # 修正
+        ("直近\n勝率", "40px", "直近5日間の前日比プラスだった日数の割合。"), # 修正
+        ("アイの所感", "min-width:350px;", "アイ（プロトレーダー）による分析コメント。リスクや流動性に関する警告を最優先して発言します。"), 
+    ]
+
+    # ヘッダーHTMLの生成
+    th_rows = ""
+    for text, width, tooltip in headers:
+        tooltip_class = " has-tooltip" if tooltip else ""
+        tooltip_attr = f'data-tooltip="{tooltip}"' if tooltip else ''
+        
+        # 企業名とアイの所感は左寄せ
+        if "企業名" in text or "アイの所感" in text:
+             th_rows += f'<th class="th-left{tooltip_class}" style="width:{width}" {tooltip_attr}>{text.replace("\\n", "<br>")}</th>'
+        else:
+             # その他は中央寄せで、改行を適用
+             th_rows += f'<th class="thdt{tooltip_class}" style="width:{width}" {tooltip_attr}>{text.replace("\\n", "<br>")}</th>'
+
+
+    # テーブル全体のHTMLを返す
+    return f'''
+    <h4>{title}</h4>
+    <div class="table-container"><table class="ai-table">
+    <thead><tr>
+    {th_rows}
+    </tr></thead>
+    <tbody>{rows}</tbody>
+    </table></div>'''
 
     st.markdown("### 📊 アイ推奨ポートフォリオ")
     # 【★ 市場騰落レシオの表示】
@@ -965,4 +1006,5 @@ if st.session_state.analyzed_data:
         if 'backtest_raw' in df_raw.columns:
             df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'}) 
         st.dataframe(df_raw)
+
 
