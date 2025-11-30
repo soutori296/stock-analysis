@@ -1127,7 +1127,7 @@ if st.session_state.analyzed_data:
     st.markdown(create_table(watch_data, "👀 様子見銘柄"), unsafe_allow_html=True)
     
     st.markdown("---")
-    st.markdown(f"<b>【アイの独り言】</b>") # **を<b>に変更
+    st.markdown(f"【アイの独り言】") # **を<b>に変更
     st.markdown(st.session_state.ai_monologue) 
     
     with st.expander("詳細データリスト (生データ確認用)"):
@@ -1140,3 +1140,4 @@ if st.session_state.analyzed_data:
         if 'rrr_half' in df_raw.columns:
             df_raw = df_raw.drop(columns=['rrr_half']) 
         st.dataframe(df_raw)
+
