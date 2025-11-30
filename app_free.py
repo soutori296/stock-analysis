@@ -269,7 +269,7 @@ with st.expander("📘 取扱説明書 (データ仕様・判定基準)"):
         <tr><td><b>RSI適正</b></td><td>RSI 55〜65</td><td>+10点</td><td>トレンドが最も継続しやすい水準を評価</td></tr>
         <tr><td><b>出来高活発</b></td><td>出来高が5日平均の1.5倍超。出来高時間配分ロジックを使いリサーチ時点の出来高を評価します。</td><td>+10点</td><td>市場の注目度とエネルギーを評価。<b>大口参入の可能性</b>を示唆します。</td></tr> 
         <tr><td><b>直近勝率</b></td><td>直近5日で4日以上上昇</td><td>+5点</td><td>短期的な上値追いの勢いを評価</td></tr>
-        <tr><td><b>リスク評価</b></td><td>最大ドローダウン高/低 or SL乖離率小</td><td><b>+5点 / -3点 / -5点 / -7点 / -10点 / -15点</b>（市場過熱時は最大<b>-15点</b>に強化）</td><td>最大ドローダウン(<b>1%以下でボーナス(+5点)</b>。<b>1%超、2%超、4%超、7%超、10%超</b>で段階的に減点)や、損切り余地(MA75/25乖離率±3%以内)が少ない銘柄を減点します。市場が過熱している場合（25日騰落レシオ125%以上）は減点を強化します。</td></tr> 
+        <tr><td><b>リスク評価</b></td><td>最大ドローダウン高/低 or SL乖離率小 or RRR低</td><td><b>+5点 / -3点 / -5点 / -7点 / -10点 / -15点</b>（市場過熱時は最大<b>-15点</b>に強化）</td><td>最大DD率(<b>1%以下でボーナス(+5点)</b>。<b>1%超、2%超、4%超、7%超、10%超</b>で段階的に減点)や、損切り余地(MA75/25乖離率±3%以内)が少ない銘柄を減点します。推奨買値からの<b>半益目標でRRRが1.5未満の場合も-5点減点</b>されます。市場が過熱している場合（25日騰落レシオ125%以上）は減点を強化します。</td></tr> 
         <tr><td><b>合計</b></td><td>(各項目の合計)</td><td><b>最大100点</b></td><td>算出されたスコアが100点を超えた場合でも、<b>上限は100点</b>となります。</td></tr>
     </table>
 
@@ -295,7 +295,6 @@ with st.expander("📘 取扱説明書 (データ仕様・判定基準)"):
         <tr><td><b>SL乖離率</b></td><td>現在値と<b>推奨損切りライン（順張り: 25MA、逆張り: 75MA）</b>との乖離率。損切り目安までの<b>下落余地の目安</b>です。</td></tr> 
         <tr><td><b>流動性(5MA)</b></td><td>過去5日間の平均出来高。<b>1万株未満</b>は流動性リスクが高いと判断し、AIコメントで強く警告されます。</td></tr> 
         <tr><td><b>25日レシオ</b></td><td>日経平均の25日騰落レシオ。<b>125.0%以上で市場全体が過熱（警戒モード）</b>と判断し、個別株のリスク減点を強化します。</td></tr> 
-        <tr><td><b>RRR(半/全)</b></td><td><b>-2.0%のSL</b>を仮定した場合の、半益/全益目標に対するリスクリワード比率。<b>1.0以上</b>が好ましい。</td></tr> 
     </table>
     </div>
     """, unsafe_allow_html=True)
@@ -503,7 +502,7 @@ def run_backtest(df, market_cap):
                 continue
             
             if sma5 > sma25 and low <= sma5: 
-                entry_price = float(sma5) 
+                entry_price = float(sma5)
                 target_price = entry_price * (1 + target_pct)
                 is_win = False
                 hold_days = 0
@@ -711,7 +710,7 @@ def get_stock_data(ticker):
         if curr_price > 0 and sl_ma > 0:
             sl_pct = ((curr_price / sl_ma) - 1) * 100 # SL乖離率を算出
             
-        # スコア計算 (変更なし)
+        # スコア計算 (ベース50点)
         score = 50
         if "順張り" in strategy: score += 20
         if "逆張り" in strategy: score += 15
@@ -720,25 +719,24 @@ def get_stock_data(ticker):
         if up_days >= 4: score += 5
         
         # --- 【★ リスクリワード比率 (RRR) の計算（-2%SLを仮定）】 ---
-        # エントリー価格 (推奨買値) をリスクの起点とする
         entry = buy_target
-        risk_2pct = entry * 0.02 # 2%のリスク（円）
+        risk_2pct = entry * 0.02 
         
         rrr_half = 0.0
         if risk_2pct > 0 and p_half > entry:
              reward_half = p_half - entry
              rrr_half = reward_half / risk_2pct
         
-        rrr_full = 0.0
-        if risk_2pct > 0 and p_full > entry:
-             reward_full = p_full - entry
-             rrr_full = reward_full / risk_2pct
-
-        # --- 【★ 最終調整: 段階的MDDボーナス/減点ロジックの適用】 ---
+        # --- 【★ 最終調整: 段階的MDDボーナス/減点ロジックの適用と RRR 評価】 ---
         mdd_risk_deduct = 0
         sl_risk_deduct = 0
         abs_mdd = abs(max_dd_pct) if max_dd_pct is not None else 0.0
 
+        # RRR減点（半益目標で1.5未満なら減点）
+        if rrr_half < 1.5:
+            sl_risk_deduct = -5 # SL減点に合算
+
+        # MDDボーナス/減点
         if abs_mdd <= 1.0:
             mdd_risk_deduct = +5 # ★ 1%以下ならボーナス
         elif abs_mdd > 10.0:
@@ -752,9 +750,9 @@ def get_stock_data(ticker):
         elif abs_mdd > 1.0: # 1%超
             mdd_risk_deduct = -3
             
-        # 2. 現在値がSLラインに近すぎる場合 (SL余地が小さい、乖離率が±3%未満)
+        # 2. SL乖離率が近すぎる場合の減点（RRR減点と合算）
         if sl_ma > 0 and abs(sl_pct) < 3.0: 
-             if "順張り" in strategy: sl_risk_deduct = -5 
+             if "順張り" in strategy: sl_risk_deduct = min(sl_risk_deduct, -5) # 最小値で合算
              
         # 3. 市場警戒モード判定と減点強化
         is_market_alert = market_25d_ratio >= 125.0
@@ -766,7 +764,7 @@ def get_stock_data(ticker):
             elif abs_mdd > 4.0 and mdd_risk_deduct < -10: mdd_risk_deduct = -10 # 4%超を-10点に強化
             elif abs_mdd > 2.0 and mdd_risk_deduct < -7: mdd_risk_deduct = -7 # 2%超を-7点に強化
             elif abs_mdd > 1.0 and mdd_risk_deduct < -5: mdd_risk_deduct = -5 # 1%超を-5点に強化
-            # SL減点の強化
+            # SL/RRR減点の強化
             if sl_risk_deduct < 0: sl_risk_deduct = -10
             
         score += mdd_risk_deduct
@@ -794,9 +792,8 @@ def get_stock_data(ticker):
             "sl_ma": sl_ma, # 損切りラインMAの値を保持 (AIコメント用)
             "avg_volume_5d": avg_vol_5d, 
             "is_low_liquidity": low_liquidity_flag, 
-            # 新規追加
+            # RRRはデータとして保持するが、テーブルには表示しない
             "rrr_half": rrr_half,
-            "rrr_full": rrr_full,
         }
     except Exception as e:
         st.session_state.error_messages.append(f"データ処理エラー (コード:{ticker}): 予期せぬエラーが発生しました。詳細: {e}")
@@ -819,20 +816,22 @@ def batch_analyze_with_ai(data_list):
         if p_half == 0 and d['strategy'] == "🔥順張り":
             target_info = "利確目標:目標超過または無効"
         
-        buy_target = d.get('buy', 0)
-        ma_div = (price/buy_target-1)*100 if buy_target > 0 and price > 0 else 0
-
-        # 【★ 追加情報: リスクリワード (RRR) と MDD】
         mdd = d.get('max_dd_pct', 0.0)
         sl_pct = d.get('sl_pct', 0.0)
         sl_ma = d.get('sl_ma', 0) 
-        rrr_h = d.get('rrr_half', 0.0)
         low_liquidity_status = "低流動性:警告" if d.get('is_low_liquidity', False) else "流動性:問題なし"
         
         sl_ma_disp = f"SL目安MA:{sl_ma:,.0f}" if sl_ma > 0 else "SL目安:なし"
+        
+        # ★ RRRの評価を追加
+        rrr_eval = ""
+        if d.get('rrr_half', 0.0) < 1.5 and d.get('rrr_half', 0.0) > 0.0:
+            rrr_eval = f"RRR警告(半:{d.get('rrr_half', 0.0):.1f})"
+        elif d.get('rrr_half', 0.0) == 0.0 and d['strategy'] != "様子見":
+            rrr_eval = "RRR評価不能"
 
-        # ★ プロンプトにリスク情報とRRRを追加
-        prompt_text += f"ID:{d['code']} | {d['name']} | 現在:{price:,.0f} | 戦略:{d['strategy']} | RSI:{d['rsi']:.1f} | {target_info} | 出来高倍率:{d['vol_ratio']:.1f}倍 | リスク情報: MDD:{mdd:+.1f}%, SL乖離率:{sl_pct:+.1f}% | RRR(半/2%SL):{rrr_h:.1f} | {sl_ma_disp} | {low_liquidity_status} | AIスコア:{d['score']}\n"
+        # ★ プロンプトにリスク情報とRRR評価を追加 (簡略化)
+        prompt_text += f"ID:{d['code']} | {d['name']} | 現在:{price:,.0f} | 戦略:{d['strategy']} | RSI:{d['rsi']:.1f} | {target_info} | 出来高倍率:{d['vol_ratio']:.1f}倍 | リスク情報: MDD:{mdd:+.1f}%, SL乖離率:{sl_pct:+.1f}% | RRR評価:{rrr_eval} | {sl_ma_disp} | {low_liquidity_status} | AIスコア:{d['score']}\n"
     
     # 【★ 市場環境の再設定】
     r25 = market_25d_ratio
@@ -864,7 +863,7 @@ def batch_analyze_with_ai(data_list):
     6.  <b>利確目標:目標超過または無効</b>と記載されている銘柄については、「既に利確水準を大きく超過しており、新規の買いは慎重にすべき」といった<b>明確な警告</b>を含めてください。
     7.  出来高倍率が1.5倍を超えている場合は、<b>「大口の買い」</b>といった表現を使い、その事実を盛り込んでください。
     8.  <b>【最重要: リスクリワード (RRR) とリスク管理】</b>
-        - <b>RRR(半/2%SL)</b>を参照し、<b>RRRが1.5未満の場合</b>は、「リターンに対しリスクが大きい」といった<b>明確な注意喚起</b>を盛り込んでください。
+        - <b>RRR評価:RRR警告(半:X.X)</b> が記載されている銘柄については、「リスクリワードが低い」といった<b>明確な注意喚起</b>を盛り込んでください。
         - MDDが-8.0%を超える（下落幅が大きい）場合は、「過去の損失リスクが高い」旨を明確に伝えてください。
         - <b>流動性:</b> <b>低流動性:警告</b>の銘柄については、コメントの冒頭で「平均出来高が1万株未満と極めて低く、希望価格での売買が困難な<b>流動性リスク</b>を伴います。ロット調整を強く推奨します。」といった<b>明確な警告</b>を必ず含めてください。
         - <b>損切り目安:</b> 「長期サポートラインである<b>SL目安MA（{sl_ma_disp}）を終値で明確に割り込んだ場合</b>は、速やかに損切りを検討すべき」といった<b>撤退基準</b>を明示してください。
@@ -1065,25 +1064,15 @@ if st.session_state.analyzed_data:
                 
             # ★ NameError を解消するためにここで定義します
             comment_html = d.get("comment", "")
-            
-            # ★ RRR表示
-            rrr_disp = "-"
-            if d.get('rrr_half') is not None and d.get('rrr_full') is not None:
-                rrr_h = d.get('rrr_half', 0.0)
-                rrr_f = d.get('rrr_full', 0.0)
-                # 色付け: 1.5以上なら緑、1.0未満なら赤
-                h_color = "#28a745" if rrr_h >= 1.5 else ("#d32f2f" if rrr_h < 1.0 else "#4A4A4A")
-                f_color = "#28a745" if rrr_f >= 1.5 else ("#d32f2f" if rrr_f < 1.0 else "#4A4A4A")
-                
-                rrr_disp = f'<span style="color:{h_color};">{rrr_h:.1f}</span><br><span style="color:{f_color};">{rrr_f:.1f}</span>'
-
 
             # 【★ テーブル行の追加（新しい並び順と2段組み対応）】
             # AIコメントを <div class="comment-scroll-box"> でラップ
-            rows += f'<tr><td class="td-center">{i+1}</td><td class="td-center">{d.get("code")}</td><td class="th-left td-bold">{d.get("name")}</td><td class="td-right">{d.get("cap_disp")}</td><td class="td-center">{score_disp}</td><td class="td-center">{d.get("strategy")}</td><td class="td-right td-bold">{price_disp}</td><td class="td-right">{buy:,.0f}<br><span style="font-size:10px;color:#666">{diff_txt}</span></td><td class="td-right">{mdd_disp}<br>{sl_pct_disp}</td><td class="td-left" style="line-height:1.2;font-size:11px;">{target_txt}</td><td class="td-center">{rrr_disp}</td><td class="td-center">{d.get("rsi_disp")}</td><td class="td-right">{vol_disp}<br>({avg_vol_html})</td><td class="td-center td-blue">{bt_cell_content}</td><td class="td-center">{d.get("per")}<br>{d.get("pbr")}</td><td class="td-center">{d.get("momentum")}</td><td class="th-left"><div class="comment-scroll-box">{comment_html}</div></td></tr>'
+            # RRR列を削除
+            rows += f'<tr><td class="td-center">{i+1}</td><td class="td-center">{d.get("code")}</td><td class="th-left td-bold">{d.get("name")}</td><td class="td-right">{d.get("cap_disp")}</td><td class="td-center">{score_disp}</td><td class="td-center">{d.get("strategy")}</td><td class="td-right td-bold">{price_disp}</td><td class="td-right">{buy:,.0f}<br><span style="font-size:10px;color:#666">{diff_txt}</span></td><td class="td-right">{mdd_disp}<br>{sl_pct_disp}</td><td class="td-left" style="line-height:1.2;font-size:11px;">{target_txt}</td><td class="td-center">{d.get("rsi_disp")}</td><td class="td-right">{vol_disp}<br>({avg_vol_html})</td><td class="td-center td-blue">{bt_cell_content}</td><td class="td-center">{d.get("per")}<br>{d.get("pbr")}</td><td class="td-center">{d.get("momentum")}</td><td class="th-left"><div class="comment-scroll-box">{comment_html}</div></td></tr>'
 
 
         # ヘッダーとツールチップデータの定義 (2段組みに対応するため\nを使用)
+        # RRRヘッダーを削除
         headers = [
             ("No", "25px", None), 
             ("コード", "45px", None), 
@@ -1095,7 +1084,6 @@ if st.session_state.analyzed_data:
             ("推奨買値\n(乖離)", "65px", "戦略に基づく推奨エントリー水準。乖離は現在値との差額。"), 
             ("最大DD率\nSL乖離率", "70px", "最大DD率: 過去の同条件トレードでの最大下落率（最大痛手）。SL乖離率: 順張り(25MA)、逆張り(75MA)までの余裕。"), # 修正
             ("利確目標\n(乖離率)", "120px", "時価総額別リターンと心理的な節目を考慮した目標値。"), 
-            ("RRR\n(半/全)", "60px", "半益/全益目標に対するリスクリワード比率（-2%SLを仮定）。1.5以上が優位性あり。"), # 新規追加
             ("RSI", "50px", "相対力指数。🔵30以下(売られすぎ) / 🟢55-65(上昇トレンド) / 🔴70以上(過熱)"), 
             ("出来高比\n（5日平均）", "80px", "上段は当日の出来高と5日平均出来高（補正済み）の比率。下段は5日平均出来高（流動性）。1万株未満は赤字で警告。"), # 修正
             ("押し目\n勝敗数", "60px", "過去75日のバックテストにおける、推奨エントリー（押し目）での勝敗数。"), 
@@ -1111,8 +1099,8 @@ if st.session_state.analyzed_data:
             tooltip_attr = f'data-tooltip="{tooltip}"' if tooltip else ''
             
             # 企業名とアイの所感は左寄せ
-            if "企業名" in text or "アイの所感" in text or "RRR" in text: # RRRも左寄せ(RRRは中央寄せの方がいいかも)
-                 th_rows += f'<th class="thdt{tooltip_class}" style="width:{width}; text-align:center;" {tooltip_attr}>{text.replace("\\n", "<br>")}</th>' # RRRは中央寄せで調整
+            if "企業名" in text or "アイの所感" in text:
+                 th_rows += f'<th class="th-left{tooltip_class}" style="width:{width}" {tooltip_attr}>{text.replace("\\n", "<br>")}</th>'
             else:
                  # その他は中央寄せで、改行を適用
                  th_rows += f'<th class="thdt{tooltip_class}" style="width:{width}" {tooltip_attr}>{text.replace("\\n", "<br>")}</th>'
@@ -1148,4 +1136,7 @@ if st.session_state.analyzed_data:
             df_raw = df_raw.drop(columns=['backtest']) 
         if 'backtest_raw' in df_raw.columns:
             df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'}) 
+        # RRR列も削除して表示
+        if 'rrr_half' in df_raw.columns:
+            df_raw = df_raw.drop(columns=['rrr_half']) 
         st.dataframe(df_raw)
