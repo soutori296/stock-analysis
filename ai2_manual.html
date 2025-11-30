@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>教えて！AIさん 2 - 最終分析ロジックマニュアル</title>
+    <style>
+        body { font-family: 'Segoe UI', 'Meiryo', sans-serif; line-height: 1.6; color: #333; margin: 0; padding: 20px; background-color: #f7f7f7; }
+        .container { max-width: 1000px; margin: 0 auto; padding: 30px; background-color: #fff; border-radius: 10px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1); }
+        h1 { text-align: center; color: #1976d2; border-bottom: 3px solid #1976d2; padding-bottom: 10px; margin-bottom: 30px; font-weight: 700; }
+        h2 { border-left: 6px solid #d32f2f; padding-left: 10px; color: #333; margin-top: 35px; font-weight: 600; }
+        h3 { border-bottom: 2px solid #ddd; padding-bottom: 5px; margin-top: 25px; color: #4A4A4A; }
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05); font-size: 14px; }
+        th, td { border: 1px solid #ddd; padding: 10px; text-align: left; vertical-align: top; }
+        th { background-color: #e0e0e0; color: #333; font-weight: 600; }
+        .risk-color { color: #d32f2f; font-weight: bold; }
+        .add-color { color: #1976d2; font-weight: bold; }
+        .head-risk { background-color: #f44336; color:white; }
+        .head-add { background-color: #4CAF50; color:white; }
+        .head-indiv { background-color: #FF9800; color:white; }
+        .code { font-family: monospace; background-color: #eee; padding: 2px 4px; border-radius: 3px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>教えて！AIさん 2 - 最終分析ロジックマニュアル</h1>
+    <p>このマニュアルは、AIスコア（点数）の計算、リスク・リワードの定義、および使用するデータ仕様に関する詳細を記述したものです。</p>
+
+    <h2>1. データ取得とハイブリッドデータ仕様</h2>
+    <p>テクニカル分析データは、市場の状況に応じて自動的に更新されます。</p>
+    <table>
+        <tr><th>状態・時刻</th><th>テクニカル分析用データ</th><th>表示用データ (株価・出来高)</th></tr>
+        <tr><td><b>ザラ場中 (~15:50)</b></td><td><b>前日までの確定データ (Stooq)</b></td><td><b>リアルタイムデータ (株探 - 20分遅延)</b></td></tr>
+        <tr><td><b>引け後 (15:50~)</b></td><td><b>当日確定足結合データ (Stooq+株情報サイト4本値)</b></td><td><b>当日確定値 (株探)</b></td></tr>
+    </table>
+    <p style="font-size:12px; margin-top:15px;">※ データ取得エラーや解析不能な銘柄は、分析リストから自動的にスキップされます。</p>
+
+    <h2>2. 時価総額分類と目標リターン</h2>
+    <p>市場のボラティリティ特性に基づき、5分類で目標リターン率を設定します。</p>
+    <table>
+        <tr><th style="width:20%">分類</th><th style="width:20%">基準額 (億円)</th><th style="width:15%">目標リターン率</th><th>順張り目標価格 (ロジック)</th></tr>
+        <tr><td><b>超大型株</b></td><td>10,000 億円 以上</td><td>1.5%</td><td rowspan="5">半益: 推奨買値から <b>目標リターン率の50%</b> の上昇価格<br>全益: 推奨買値から <b>目標リターン率の100%</b> の上昇価格</td></tr>
+        <tr><td><b>大型株</b></td><td>3,000 億円 ～ 10,000 億円未満</td><td>2.0%</td></tr>
+        <tr><td><b>中型株</b></td><td>500 億円 ～ 3,000 億円未満</td><td>3.0%</td></tr>
+        <tr><td><b>小型株</b></td><td>100 億円 ～ 500 億円未満</td><td>4.0%</td></tr>
+        <tr><td><b>超小型株</b></td><td>100 億円 未満</td><td>5.0%</td></tr>
+    </table>
+    
+    <h3>利確・損切りロジック</h3>
+    <ul>
+        <li><b>🔥順張り目標:</b> 推奨買値（5MAなど）を基準に計算。<b>半益目標が現在値以下の場合、目標は無効（目標超過）</b>となり、新規エントリーは推奨されません。</li>
+        <li><b>🌊逆張り目標:</b> 半益: <b>5日移動平均線より1円安い価格</b> / 全益: <b>25日移動平均線より1円安い価格</b>を目安とします。</li>
+        <li><b>推奨SLライン:</b> 順張りは<b>25日移動平均線</b>、逆張りは<b>75日移動平均線</b>を基準とします。</li>
+    </ul>
+
+    <h2>3. AIスコア（点数）配分とリスクウェイト強化</h2>
+    <p>AIスコアは<b>最大100点</b>で、リスク評価に最も重きを置いています。</p>
+    
+    <h3>AIスコア配点詳細</h3>
+    <table>
+        <tr><th style="width:20%">項目</th><th style="width:40%">条件</th><th style="width:20%">配点/減点</th><th style="width:20%">備考</th></tr>
+        
+        <tr><td class="add-color"><b>ベーススコア</b></td><td>-</td><td><b>+50点</b></td><td>全ての分析の起点</td></tr>
+        
+        <tr><th class="head-risk" colspan="4">構造的リスク減点 (最大-80点)</th></tr>
+        <tr><td class="risk-color">R/R比 不利</td><td>R/R比 &lt; 1.0</td><td><b>-25点</b></td><td>リワードがリスクを下回る数学的に不利なトレード。</td></tr>
+        <tr><td class="risk-color">RSI極端 (大型株G)</td><td>🔥順張りでRSI &ge; 85 / 🌊逆張りでRSI &le; 20 <br>(時価総額 &ge; 3000億円)</td><td><b>-15点</b></td><td>大型株のトレンド慣性を許容。</td></tr>
+        <tr><td class="risk-color">RSI極端 (小型株G)</td><td>🔥順張りでRSI &ge; 80 / 🌊逆張りでRSI &le; 20 <br>(時価総額 &lt; 3000億円)</td><td><b>-25点</b></td><td>小型株の過熱/急落リスクを厳しく評価。</td></tr>
+        <tr><td class="risk-color">流動性不足(致命的)</td><td>5日平均出来高が 1,000株未満</td><td><b>-30点</b></td><td>換金リスク。この減点でスコアはほぼ非推奨。</td></tr>
+        
+        <tr><th class="head-add" colspan="4">戦略・トレンド・勢い加点 (最大+45点)</th></tr>
+        <tr><td class="add-color">順張り戦略</td><td>パーフェクトオーダー＆5日線上昇</td><td><b>+15点</b></td><td>勢いの評価。</td></tr>
+        <tr><td class="add-color">逆張り戦略</td><td>RSI &le; 30 または 25MAから -10%乖離</td><td><b>+15点</b></td><td>反発期待値を評価。</td></tr>
+        <tr><td class="add-color">RSI適正</td><td>RSI 55〜65</td><td><b>+10点</b></td><td>トレンドが最も継続しやすい水準。</td></tr>
+        <tr><td class="add-color">出来高活発</td><td>出来高が5日平均の1.5倍超</td><td><b>+10点</b></td><td>市場の注目度。</td></tr> 
+        <tr><td class="add-color"><b>究極の出来高</b></td><td>出来高が5日平均の<b>3.0倍超</b></td><td><b>+5点</b></td><td>満点100点到達のトリガー。</td></tr> 
+        <tr><td class="add-color">直近勝率</td><td>直近5日で4日以上上昇</td><td><b>+5点</b></td><td>短期的な上値追いの勢い。</td></tr>
+
+        <tr><th class="head-indiv" colspan="4">個別リスク評価 (DD率の連続減点)</th></tr>
+        <tr><td class="add-color">DD率 優秀</td><td>最大DD率 &lt; 1.0%</td><td><b>+5点</b></td><td>過去の損失リスクが極めて低い。</td></tr>
+        <tr><td class="risk-color">DD率 連続減点</td><td>2.0% &lt; DD &le; 10.0%</td><td><b>&times-2点</b></td><td>DD率に比例した減点。: DD率=2%超えると1％上昇するごとに2点減点。</td></tr>
+        <tr><td class="risk-color">DD率 高リスク</td><td>最大DD率 &gt; 10.0%</td><td><b>-20点</b></td><td>大幅な損失リスク (強化)。</td></tr>
+        <tr><td class="risk-color">SL乖離率小</td><td>SL乖離率が &plusmn;3.0%未満</td><td><b>-5点</b></td><td>損切り余地が少ない (ウェイト調整)。</td></tr>
+        <tr><td class="risk-color">SL乖離率小(警戒)</td><td><b>市場警戒時</b> (レシオ&ge;125%)</td><td><b>-20点</b></td><td>市場警戒時はリスクを極度に嫌う。</td></tr>
+        <tr><th><b>合計</b></th><td>(全ての加点・減点の合算)</td><td><b>最大100点</b></td><td>算出されたスコアが100点を超えた場合でも、<b>上限は100点</b>となります。</td></tr>
+    </table>
+    
+</div>
+
+</body>
+</html>
