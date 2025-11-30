@@ -219,60 +219,64 @@ st.markdown(f"""
 
 # --- 説明書 (最終合意ロジックに更新 - 表示安全性を最優先) ---
 with st.expander("📘 取扱説明書 (最終分析ロジック)"):
-    # **最終安全対策**: 崩壊の原因となるMarkdownとHTMLの境界線を厳密に管理します。
-    st.markdown("""
-    <div class="center-text">
+    # **究極の安全対策**: カスタムCSSクラスを排除し、インラインスタイルと純粋Markdownのみで構築
+    # ※ desc-tableのスタイルもインライン化し、外部CSSとの依存を断ち切る
+    table_style = "width:90%; margin:0 auto; border-collapse:collapse; background-color:#fff; color:#000; font-family:'Meiryo', sans-serif;"
+    th_style = "background-color:#d0d0d0; border:1px solid #999; padding:8px; text-align:center !important;"
+    td_style = "border:1px solid #ccc; padding:8px; text-align:left !important;"
+    
+    st.markdown(f"""
+    <div style="text-align:center;">
     
     <h4>1. データ取得と時間の仕組み (ハイブリッドデータ仕様)</h4>
-    | 項目 | 取得元 | 状態 | 解説 |
-    | :--- | :--- | :--- | :--- |
-    | **現在値・出来高** | **株情報サイト** | **リアルタイム** | データは20分遅延します。ザラ場中は参考値、**15:50以降**が当日の確定値となります。 |
-    | **テクニカル** | **Stooq他** | **前日確定 &rarr; 引け後(当日確定)** | テクニカルデータは、15:50以降、当日の確定足を含めて計算されます。 |
-    | **市場環境** | **外部サイト** | **リアルタイム** | 日経平均25日騰落レシオを取得し、市場全体の過熱感を評価します。 |
-    
+    <table style="{table_style}">
+        <tr><th style="{th_style}width:20%">項目</th><th style="{th_style}width:20%">取得元</th><th style="{th_style}width:20%">状態</th><th style="{th_style}">解説</th></tr>
+        <tr><td style="{td_style}"><b>現在値・出来高</b></td><td style="{td_style}"><b>株情報サイト</b></td><td style="{td_style}"><b>リアルタイム</b></td><td style="{td_style}">データは20分遅延します。ザラ場中は参考値、<b>15:50以降</b>が当日の確定値となります。</td></tr>
+        <tr><td style="{td_style}"><b>テクニカル</b></td><td style="{td_style}"><b>Stooq他</b></td><td style="{td_style}"><b>前日確定 &rarr; 引け後(当日確定)</b></td><td style="{td_style}">テクニカルデータは、15:50以降、当日の確定足を含めて計算されます。</td></tr>
+        <tr><td style="{td_style}"><b>市場環境</b></td><td style="{td_style}"><b>外部サイト</b></td><td style="{td_style}"><b>リアルタイム</b></td><td style="{td_style}">日経平均25日騰落レシオを取得し、市場全体の過熱感を評価します。</td></tr> 
+    </table>
     <br>
 
-    <h4>2. 時価総額分類と目標リターン ($T_{\text{pct}}$)</h4>
-
-    | 分類 | 基準額 (億円) | 目標 $T_{\text{pct}}$ | 順張り目標価格 |
-    | :--- | :--- | :--- | :--- |
-    | **超大型株** | 10,000 億円 以上 | 1.5% | 半益: 買値 * (1 + $T_{\text{pct}}$ / 2) |
-    | **大型株** | 3,000 億円 ～ 10,000 億円未満 | 2.0% | 全益: 買値 * (1 + $T_{\text{pct}}$) |
-    | **中型株** | 500 億円 ～ 3,000 億円未満 | 3.0% | |
-    | **小型株** | 100 億円 ～ 500 億円未満 | 4.0% | |
-    | **超小型株** | 100 億円 未満 | 5.0% | |
-
-    - **🌊逆張り**の利確目標は、半益: 5MA-1円 / 全益: 25MA-1円を目安とします。
-    - **🔥順張り**は、**半益目標が現在値以下の場合、目標は無効**となります。
-    <br>
+    <h4>2. 時価総額分類と目標リターン ($T_{{\text{{pct}}}}$)</h4>
+    <table style="{table_style}">
+        <tr><th style="{th_style}width:20%">分類</th><th style="{th_style}width:20%">基準額 (億円)</th><th style="{th_style}width:15%">目標 $T_{{\text{{pct}}}}$</th><th style="{th_style}">順張り目標価格</th></tr>
+        <tr><td style="{td_style}"><b>超大型株</b></td><td style="{td_style}">10,000 億円 以上</td><td style="{td_style}">1.5%</td><td rowspan="5" style="{td_style}">半益: 推奨買値 * (1 + $T_{{\text{{pct}}}}$ / 2)<br>全益: 推奨買値 * (1 + $T_{{\text{{pct}}}}$)</td></tr>
+        <tr><td style="{td_style}"><b>大型株</b></td><td style="{td_style}">3,000 億円 ～ 10,000 億円未満</td><td style="{td_style}">2.0%</td></tr>
+        <tr><td style="{td_style}"><b>中型株</b></td><td style="{td_style}">500 億円 ～ 3,000 億円未満</td><td style="{td_style}">3.0%</td></tr>
+        <tr><td style="{td_style}"><b>小型株</b></td><td style="{td_style}">100 億円 ～ 500 億円未満</td><td style="{td_style}">4.0%</td></tr>
+        <tr><td style="{td_style}"><b>超小型株</b></td><td style="{td_style}">100 億円 未満</td><td style="{td_style}">5.0%</td></tr>
+    </table>
+    <p style="font-size:12px; margin-top:5px;">※ <b>🌊逆張り</b>の利確目標は、半益: 5MA-1円 / 全益: 25MA-1円を目安とします。</p>
+    <p style="font-size:12px;">※ **🔥順張り**は、**半益目標が現在値以下の場合、目標は無効**となります。</p>
 
     <h4>3. AIスコア（点数）配分とリスクウェイト強化</h4>
-    
-    | 項目 | 条件 | 配点/減点 | 備考 |
-    | :--- | :--- | :--- | :--- |
-    | **ベーススコア** | - | **+50点** | 全ての分析の起点 |
-    | **🔥順張り戦略** | パーフェクトオーダー＆5日線上昇 | **+15点** | 勢いの評価 |
-    | **🌊逆張り戦略** | RSI &le; 30 または 25MAから -10%乖離 | **+15点** | 反発期待値の評価 |
-    | **RSI適正** | RSI 55〜65 | **+10点** | トレンド継続しやすい水準 |
-    | **出来高活発** | 出来高が5日平均の1.5倍超 | **+10点** | 市場の注目度 | 
-    | **究極の出来高** | 出来高が5日平均の**3.0倍超** | **+5点** | 満点100点到達のトリガー | 
-    | **直近勝率** | 直近5日で4日以上上昇 | **+5点** | 短期的な勢いの評価 |
+    <p style="font-size:14px; margin-bottom:5px;"><b>リスク管理を最優先する厳格な評価システムです。</b></p>
+    <table style="{table_style} font-size:13px;">
+        <tr><th style="{th_style}width:20%">項目</th><th style="{th_style}width:40%">条件</th><th style="{th_style}width:20%">配点/減点</th><th style="{th_style}width:20%">備考</th></tr>
+        
+        <tr><td style="color:#5D4037; font-weight:bold; {td_style}">ベーススコア</td><td style="{td_style}">-</td><td style="{td_style}"><b>+50点</b></td><td style="{td_style}">全ての分析の起点</td></tr>
+        
+        <tr><th style="background-color:#f44336; color:white; {th_style}" colspan="4">構造的リスク減点 (最大-80点)</th></tr>
+        <tr><td style="color:#d32f2f; font-weight:bold; {td_style}">R/R比 不利</td><td style="{td_style}">R/R比 &lt; 1.0</td><td style="{td_style}"><b>-25点</b></td><td style="{td_style}">リワードがリスクを下回る。</td></tr>
+        <tr><td style="color:#d32f2f; font-weight:bold; {td_style}">RSI極端 (大型株G)</td><td style="{td_style}">🔥順張りでRSI &ge; 85 / 🌊逆張りでRSI &le; 20 <br>(時価総額 &ge; 3000億円)</td><td style="{td_style}"><b>-15点</b></td><td style="{td_style}">大型株のトレンド継続性を許容し緩和。</td></tr>
+        <tr><td style="color:#d32f2f; font-weight:bold; {td_style}">RSI極端 (小型株G)</td><td style="{td_style}">🔥順張りでRSI &ge; 80 / 🌊逆張りでRSI &le; 20 <br>(時価総額 &lt; 3000億円)</td><td style="{td_style}"><b>-25点</b></td><td style="{td_style}">小型株の急落リスクを厳しく評価。</td></tr>
+        <tr><td style="color:#d32f2f; font-weight:bold; {td_style}">流動性不足(致命的)</td><td style="{td_style}">5日平均出来高が 1,000株未満</td><td style="{td_style}"><b>-30点</b></td><td style="{td_style}">換金リスクが極めて高い。</td></tr>
+        
+        <tr><th style="background-color:#4CAF50; color:white; {th_style}" colspan="4">戦略・トレンド・勢い加点 (最大+45点)</th></tr>
+        <tr><td style="color:#1976d2; font-weight:bold; {td_style}">順張り戦略</td><td style="{td_style}">パーフェクトオーダー＆5日線上昇</td><td style="{td_style}"><b>+15点</b></td><td style="{td_style}">勢いの評価。</td></tr>
+        <tr><td style="color:#1976d2; font-weight:bold; {td_style}">逆張り戦略</td><td style="{td_style}">RSI &le; 30 または 25MAから -10%乖離</td><td style="{td_style}"><b>+15点</b></td><td style="{td_style}">反発期待値を評価。</td></tr>
+        <tr><td style="color:#1976d2; font-weight:bold; {td_style}">RSI適正</td><td style="{td_style}">RSI 55〜65</td><td style="{td_style}"><b>+10点</b></td><td style="{td_style}">トレンドが最も継続しやすい水準。</td></tr>
+        <tr><td style="color:#1976d2; font-weight:bold; {td_style}">出来高活発</td><td style="{td_style}">出来高が5日平均の1.5倍超</td><td style="{td_style}"><b>+10点</b></td><td style="{td_style}">市場の注目度を評価。</td></tr> 
+        <tr><td style="color:#1976d2; font-weight:bold; {td_style}"><b>究極の出来高</b></td><td style="{td_style}">出来高が5日平均の<b>3.0倍超</b></td><td style="{td_style}"><b>+5点</b> (追加)</td><td style="{td_style}"><b>満点100点到達のトリガー。</b></td></tr> 
+        <tr><td style="color:#1976d2; font-weight:bold; {td_style}">直近勝率</td><td style="{td_style}">直近5日で4日以上上昇</td><td style="{td_style}"><b>+5点</b></td><td style="{td_style}">短期的な上値追いの勢いを評価。</td></tr>
 
-    | **構造的リスク減点** (最大-80点) | 条件 | 減点 | 備考 |
-    | :--- | :--- | :--- | :--- |
-    | **R/R比 不利** | R/R比 &lt; 1.0 | **-25点** | 数学的に不利なトレード |
-    | **RSI極端 (大型株G)** | 🔥順張りでRSI &ge; 85 / 🌊逆張りでRSI &le; 20 <br>(時価総額 &ge; 3000億円) | **-15点** | 大型株の許容範囲を広く設定 |
-    | **RSI極端 (小型株G)** | 🔥順張りでRSI &ge; 80 / 🌊逆張りでRSI &le; 20 <br>(時価総額 &lt; 3000億円) | **-25点** | 小型株の過熱・急落リスクを厳しく評価 |
-    | **流動性不足(致命的)** | 5日平均出来高が 1,000株未満 | **-30点** | 換金リスクが極めて高い |
-    
-    | **個別リスク評価** (最大-40点) | 条件 | 配点/減点 | 備考 |
-    | :--- | :--- | :--- | :--- |
-    | **DD率 優秀** | 最大DD率 &lt; 1.0% | **+5点** | 過去の損失リスクが極めて低い |
-    | **DD率 連続減点** | 2.0% &lt; DD &le; 10.0% | **-2 * floor(DD-2.0)** | DD率に比例した減点 (強化) |
-    | **DD率 高リスク** | 最大DD率 &gt; 10.0% | **-20点** | 大幅な損失リスク |
-    | **SL乖離率小** | SL乖離率が &plusmn;3.0%未満 | **-5点** | 損切り余地が少ない (ウェイト調整) |
-    | **SL乖離率小(警戒)** | **市場警戒時** (レシオ&ge;125%) | **-20点** | 市場警戒時はリスクを極度に嫌う |
-    | **合計** | (各項目の合計) | **最大100点** | 算出されたスコアが100点を超えた場合でも、<b>上限は100点</b>となります。 |
+        <tr><th style="background-color:#FF9800; color:white; {th_style}" colspan="4">個別リスク評価 (市場環境連動)</th></tr>
+        <tr><td style="color:#1976d2; font-weight:bold; {td_style}">DD率 優秀</td><td style="{td_style}">最大DD率 &lt; 1.0%</td><td style="{td_style}"><b>+5点</b></td><td style="{td_style}">過去の損失リスクが極めて低い。</td></tr>
+        <tr><td style="color:#d32f2f; font-weight:bold; {td_style}">DD率 連続減点</td><td style="{td_style}">2.0% &lt; DD &le; 10.0%</td><td style="{td_style}"><b>-2 * floor(DD-2.0)</b></td><td style="{td_style}">DD率に比例した減点 (強化)。</td></tr>
+        <tr><td style="color:#d32f2f; font-weight:bold; {td_style}">DD率 高リスク</td><td style="{td_style}">最大DD率 &gt; 10.0%</td><td style="{td_style}"><b>-20点</b></td><td style="{td_style}">大幅な損失リスク (強化)。</td></tr>
+        <tr><td style="color:#d32f2f; font-weight:bold; {td_style}">SL乖離率小</td><td style="{td_style}">SL乖離率が &plusmn;3.0%未満</td><td style="{td_style}"><b>-5点</b></td><td style="{td_style}">損切り余地が少ない (ウェイト調整)。</td></tr>
+        <tr><td style="color:#d32f2f; font-weight:bold; {td_style}">SL乖離率小(警戒)</td><td style="{td_style}"><b>市場警戒時</b> (レシオ&ge;125%)</td><td style="{td_style}"><b>-20点</b></td><td style="{td_style}">市場警戒時はリスクを極度に嫌う (強化)。</td></tr>
+    </table>
     
     </div>
     """, unsafe_allow_html=True)
@@ -1139,6 +1143,7 @@ if st.session_state.analyzed_data:
         if 'backtest_raw' in df_raw.columns:
             df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'}) 
         st.dataframe(df_raw)
+
 
 
 
