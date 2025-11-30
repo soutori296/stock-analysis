@@ -1084,7 +1084,7 @@ if st.session_state.analyzed_data:
     ratio_color = "#d32f2f" if r25 >= 125.0 else ("#1976d2" if r25 <= 80.0 else "#4A4A4A")
     st.markdown(f'<p class="big-font"><b>市場環境（25日騰落レシオ）：<span style="color:{ratio_color};">{r25:.2f}%</span></b></p>', unsafe_allow_html=True)
     
-    st.markdown(create_table(rec_data, "🔥 推奨銘柄 (順張り / 逆張り)"), unsafe_allow_html=True)
+    st.markdown(create_table(rec_data, "🔥 推奨銘柄"), unsafe_allow_html=True)
     st.markdown(create_table(watch_data, "👀 様子見銘柄"), unsafe_allow_html=True)
     
     st.markdown("---")
@@ -1098,6 +1098,7 @@ if st.session_state.analyzed_data:
         if 'backtest_raw' in df_raw.columns:
             df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'}) 
         st.dataframe(df_raw)
+
 
 
 
