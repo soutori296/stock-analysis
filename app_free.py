@@ -966,7 +966,7 @@ if st.session_state.analyzed_data:
             target_txt = "-"
             if p_half > 0:
                  # ★ 利確目標の2段組みを修正: 半益を1段目、全益（+乖離率%）を2段目
-                target_txt = f"半:{p_half:,}<br>全:{p_full:,} ({full_pct:+.1f}%)" 
+                target_txt = f"半:{p_half:,} ({half_pct:+.1f}%)" <br>全:{p_full:,} ({full_pct:+.1f}%)" 
             else:
                  target_txt = "目標超過/無効"
             
@@ -1061,5 +1061,6 @@ if st.session_state.analyzed_data:
         if 'backtest_raw' in df_raw.columns:
             df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'}) 
         st.dataframe(df_raw)
+
 
 
