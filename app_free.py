@@ -85,6 +85,8 @@ def get_volume_weight(current_dt):
         
     return 1.0
 
+
+# --- CSSスタイル (干渉回避版) + ツールチップCSS ---
 st.markdown(f"""
 <style>
     /* Streamlit標準のフォント設定を邪魔しないように限定的に適用 */
@@ -186,7 +188,7 @@ st.markdown(f"""
     .score-high {{ color: #d32f2f !important; font-weight: bold; }}
     
     /* ========================================================== */
-    /* ★ AIコメントセル内のスクロールコンテナ (前回追加分) */
+    /* ★ AIコメントセル内のスクロールコンテナ (新規追加) */
     /* ========================================================== */
     .comment-scroll-box {{
         max-height: 70px; /* 例: 13pxフォントで約3～4行分の高さに設定 */
@@ -200,6 +202,101 @@ st.markdown(f"""
     /* ========================================================== */
 </style>
 """, unsafe_allow_html=True)
+
+# --- タイトル --- (変更なし)
+st.markdown(f"""
+<div class="custom-title">
+    <img src="{ICON_URL}" alt="AI Icon"> 教えて！AIさん 2
+</div>
+""", unsafe_allow_html=True)
+
+st.markdown(f"""
+<p class="big-font">
+    あなたの提示した銘柄についてアイが分析して売買戦略を伝えます。<br>
+    <span class="status-badge">{status_label}</span>
+</p>
+""", unsafe_allow_html=True)
+
+# --- 説明書 (マニュアル詳細化 - 最終版の利確目標を更新) ---
+with st.expander("📘 取扱説明書 (データ仕様・判定基準)"):
+    st.markdown("""
+    <div class="center-text">
+    
+    <h4>1. データ取得と時間の仕組み</h4>
+    <table class="desc-table">
+      <tr><th style="width:20%">項目</th><th style="width:20%">取得元</th><th style="width:20%">状態</th><th>解説</th></tr>
+      <tr>
+        <td>現在値・出来高</td><td><b>株情報サイト</b></td><td><b>リアルタイム</b></td>
+        <td>データは<b>20分遅延</b>します。ザラ場中は参考値、<b>15:50以降</b>が当日の確定値となります。</td>
+      </tr>
+      <tr>
+        <td>テクニカル</td><td><b>Stooq</b></td><td><b>前日確定</b></td>
+        <td>移動平均線、RSI、勝率などは「前日終値」基準で判定します。ザラ場中は前日までのデータで分析します。</td>
+      </tr>
+      <tr>
+        <td>市場環境</td><td><b>外部サイト</b></td><td><b>リアルタイム</b></td>
+        <td>日経平均25日騰落レシオを取得し、市場全体の過熱感を評価します。</td>
+      </tr> 
+    </table>
+    <br>
+
+    <h4>2. 分析ロジック詳細</h4>
+
+    <h5>① 戦略判定（🔥順張り / 🌊逆張り）</h5>
+    <table class="desc-table">
+        <tr><th style="width:20%">戦略</th><th style="width:80%">判定基準と解説</th></tr>
+        <tr>
+            <td><b>🔥 順張り</b></td>
+            <td><b>【判定条件】</b>移動平均線が「5日 ＞ 25日 ＞ 75日」のパーフェクトオーダーで、かつ5日移動平均線が前日より上昇している場合。<br><b>【解説】</b>明確な上昇トレンドの初期または継続と判断し、一時的な下落（押し目）でのエントリーを推奨します。</td>
+        </tr>
+        <tr>
+            <td><b>🌊 逆張り</b></td>
+            <td><b>【判定条件】</b>「RSIが30以下」<b>または</b>「現在値が25日移動平均線から-10%以上乖離している」場合。<br><b>【解説】</b>売られすぎ水準、または短期的な急落局面と判断し、テクニカルな反発（リバウンド）を狙います。</td>
+        </tr>
+        <tr>
+            <td><b>👀 様子見</b></td>
+            <td>上記以外の条件。明確なトレンドがなく、レンジ相場や方向感が定まらないと判断します。</td>
+        </tr>
+    </table>
+    
+    <h5>② AIスコア（点数）配分</h5>
+    <table class="desc-table">
+        <tr><th style="width:20%">項目</th><th>条件</th><th>配点</th><th>備考</th></tr>
+        <tr><td><b>ベーススコア</b></td><td>-</td><td>50点</td><td>-</td></tr>
+        <tr><td><b>順張り</b></td><td>パーフェクトオーダー＆5日線上昇</td><td>+20点</td><td>強いトレンドの形成を評価</td></tr>
+        <tr><td><b>逆張り</b></td><td>RSI30以下または25MA-10%乖離</td><td>+15点</td><td>反発期待値を評価</td></tr>
+        <tr><td><b>RSI適正</b></td><td>RSI 55〜65</td><td>+10点</td><td>トレンドが最も継続しやすい水準を評価</td></tr>
+        <tr><td><b>出来高活発</b></td><td>出来高が5日平均の1.5倍超。出来高時間配分ロジックを使いリサーチ時点の出来高を評価します。</td><td>+10点</td><td>市場の注目度とエネルギーを評価。<b>大口参入の可能性</b>を示唆します。</td></tr> 
+        <tr><td><b>直近勝率</b></td><td>直近5日で4日以上上昇</td><td>+5点</td><td>短期的な上値追いの勢いを評価</td></tr>
+        <tr><td><b>リスク減点</b></td><td>最大ドローダウン高 or SL乖離率小</td><td>-5点 / -5点（市場過熱時は-10点 / -10点に強化）</td><td>最大ドローダウン(-10%超)や、損切り余地(MA75/25乖離率±3%以内)が少ない銘柄を減点します。市場が過熱している場合（25日騰落レシオ125%以上）は減点を強化します。</td></tr> 
+        <tr><td><b>合計</b></td><td>(各項目の合計)</td><td><b>最大100点</b></td><td>算出されたスコアが100点を超えた場合でも、<b>上限は100点</b>となります。</td></tr>
+    </table>
+
+    <h5>③ 押し目勝敗数（バックテスト）と推奨利確目標</h5>
+    <table class="desc-table">
+        <tr><th style="width:20%">項目</th><th style="width:80%">ロジック詳細</th></tr>
+        <tr><td><b>対象期間</b></td><td>直近75営業日</td></tr>
+        <tr><td><b>エントリー条件</b></td><td>「5日MA > 25日MA」の状態で、かつ終値が5日移動平均線以下に<b>タッチまたは下回った日</b>（押し目と判断）。</td></tr>
+        <tr><td><b>利確目標</b><br><span style="font-size:12px;">(時価総額別の目標リターン)</span></td><td><b>1兆円以上</b>：エントリー価格から<b>2%の上昇</b> / <b>500億円未満</b>：エントリー価格から<b>5%の上昇</b></td></tr>
+        <tr><td><b>利確目標(半/全)</b><br><span style="font-size:12px;">(売買戦略の推奨値)</span></td><td><b>🔥 順張り</b>：全益は「時価総額別目標の100%」、半益は「全益価格の50%」を計算後、<b>1円単位で切り捨て</b>。 / <b>🌊 逆張り</b>：半益は「5日移動平均線」から<b>-1円</b>、全益は「25日移動平均線」から<b>-1円</b>を目安。</td></tr>
+        <tr><td><b>保有期間</b></td><td>最大10営業日。10日以内に利確目標に到達しなければ「敗北」としてカウント。</td></tr>
+        <tr><td><b>解説</b></td><td>このロジックで過去にトレードした場合の勝敗数。心理的な節目・抵抗線手前での確実な利確を推奨するロジックを適用しています。</td></tr>
+    </table>
+
+    <h5>④ 各種指標の基準</h5>
+    <table class="desc-table">
+        <tr><th style="width:20%">指標</th><th>解説</th></tr>
+        <tr><td><b>出来高比（5日平均）</b></td><td><b>当日のリアルタイム出来高</b>を<b>過去5日間の出来高平均</b>と<b>市場の経過時間比率</b>で調整した倍率。<br>市場が開いている時間帯に応じて、出来高の偏りを考慮し、公平に大口流入を評価します。</td></tr>
+        <tr><td><b>直近勝率</b></td><td>直近5営業日のうち、前日比プラスだった割合。 (例: 80% = 5日中4日上昇)</td></tr>
+        <tr><td><b>RSI</b></td><td>🔵30以下(売られすぎ) / 🟢55-65(上昇トレンド) / 🔴70以上(過熱)</td></tr>
+        <tr><td><b>PER/PBR</b></td><td>市場の評価。低ければ割安とされるが、業績や成長性との兼ね合いが重要。</td></tr>
+        <tr><td><b>最大DD率</b></td><td>過去75日の押し目トレードで、エントリーから期間中最安値までの<b>最大下落率</b>。値が大きいほど過去の損失リスクが高かったことを示します。</td></tr> 
+        <tr><td><b>SL乖離率</b></td><td>現在値と<b>推奨損切りライン（順張り: 25MA、逆張り: 75MA）</b>との乖離率。損切り目安までの<b>下落余地の目安</b>です。</td></tr> 
+        <tr><td><b>流動性(5MA)</b></td><td>過去5日間の平均出来高。<b>1万株未満</b>は流動性リスクが高いと判断し、AIコメントで強く警告されます。</td></tr> 
+        <tr><td><b>25日レシオ</b></td><td>日経平均の25日騰落レシオ。<b>125.0%以上で市場全体が過熱（警戒モード）</b>と判断し、個別株のリスク減点を強化します。</td></tr> 
+    </table>
+    </div>
+    """, unsafe_allow_html=True)
 
 # --- サイドバー --- (変更なし)
 if "GEMINI_API_KEY" in st.secrets:
@@ -882,11 +979,8 @@ if st.session_state.analyzed_data:
             vol_man = round(volume / 10000)
             return f'{vol_man:,.0f}万株'
 
-# ------------------------------------------------------------------
-# ↓↓↓ create_table 関数の始まり
-def create_table(d_list, title):
-    # ★ 以下の全行にインデント（スペース4つ）を追加
 
+def create_table(d_list, title):
     if not d_list: return f"<h4>{title}: 該当なし</h4>"
     
     rows = ""
@@ -933,10 +1027,10 @@ def create_table(d_list, title):
         score_disp = f'{d.get("score")}'
         if d.get("score", 0) >= 80:
             score_disp = f'<span class="score-high">{score_disp}</span>'
-
+            
         # ★ NameError を解消するためにここで定義します
         comment_html = d.get("comment", "")
-        
+
         # 【★ テーブル行の追加（新しい並び順と2段組み対応）】
         # AIコメントを <div class="comment-scroll-box"> でラップ
         rows += f'<tr><td class="td-center">{i+1}</td><td class="td-center">{d.get("code")}</td><td class="th-left td-bold">{d.get("name")}</td><td class="td-right">{d.get("cap_disp")}</td><td class="td-center">{score_disp}</td><td class="td-center">{d.get("strategy")}</td><td class="td-right td-bold">{price_disp}</td><td class="td-right">{buy:,.0f}<br><span style="font-size:10px;color:#666">{diff_txt}</span></td><td class="td-right">{mdd_disp}<br>{sl_pct_disp}</td><td class="td-left" style="line-height:1.2;font-size:11px;">{target_txt}</td><td class="td-center">{d.get("rsi_disp")}</td><td class="td-right">{vol_disp}<br>({avg_vol_html})</td><td class="td-center td-blue">{bt_cell_content}</td><td class="td-center">{d.get("per")}<br>{d.get("pbr")}</td><td class="td-center">{d.get("momentum")}</td><td class="th-left"><div class="comment-scroll-box">{comment_html}</div></td></tr>'
@@ -986,6 +1080,7 @@ def create_table(d_list, title):
     <tbody>{rows}</tbody>
     </table></div>'''
 
+
     st.markdown("### 📊 アイ推奨ポートフォリオ")
     # 【★ 市場騰落レシオの表示】
     r25 = market_25d_ratio
@@ -1006,8 +1101,3 @@ def create_table(d_list, title):
         if 'backtest_raw' in df_raw.columns:
             df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'}) 
         st.dataframe(df_raw)
-
-
-
-
-
