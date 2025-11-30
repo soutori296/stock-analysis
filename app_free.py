@@ -105,7 +105,7 @@ st.markdown(f"""
     .ai-table {{ 
         width: 100%; 
         border-collapse: collapse; 
-        min-width: 1200px; /* ★ R/R比追加に合わせて最低幅を拡張 */
+        min-width: 1200px; 
         background-color: #ffffff; 
         color: #000000;
         font-family: "Meiryo", sans-serif;
@@ -242,28 +242,30 @@ with st.expander("📘 取扱説明書 (最終分析ロジック)"):
     <p style="font-size:12px; margin-top:5px;">※ <b>🌊逆張り</b>の利確目標は、半益: 5MA-1円 / 全益: 25MA-1円</p>
 
     <h4>3. AIスコア（点数）配分とリスクウェイト強化</h4>
+    <p style="font-size:14px; margin-bottom:5px;"><b>リスク管理を最優先する厳格な評価システムです。</b></p>
     <table class="desc-table">
         <tr><th>項目</th><th>条件</th><th>配点/減点</th><th>備考</th></tr>
         <tr><td><b>ベーススコア</b></td><td>-</td><td>+50点</td><td>全ての分析の起点</td></tr>
         
-        <tr><td style="color:#d32f2f; font-weight:bold;"><b>構造的リスク減点</b></td><td colspan="3"><b>投資適格性を判断する最重要フィルター。以下の合計最大-80点。</b></td></tr>
-        <tr><td>R/R比 不利</td><td>$\text{R/R比} = \frac{\text{半益目標} - \text{推奨買値}}{\text{推奨買値} - \text{SL MA}} < 1.0$</td><td><b>-20点</b></td><td>リワードがリスクを下回る。</td></tr>
-        <tr><td>RSI極端</td><td>🔥順張りでRSI $\ge 80$ / 🌊逆張りでRSI $\le 20$</td><td><b>-20点</b></td><td>極端な過熱・極底は調整リスク大。</td></tr>
+        <tr><td style="color:#d32f2f; font-weight:bold;"><b>構造的リスク減点</b></td><td colspan="3"><b>投資適格性フィルター。以下の合計最大-80点。</b></td></tr>
+        <tr><td>R/R比 不利</td><td>$\text{R/R比} < 1.0$</td><td><b>-20点</b></td><td>リワードがリスクを下回る。</td></tr>
+        <tr><td>RSI極端 (大型株G)</td><td>🔥順張りでRSI $\ge 85$ / 🌊逆張りでRSI $\le 20$ <br>(時価総額 $\ge 3000$億円)</td><td><b>-15点</b></td><td>トレンド継続性を考慮し、罰則を緩和。</td></tr>
+        <tr><td>RSI極端 (小型株G)</td><td>🔥順張りでRSI $\ge 80$ / 🌊逆張りでRSI $\le 20$ <br>(時価総額 $\lt 3000$億円)</td><td><b>-25点</b></td><td>急落リスクが高いため罰則を強化。</td></tr>
         <tr><td>流動性不足(致命的)</td><td>5日平均出来高が 1,000株未満</td><td><b>-30点</b></td><td>換金リスクが極めて高い。</td></tr>
         
         <tr><td style="color:#1976d2; font-weight:bold;"><b>戦略/トレンド加点</b></td><td colspan="3"><b>以下、合計最大+45点 (満点100点達成可能)</b></td></tr>
-        <tr><td>順張り戦略</td><td>パーフェクトオーダー＆5日線上昇</td><td><b>+15点</b> (旧+20から減額)</td><td>勢いの評価。</td></tr>
+        <tr><td>順張り戦略</td><td>パーフェクトオーダー＆5日線上昇</td><td><b>+15点</b></td><td>勢いの評価 (旧+20から減額し、リスク優位性を確保)。</td></tr>
         <tr><td>逆張り戦略</td><td>RSI $\le 30$ または 25MAから -10%乖離</td><td>+15点</td><td>反発期待値を評価。</td></tr>
         <tr><td>RSI適正</td><td>RSI 55〜65</td><td>+10点</td><td>トレンドが最も継続しやすい水準。</td></tr>
         <tr><td>出来高活発</td><td>出来高が5日平均の1.5倍超</td><td>+10点</td><td>市場の注目度を評価。</td></tr> 
         <tr><td><b>究極の出来高</b></td><td>出来高が5日平均の<b>3.0倍超</b></td><td><b>+5点</b> (追加)</td><td><b>満点100点到達のトリガー。</b></td></tr> 
         <tr><td>直近勝率</td><td>直近5日で4日以上上昇</td><td>+5点</td><td>短期的な上値追いの勢いを評価。</td></tr>
 
-        <tr><td style="color:#FF9800; font-weight:bold;"><b>個別リスク評価</b></td><td colspan="3"><b>以下、DD率の連続減点を導入。最大-40点。</b></td></tr>
+        <tr><td style="color:#FF9800; font-weight:bold;"><b>個別リスク評価</b></td><td colspan="3"><b>DD率の連続減点とSL乖離の強化。最大-40点。</b></td></tr>
         <tr><td>DD率 優秀</td><td>最大DD率 $\lt 1.0\%$</td><td><b>+5点</b></td><td>過去の損失リスクが極めて低い。</td></tr>
         <tr><td>DD率 連続減点</td><td>$2.0\% < \text{DD} \le 10.0\%$</td><td>$\mathbf{-2 \times \text{floor}(\text{DD}-2.0)}$</td><td>DD率に比例した減点 (強化)。</td></tr>
         <tr><td>DD率 高リスク</td><td>最大DD率 $\gt 10.0\%$</td><td><b>-20点</b></td><td>大幅な損失リスク (強化)。</td></tr>
-        <tr><td>SL乖離率小</td><td>SL乖離率が $\pm 3.0\%$未満</td><td><b>-10点</b></td><td>損切り余地が少ない (強化)。</td></tr>
+        <tr><td>SL乖離率小</td><td>SL乖離率が $\pm 3.0\%$未満</td><td><b>-5点</b></td><td>損切り余地が少ない (ウェイト調整)。</td></tr>
         <tr><td>SL乖離率小(警戒)</td><td><b>市場警戒時</b> (レシオ$\ge 125\%$)</td><td><b>-20点</b></td><td>市場警戒時はリスクを極度に嫌う (強化)。</td></tr>
     </table>
     
@@ -335,6 +337,7 @@ def get_stock_info(code):
     }
     
     try:
+        # タイムアウトを 5秒 から 8秒 に延長
         res = requests.get(url, headers=headers, timeout=8)
         res.encoding = res.apparent_encoding
         html = res.text.replace("\n", "")
@@ -640,13 +643,13 @@ def get_stock_data(ticker):
             target_full_raw = buy_target * (1 + target_pct) 
             p_full_candidate = int(np.floor(target_full_raw))
             
-            if p_half_candidate > buy_target:
-                 p_half = p_half_candidate
-                 p_full = p_full_candidate if p_full_candidate > p_half else p_half + 1 
-                 if p_full <= curr_price: p_full = 0; p_half = 0 
-            else:
+            # 【★ 利確無効化ロジック】: 半益目標が現在値以下の場合、目標は無効（既に達成済み/高すぎ）
+            if p_half_candidate <= curr_price: 
                  p_half = 0
                  p_full = 0
+            else:
+                 p_half = p_half_candidate
+                 p_full = p_full_candidate if p_full_candidate > p_half else p_half + 1 
                  
         # 逆張り 
         elif rsi_val <= 30 or (curr_price < ma25 * 0.9 if ma25 else False):
@@ -693,12 +696,23 @@ def get_stock_data(ticker):
         
         # 1-A. R/R比 不利
         if risk_reward_ratio < 1.0: 
-             total_structural_deduction -= 20 # -20点に強化
+             total_structural_deduction -= 25 # -25点に強化
              
         # 1-B. RSI極端 (戦略との整合性あり)
-        if ("🔥順張り" in strategy and rsi_val >= 80) or \
-           ("🌊逆張り" in strategy and rsi_val <= 20):
-             total_structural_deduction -= 20 # -20点に強化
+        if "🔥順張り" in strategy:
+            if info["cap"] >= 3000: # 大型株グループ: RSI >= 85を基準
+                if rsi_val >= 85:
+                    total_structural_deduction -= 15 
+            else: # 小型株グループ: RSI >= 80を基準
+                if rsi_val >= 80:
+                    total_structural_deduction -= 25 
+                    
+        elif "🌊逆張り" in strategy:
+            if rsi_val <= 20: # 逆張りはRSI <= 20で統一
+                if info["cap"] >= 3000:
+                    total_structural_deduction -= 15
+                else:
+                    total_structural_deduction -= 25
              
         # 1-C. 流動性不足（致命的リスク）
         if avg_vol_5d < 1000:
@@ -748,7 +762,7 @@ def get_stock_data(ticker):
         sl_risk_deduct = 0
         if sl_ma > 0 and abs(sl_pct) < 3.0: 
              if "順張り" in strategy: 
-                 sl_risk_deduct = -10 # -10点に強化
+                 sl_risk_deduct = -5 # -5点に緩和
                  if is_market_alert:
                      sl_risk_deduct = -20 # 市場警戒時は-20点に強化
                      
@@ -914,10 +928,15 @@ if st.button("🚀 分析開始 (アイに聞く)"):
     elif not tickers_input.strip():
         st.warning("銘柄コードを入力してください。")
     else:
+        st.session_state.analyzed_data = []
+        
+        # ★★★ 修正箇所: 入力文字列の柔軟な解析ロジック ★★★
         raw_tickers_str = tickers_input.replace("\n", ",") \
                                        .replace(" ", ",") \
-                                       .replace("、", ",")                                  
+                                       .replace("、", ",")
+                                       
         raw_tickers = list(set([t.strip() for t in raw_tickers_str.split(",") if t.strip()]))
+        # ★★★ 修正箇所ここまで ★★★
         
         data_list = []
         bar = st.progress(0)
@@ -1058,7 +1077,7 @@ if st.session_state.analyzed_data:
             ("戦略", "75px", "🔥順張り: パーフェクトオーダーなど。🌊逆張り: RSI30以下など。"), 
             ("現在値", "60px", None), 
             ("推奨買値\n(乖離)", "65px", "戦略に基づく推奨エントリー水準。乖離は現在値との差額。"), 
-            ("R/R比", "40px", "<b>最重要:</b> 推奨買値から半益目標までの値幅を、SL MAまでの値幅で割った比率。1.0未満は-20点。"), # ★ R/R比を追加
+            ("R/R比", "40px", "<b>最重要:</b> 推奨買値から半益目標までの値幅を、SL MAまでの値幅で割った比率。1.0未満は-25点。"), # ★ R/R比を追加
             ("最大DD率\nSL乖離率", "70px", "最大DD率: 過去の同条件トレードでの最大下落率。SL乖離率: SLラインまでの余地。"), 
             ("利確目標\n(乖離率)", "120px", "時価総額別リターンと心理的な節目を考慮した目標値。"), 
             ("RSI", "50px", "相対力指数。🔵30以下(売られすぎ) / 🟢55-65(上昇トレンド) / 🔴70以上(過熱)"), 
@@ -1114,4 +1133,3 @@ if st.session_state.analyzed_data:
         if 'backtest_raw' in df_raw.columns:
             df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'}) 
         st.dataframe(df_raw)
-
