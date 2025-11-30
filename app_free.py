@@ -223,13 +223,14 @@ st.markdown(f"""
 
 # --- 説明書 (外部HTMLリンクに変更) ---
 with st.expander("📘 取扱説明書 (データ仕様・判定基準)"):
+    # ★ 修正: st.markdown() に f-string プレフィックス 'f' を追加
     st.markdown(f"""
     <p>
         詳細な分析ロジック、スコア配点、時価総額別の目標リターンについては、<br>
         以下の外部マニュアルリンクをご参照ください。<br>
         <b><a href="{MANUAL_URL}" target="_blank">🔗 詳細ロジックマニュアルを開く</a></b>
     </p>
-    """)
+    """, unsafe_allow_html=True) # unsafe_allow_html=True も追加してHTMLタグを有効化
 
 # --- サイドバー --- (変更なし)
 if "GEMINI_API_KEY" in st.secrets:
@@ -1093,4 +1094,5 @@ if st.session_state.analyzed_data:
         if 'backtest_raw' in df_raw.columns:
             df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'}) 
         st.dataframe(df_raw)
+
 
