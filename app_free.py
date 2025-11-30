@@ -1042,7 +1042,7 @@ if st.session_state.analyzed_data:
             ("戦略", "75px", "🔥順張り: パーフェクトオーダーなど。🌊逆張り: RSI30以下など。"), 
             ("現在値", "60px", None), 
             ("推奨買値\n(乖離)", "65px", "戦略に基づく推奨エントリー水準。乖離は現在値との差額。"), 
-            ("R/R比", "40px", "<b>最重要:</b> 推奨買値から半益目標までの値幅を、SL MAまでの値幅で割った比率。1.0未満は-25点。"), # ★ R/R比を追加
+            ("R/R比", "40px", "最重要:推奨買値から半益目標までの値幅を、SL MAまでの値幅で割った比率。1.0未満は-25点。"), # ★ R/R比を追加
             ("最大DD率\nSL乖離率", "70px", "最大DD率: 過去の同条件トレードでの最大下落率。SL乖離率: SLラインまでの余地。"), 
             ("利確目標\n(乖離率)", "120px", "時価総額別リターンと心理的な節目を考慮した目標値。"), 
             ("RSI", "50px", "相対力指数。🔵30以下(売られすぎ) / 🟢55-65(上昇トレンド) / 🔴70以上(過熱)"), 
@@ -1088,7 +1088,7 @@ if st.session_state.analyzed_data:
     st.markdown(create_table(watch_data, "👀 様子見銘柄"), unsafe_allow_html=True)
     
     st.markdown("---")
-    st.markdown(f"<b>【アイの独り言】</b>")
+    st.markdown(f"【アイの独り言】")
     st.markdown(st.session_state.ai_monologue) 
     
     with st.expander("詳細データリスト (生データ確認用)"):
@@ -1098,3 +1098,4 @@ if st.session_state.analyzed_data:
         if 'backtest_raw' in df_raw.columns:
             df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'}) 
         st.dataframe(df_raw)
+
