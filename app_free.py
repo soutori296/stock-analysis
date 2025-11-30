@@ -94,26 +94,42 @@ st.markdown(f"""
     .status-badge {{ background-color: {status_color}; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; vertical-align: middle; }}
     
     .center-text {{ text-align: center; font-family: "Meiryo", sans-serif; }}
-    .table-container {{ width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; margin-bottom: 20px; }}
+    .table-container {{ 
+        width: 100%; 
+        overflow-x: auto; 
+        -webkit-overflow-scrolling: touch; 
+        margin-bottom: 20px; 
+    }}
     
     /* 自作テーブルのみにスタイルを適用 (.ai-table配下のみ) */
     .ai-table {{ 
-        width: 100%; border-collapse: collapse; min-width: 1000px; /* ★ 最低幅を狭める */
-        background-color: #ffffff; color: #000000;
+        width: 100%; 
+        border-collapse: collapse; 
+        min-width: 1100px; /* ★ 最低幅を設定し、確実にスクロールを出す */
+        background-color: #ffffff; 
+        color: #000000;
         font-family: "Meiryo", sans-serif;
         font-size: 13px;
     }}
     .ai-table th {{ 
-        background-color: #e0e0e0; color: #000000;
-        border: 1px solid #999; padding: 4px 2px; /* ★ パディングを減らす */
-        text-align: center; vertical-align: middle; font-weight: bold; white-space: nowrap; 
+        background-color: #e0e0e0; 
+        color: #000000;
+        border: 1px solid #999; 
+        padding: 4px 2px; 
+        text-align: center; 
+        vertical-align: middle; 
+        font-weight: bold; 
+        white-space: normal !important; /* 2段組みを強制 */
         position: relative; 
         line-height: 1.2; 
     }}
     .ai-table td {{ 
-        background-color: #ffffff; color: #000000;
-        border: 1px solid #ccc; padding: 4px 2px; /* ★ パディングを減らす */
-        vertical-align: middle; line-height: 1.4;
+        background-color: #ffffff; 
+        color: #000000;
+        border: 1px solid #ccc; 
+        padding: 4px 2px; 
+        vertical-align: middle; 
+        line-height: 1.4;
     }}
 
     /* 説明書用テーブル (変更なし) */
@@ -167,6 +183,9 @@ st.markdown(f"""
     }}
     .ai-table th.has-tooltip {{ cursor: help; }} /* ホバー時にカーソルをヘルプに変更 */
     /* ------------------------------------- */
+    
+    /* ★ 80点以上の強調表示用 */
+    .score-high {{ color: #d32f2f !important; font-weight: bold; }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -184,7 +203,7 @@ st.markdown(f"""
 </p>
 """, unsafe_allow_html=True)
 
-# --- 説明書 (マニュアル詳細化 - 最終版の利確目標を更新) --- (変更なし)
+# --- 説明書 (マニュアル詳細化 - 最終版の利確目標を更新) --- (ヘルプのSL乖離率説明を更新)
 with st.expander("📘 取扱説明書 (データ仕様・判定基準)"):
     st.markdown("""
     <div class="center-text">
@@ -235,7 +254,7 @@ with st.expander("📘 取扱説明書 (データ仕様・判定基準)"):
         <tr><td><b>RSI適正</b></td><td>RSI 55〜65</td><td>+10点</td><td>トレンドが最も継続しやすい水準を評価</td></tr>
         <tr><td><b>出来高活発</b></td><td>出来高が5日平均の1.5倍超。出来高時間配分ロジックを使いリサーチ時点の出来高を評価します。</td><td>+10点</td><td>市場の注目度とエネルギーを評価。<b>大口参入の可能性</b>を示唆します。</td></tr> 
         <tr><td><b>直近勝率</b></td><td>直近5日で4日以上上昇</td><td>+5点</td><td>短期的な上値追いの勢いを評価</td></tr>
-        <tr><td><b>リスク減点</b></td><td>最大ドローダウン高 or SL余地小</td><td>-5点 / -5点（市場過熱時は-10点 / -10点に強化）</td><td>最大ドローダウン(-10%超)や、損切り余地(MA75/25乖離率±3%以内)が少ない銘柄を減点します。市場が過熱している場合（25日騰落レシオ125%以上）は減点を強化します。</td></tr> 
+        <tr><td><b>リスク減点</b></td><td>最大ドローダウン高 or SL余地小</td><td>-5点 / -5点（市場過熱時は-10点 / -10点に強化）</td><td>最大ドローダウン(-10%超)や、損切り余地(推奨SLラインとの乖離率±3%以内)が少ない銘柄を減点します。市場が過熱している場合（25日騰落レシオ125%以上）は減点を強化します。</td></tr> 
         <tr><td><b>合計</b></td><td>(各項目の合計)</td><td><b>最大100点</b></td><td>算出されたスコアが100点を超えた場合でも、<b>上限は100点</b>となります。</td></tr>
     </table>
 
@@ -250,7 +269,7 @@ with st.expander("📘 取扱説明書 (データ仕様・判定基準)"):
         <tr><td><b>解説</b></td><td>このロジックで過去にトレードした場合の勝敗数。心理的な節目・抵抗線手前での確実な利確を推奨するロジックを適用しています。</td></tr>
     </table>
 
-    <h5>④ 各種指標の基準 (変更なし)</h5>
+    <h5>④ 各種指標の基準</h5>
     <table class="desc-table">
         <tr><th style="width:20%">指標</th><th>解説</th></tr>
         <tr><td><b>出来高（5MA比）</b></td><td><b>当日のリアルタイム出来高</b>を<b>過去5日間の出来高平均</b>と<b>市場の経過時間比率</b>で調整した倍率。<br>市場が開いている時間帯に応じて、出来高の偏りを考慮し、公平に大口流入を評価します。</td></tr>
@@ -960,30 +979,35 @@ if st.session_state.analyzed_data:
             
             # 【★ 出来高の統合表示】
             avg_vol_html = format_volume(d.get('avg_volume_5d', 0))
+            
+            # 【★ スコアの強調表示】
+            score_disp = f'{d.get("score")}'
+            if d.get("score", 0) >= 80:
+                score_disp = f'<span class="score-high">{score_disp}</span>'
 
-            # 【★ テーブル行の追加】
-            rows += f'<tr><td class="td-center">{i+1}</td><td class="td-center">{d.get("code")}</td><td class="th-left td-bold">{d.get("name")}</td><td class="td-right">{d.get("cap_disp")}</td><td class="td-center">{d.get("score")}</td><td class="td-center">{d.get("strategy")}</td><td class="td-center">{d.get("momentum")}</td><td class="td-center">{d.get("rsi_disp")}</td><td class="td-right">{vol_disp}<br>({avg_vol_html})</td><td class="td-right td-bold">{price_disp}</td><td class="td-right">{buy:,.0f}<br><span style="font-size:10px;color:#666">{diff_txt}</span></td><td class="td-left" style="line-height:1.2;font-size:11px;">{target_txt}</td><td class="td-center td-blue">{bt_display}</td><td class="td-center">{d.get("per")}<br>{d.get("pbr")}</td><td class="td-right">{mdd_disp}<br>{sl_pct_disp}</td><td class="th-left">{d.get("comment")}</td></tr>'
+            # 【★ テーブル行の追加（新しい並び順と2段組み対応）】
+            rows += f'<tr><td class="td-center">{i+1}</td><td class="td-center">{d.get("code")}</td><td class="th-left td-bold">{d.get("name")}</td><td class="td-right">{d.get("cap_disp")}</td><td class="td-center">{score_disp}</td><td class="td-center">{d.get("strategy")}</td><td class="td-right td-bold">{price_disp}</td><td class="td-right">{buy:,.0f}<br><span style="font-size:10px;color:#666">{diff_txt}</span></td><td class="td-right">{mdd_disp}<br>{sl_pct_disp}</td><td class="td-left" style="line-height:1.2;font-size:11px;">{target_txt}</td><td class="td-center">{d.get("rsi_disp")}</td><td class="td-right">{vol_disp}<br>({avg_vol_html})</td><td class="td-center td-blue">{bt_display}</td><td class="td-center">{d.get("per")}<br>{d.get("pbr")}</td><td class="td-center">{d.get("momentum")}</td><td class="th-left">{d.get("comment")}</td></tr>'
 
 
         # ヘッダーとツールチップデータの定義
-        # ★ 2段組みに合わせてヘッダーテキストを修正
+        # ★ 新しい並び順と最適化された幅
         headers = [
             ("No", "25px", None), 
             ("コード", "45px", None), 
             ("企業名", "130px", None), 
-            ("時価総額", "100px", None), 
+            ("時価総額", "85px", None), 
             ("点", "35px", "AIスコア。市場警戒モード発動時はMDD/SL減点が-10点に強化されます。"), 
             ("戦略", "75px", "🔥順張り: パーフェクトオーダーなど。🌊逆張り: RSI30以下など。"), 
-            ("直近\n勝率", "50px", "直近5日間の前日比プラスだった日数の割合。"), 
-            ("RSI", "50px", "相対力指数。🔵30以下(売られすぎ) / 🟢55-65(上昇トレンド) / 🔴70以上(過熱)"), 
-            ("出来高\n(5MA比)", "70px", "上段は当日の出来高と5日平均出来高（補正済み）の比率。下段は5日平均出来高（流動性）。1万株未満は赤字で警告。"), 
             ("現在値", "60px", None), 
             ("推奨買値\n(乖離)", "70px", "戦略に基づく推奨エントリー水準。乖離は現在値との差額。"), 
-            ("利確目標\n(乖離率%)", "95px", "時価総額別リターンと心理的な節目を考慮した目標値。"), 
+            ("MDD %\nSL乖離率", "75px", "MDD %: 過去の同条件トレードでの最大下落率（最大痛手）。SL乖離率: 順張り(25MA)、逆張り(75MA)までの余裕。"), 
+            ("利確目標\n(乖離率%)", "85px", "時価総額別リターンと心理的な節目を考慮した目標値。"), 
+            ("RSI", "50px", "相対力指数。🔵30以下(売られすぎ) / 🟢55-65(上昇トレンド) / 🔴70以上(過熱)"), 
+            ("出来高\n(5MA比)", "80px", "上段は当日の出来高と5日平均出来高（補正済み）の比率。下段は5日平均出来高（流動性）。1万株未満は赤字で警告。"), 
             ("押し目\n勝敗数", "65px", "過去75日のバックテストにおける、推奨エントリー（押し目）での勝敗数。"), 
             ("PER\nPBR", "65px", "株価収益率/株価純資産倍率。市場の評価指標。"), 
-            ("MDD %\nSL乖離率", "75px", "MDD %: 過去の同条件トレードでの最大下落率（最大痛手）。SL乖離率: 順張り(25MA)、逆張り(75MA)までの余裕。"), # ★ ツールチップ内のHTMLタグを削除
-            ("アイの所感", "min-width:300px;", "アイ（プロトレーダー）による分析コメント。リスクや流動性に関する警告を最優先して発言します。"), # ★ 幅を広げる
+            ("直近\n勝率", "50px", "直近5日間の前日比プラスだった日数の割合。"),
+            ("アイの所感", "min-width:350px;", "アイ（プロトレーダー）による分析コメント。リスクや流動性に関する警告を最優先して発言します。"), # ★ 幅を最大化
         ]
 
         # ヘッダーHTMLの生成
