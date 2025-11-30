@@ -1040,8 +1040,8 @@ if st.session_state.analyzed_data:
         headers = [
             ("No", "25px", None), 
             ("コード", "45px", None), 
-            ("企業名", "130px", None), 
-            ("時価総額", "85px", None), 
+            ("企業名", "125px", None), 
+            ("時価総額", "90px", None), 
             ("点", "35px", "AIスコア。市場警戒モード発動時はMDD/SL減点が-10点に強化されます。"), 
             ("戦略", "75px", "🔥順張り: パーフェクトオーダーなど。🌊逆張り: RSI30以下など。"), 
             ("現在値", "60px", None), 
@@ -1101,3 +1101,4 @@ if st.session_state.analyzed_data:
         if 'backtest_raw' in df_raw.columns:
             df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'}) 
         st.dataframe(df_raw)
+
