@@ -225,48 +225,48 @@ with st.expander("📘 取扱説明書 (最終分析ロジック)"):
     <h4>1. データ取得とハイブリッドデータ仕様</h4>
     <table class="desc-table">
         <tr><th>状態・時刻</th><th>テクニカル分析用データ</th><th>表示用データ (株価・出来高)</th></tr>
-        <tr><td><b>ザラ場中 (~15:50)</b></td><td><b>前日までの確定データ (Stooq)</b></td><td><b>リアルタイムデータ (株探)</b></td></tr>
-        <tr><td><b>引け後 (15:50~)</b></td><td><b>当日確定足結合データ (Stooq+株探OHLCV)</b></td><td><b>当日確定値 (株探)</b></td></tr>
+        <tr><td>**ザラ場中 (~15:50)**</td><td>**前日までの確定データ (Stooq)**</td><td>**リアルタイムデータ (株探)**</td></tr>
+        <tr><td>**引け後 (15:50~)**</td><td>**当日確定足結合データ (Stooq+株探OHLCV)**</td><td>**当日確定値 (株探)**</td></tr>
     </table>
     <br>
 
     <h4>2. 時価総額分類と目標リターン ($T_{pct}$)</h4>
     <table class="desc-table">
         <tr><th style="width:20%">分類</th><th style="width:20%">基準額 (億円)</th><th style="width:15%">目標 $T_{pct}$</th><th>順張り目標価格</th></tr>
-        <tr><td><b>超大型株</b></td><td>10,000 億円 以上</td><td>1.5%</td><td rowspan="5">半益: 推奨買値 + ($T_{pct} \times 50\%$) <br>全益: 推奨買値 + ($T_{pct} \times 100\%$)</td></tr>
-        <tr><td><b>大型株</b></td><td>3,000 億円 ～ 10,000 億円未満</td><td>2.0%</td></tr>
-        <tr><td><b>中型株</b></td><td>500 億円 ～ 3,000 億円未満</td><td>3.0%</td></tr>
-        <tr><td><b>小型株</b></td><td>100 億円 ～ 500 億円未満</td><td>4.0%</td></tr>
-        <tr><td><b>超小型株</b></td><td>100 億円 未満</td><td>5.0%</td></tr>
+        <tr><td>**超大型株**</td><td>10,000 億円 以上</td><td>1.5%</td><td rowspan="5">半益: 推奨買値 + ($T_{pct} \times 50\\%$) <br>全益: 推奨買値 + ($T_{pct} \times 100\\%$)</td></tr>
+        <tr><td>**大型株**</td><td>3,000 億円 ～ 10,000 億円未満</td><td>2.0%</td></tr>
+        <tr><td>**中型株**</td><td>500 億円 ～ 3,000 億円未満</td><td>3.0%</td></tr>
+        <tr><td>**小型株**</td><td>100 億円 ～ 500 億円未満</td><td>4.0%</td></tr>
+        <tr><td>**超小型株**</td><td>100 億円 未満</td><td>5.0%</td></tr>
     </table>
-    <p style="font-size:12px; margin-top:5px;">※ <b>🌊逆張り</b>の利確目標は、半益: 5MA-1円 / 全益: 25MA-1円</p>
+    <p style="font-size:12px; margin-top:5px;">※ **🌊逆張り**の利確目標は、半益: 5MA-1円 / 全益: 25MA-1円</p>
 
     <h4>3. AIスコア（点数）配分とリスクウェイト強化</h4>
-    <p style="font-size:14px; margin-bottom:5px;"><b>リスク管理を最優先する厳格な評価システムです。</b></p>
+    <p style="font-size:14px; margin-bottom:5px;">**リスク管理を最優先する厳格な評価システムです。**</p>
     <table class="desc-table">
         <tr><th>項目</th><th>条件</th><th>配点/減点</th><th>備考</th></tr>
-        <tr><td><b>ベーススコア</b></td><td>-</td><td>+50点</td><td>全ての分析の起点</td></tr>
+        <tr><td>**ベーススコア**</td><td>-</td><td>**+50点**</td><td>全ての分析の起点</td></tr>
         
-        <tr><td style="color:#d32f2f; font-weight:bold;"><b>構造的リスク減点</b></td><td colspan="3"><b>投資適格性フィルター。以下の合計最大-80点。</b></td></tr>
-        <tr><td>R/R比 不利</td><td>$\text{R/R比} < 1.0$</td><td><b>-20点</b></td><td>リワードがリスクを下回る。</td></tr>
-        <tr><td>RSI極端 (大型株G)</td><td>🔥順張りでRSI $\ge 85$ / 🌊逆張りでRSI $\le 20$ <br>(時価総額 $\ge 3000$億円)</td><td><b>-15点</b></td><td>トレンド継続性を考慮し、罰則を緩和。</td></tr>
-        <tr><td>RSI極端 (小型株G)</td><td>🔥順張りでRSI $\ge 80$ / 🌊逆張りでRSI $\le 20$ <br>(時価総額 $\lt 3000$億円)</td><td><b>-25点</b></td><td>急落リスクが高いため罰則を強化。</td></tr>
-        <tr><td>流動性不足(致命的)</td><td>5日平均出来高が 1,000株未満</td><td><b>-30点</b></td><td>換金リスクが極めて高い。</td></tr>
+        <tr><td style="color:#d32f2f; font-weight:bold;">**構造的リスク減点**</td><td colspan="3">**投資適格性フィルター。以下の合計最大-80点。**</td></tr>
+        <tr><td>R/R比 不利</td><td>$\text{R/R比} < 1.0$</td><td>**-25点**</td><td>リワードがリスクを下回る。</td></tr>
+        <tr><td>RSI極端 (大型株G)</td><td>🔥順張りでRSI $\ge 85$ / 🌊逆張りでRSI $\le 20$ <br>(時価総額 $\ge 3000$億円)</td><td>**-15点**</td><td>大型株のトレンド継続性を考慮し緩和。</td></tr>
+        <tr><td>RSI極端 (小型株G)</td><td>🔥順張りでRSI $\ge 80$ / 🌊逆張りでRSI $\le 20$ <br>(時価総額 $\lt 3000$億円)</td><td>**-25点**</td><td>小型株の急落リスクが高いため強化。</td></tr>
+        <tr><td>流動性不足(致命的)</td><td>5日平均出来高が 1,000株未満</td><td>**-30点**</td><td>換金リスクが極めて高い。</td></tr>
         
-        <tr><td style="color:#1976d2; font-weight:bold;"><b>戦略/トレンド加点</b></td><td colspan="3"><b>以下、合計最大+45点 (満点100点達成可能)</b></td></tr>
-        <tr><td>順張り戦略</td><td>パーフェクトオーダー＆5日線上昇</td><td><b>+15点</b></td><td>勢いの評価 (旧+20から減額し、リスク優位性を確保)。</td></tr>
-        <tr><td>逆張り戦略</td><td>RSI $\le 30$ または 25MAから -10%乖離</td><td>+15点</td><td>反発期待値を評価。</td></tr>
-        <tr><td>RSI適正</td><td>RSI 55〜65</td><td>+10点</td><td>トレンドが最も継続しやすい水準。</td></tr>
-        <tr><td>出来高活発</td><td>出来高が5日平均の1.5倍超</td><td>+10点</td><td>市場の注目度を評価。</td></tr> 
-        <tr><td><b>究極の出来高</b></td><td>出来高が5日平均の<b>3.0倍超</b></td><td><b>+5点</b> (追加)</td><td><b>満点100点到達のトリガー。</b></td></tr> 
-        <tr><td>直近勝率</td><td>直近5日で4日以上上昇</td><td>+5点</td><td>短期的な上値追いの勢いを評価。</td></tr>
+        <tr><td style="color:#1976d2; font-weight:bold;">**戦略/トレンド加点**</td><td colspan="3">**以下、合計最大+45点 (満点100点達成可能)**</td></tr>
+        <tr><td>順張り戦略</td><td>パーフェクトオーダー＆5日線上昇</td><td>**+15点**</td><td>勢いの評価。</td></tr>
+        <tr><td>逆張り戦略</td><td>RSI $\le 30$ または 25MAから -10%乖離</td><td>**+15点**</td><td>反発期待値を評価。</td></tr>
+        <tr><td>RSI適正</td><td>RSI 55〜65</td><td>**+10点**</td><td>トレンドが最も継続しやすい水準。</td></tr>
+        <tr><td>出来高活発</td><td>出来高が5日平均の1.5倍超</td><td>**+10点**</td><td>市場の注目度を評価。</td></tr> 
+        <tr><td>**究極の出来高**</td><td>出来高が5日平均の**3.0倍超**</td><td>**+5点** (追加)</td><td>**満点100点到達のトリガー。**</td></tr> 
+        <tr><td>直近勝率</td><td>直近5日で4日以上上昇</td><td>**+5点**</td><td>短期的な上値追いの勢いを評価。</td></tr>
 
-        <tr><td style="color:#FF9800; font-weight:bold;"><b>個別リスク評価</b></td><td colspan="3"><b>DD率の連続減点とSL乖離の強化。最大-40点。</b></td></tr>
-        <tr><td>DD率 優秀</td><td>最大DD率 $\lt 1.0\%$</td><td><b>+5点</b></td><td>過去の損失リスクが極めて低い。</td></tr>
+        <tr><td style="color:#FF9800; font-weight:bold;">**個別リスク評価**</td><td colspan="3">**DD率の連続減点とSL乖離の強化。最大-40点。**</td></tr>
+        <tr><td>DD率 優秀</td><td>最大DD率 $\lt 1.0\%$</td><td>**+5点**</td><td>過去の損失リスクが極めて低い。</td></tr>
         <tr><td>DD率 連続減点</td><td>$2.0\% < \text{DD} \le 10.0\%$</td><td>$\mathbf{-2 \times \text{floor}(\text{DD}-2.0)}$</td><td>DD率に比例した減点 (強化)。</td></tr>
-        <tr><td>DD率 高リスク</td><td>最大DD率 $\gt 10.0\%$</td><td><b>-20点</b></td><td>大幅な損失リスク (強化)。</td></tr>
-        <tr><td>SL乖離率小</td><td>SL乖離率が $\pm 3.0\%$未満</td><td><b>-5点</b></td><td>損切り余地が少ない (ウェイト調整)。</td></tr>
-        <tr><td>SL乖離率小(警戒)</td><td><b>市場警戒時</b> (レシオ$\ge 125\%$)</td><td><b>-20点</b></td><td>市場警戒時はリスクを極度に嫌う (強化)。</td></tr>
+        <tr><td>DD率 高リスク</td><td>最大DD率 $\gt 10.0\%$</td><td>**-20点**</td><td>大幅な損失リスク (強化)。</td></tr>
+        <tr><td>SL乖離率小</td><td>SL乖離率が $\pm 3.0\%$未満</td><td>**-5点**</td><td>損切り余地が少ない (ウェイト調整)。</td></tr>
+        <tr><td>SL乖離率小(警戒)</td><td>**市場警戒時** (レシオ$\ge 125\%$)</td><td>**-20点**</td><td>市場警戒時はリスクを極度に嫌う (強化)。</td></tr>
     </table>
     
     </div>
@@ -1133,3 +1133,4 @@ if st.session_state.analyzed_data:
         if 'backtest_raw' in df_raw.columns:
             df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'}) 
         st.dataframe(df_raw)
+
