@@ -232,7 +232,7 @@ with st.expander("📘 取扱説明書 (最終分析ロジック)"):
     </table>
     <br>
 
-    <h4>2. 時価総額分類と目標リターン ($T_{pct}$)</h4>
+    <h4>2. 時価総額分類と目標リターン</h4>
     <table class="desc-table">
         <tr><th style="width:20%">分類</th><th style="width:20%">基準額 (億円)</th><th style="width:15%">目標 $T_{pct}$</th><th>順張り目標価格</th></tr>
         <tr><td><b>超大型株</b></td><td>10,000 億円 以上</td><td>1.5%</td><td rowspan="5">半益: 推奨買値 * (1 + $T_{pct}$ / 2)<br>全益: 推奨買値 * (1 + $T_{pct}$)</td></tr>
@@ -1135,4 +1135,5 @@ if st.session_state.analyzed_data:
         if 'backtest_raw' in df_raw.columns:
             df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'}) 
         st.dataframe(df_raw)
+
 
