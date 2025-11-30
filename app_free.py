@@ -949,8 +949,8 @@ if st.session_state.analyzed_data:
     data = st.session_state.analyzed_data
     
     # リスト分け (変更なし)
-    rec_data = [d for d in data if d['strategy'] != "様子見"]
-    watch_data = [d for d in data if d['strategy'] == "様子見"]
+    rec_data = [d for d in data if d['strategy'] != "様子見" and d['score'] >= 50]
+    watch_data = [d for d in data if d['strategy'] == "様子見" or d['score'] < 50]
 
     # ソート
     def sort_data(lst):
@@ -1098,5 +1098,6 @@ if st.session_state.analyzed_data:
         if 'backtest_raw' in df_raw.columns:
             df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'}) 
         st.dataframe(df_raw)
+
 
 
