@@ -138,7 +138,6 @@ st.markdown(f"""
     .desc-table td {{ border: 1px solid #ccc; padding: 8px; text-align: left !important; }}
     
     /* 説明書内の強調文字色をメインCSSブロックに移動して安全性を確保 */
-    .desc-risk { color: #d32f2f; font-weight:bold; }
     .desc-add { color: #1976d2; font-weight:bold; }
     .desc-base { color: #5D4037; font-weight:bold; }
     .desc-head-risk { background-color: #f44336; color:white; font-weight:bold; }
@@ -1143,3 +1142,4 @@ if st.session_state.analyzed_data:
         if 'backtest_raw' in df_raw.columns:
             df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'}) 
         st.dataframe(df_raw)
+
