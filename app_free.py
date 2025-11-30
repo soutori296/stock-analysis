@@ -1053,7 +1053,7 @@ if st.session_state.analyzed_data:
             ("押し目\n勝敗数", "60px", "過去75日のバックテストにおける、推奨エントリー（押し目）での勝敗数。"), 
             ("PER\nPBR", "60px", "株価収益率/株価純資産倍率。市場の評価指標。"), # 修正
             ("直近\n勝率", "40px", "直近5日間の前日比プラスだった日数の割合。"), # 修正
-            ("アイの所感", "min-width:350px;", "アイ（プロトレーダー）による分析コメント。リスクや流動性に関する警告を最優先して発言します。"), 
+            ("アイの所感", "min-width:350px;", None), 
         ]
 
         # ヘッダーHTMLの生成
@@ -1101,4 +1101,5 @@ if st.session_state.analyzed_data:
         if 'backtest_raw' in df_raw.columns:
             df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'}) 
         st.dataframe(df_raw)
+
 
