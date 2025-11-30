@@ -13,7 +13,7 @@ import numpy as np # for np.floor/ceil
 ICON_URL = "https://raw.githubusercontent.com/soutori296/stock-analysis/main/aisan.png"
 # --- 外部説明書URL ---
 # ⚠️ 注意: 実際にデプロイする際には、このURLをGitHub Pagesなど、アクセス可能な場所に配置したHTMLのURLに置き換えてください。
-MANUAL_URL = "https://example.com/ai_stock_manual.html" 
+MANUAL_URL = "https://soutori296.stars.ne.jp/SoutoriWebShop/ai2_manual.html" 
 
 
 # --- ページ設定 ---
@@ -1093,3 +1093,4 @@ if st.session_state.analyzed_data:
         if 'backtest_raw' in df_raw.columns:
             df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'}) 
         st.dataframe(df_raw)
+
