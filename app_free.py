@@ -461,54 +461,182 @@ def get_stock_data(ticker):
         if curr_price and sl_ma:
             sl_pct = ((curr_price / sl_ma) - 1) * 100
         # スコア
-        score = 50
+        score = 50  # ← 基本点
+        
+        # 戦略ボーナス
         if "順張り" in strategy:
             score += 20
         if "逆張り" in strategy:
             score += 15
+        
+        # RSI
         if 55 <= rsi_val <= 65:
             score += 10
+        
+        # 出来高
         if vol_ratio > 1.5:
             score += 10
+        
+        # モメンタム
         if up_days >= 4:
             score += 5
-        # リスク減点（段階的）
+        
+        
+        # -------------------------------
+        # RR（リスクリワード）補正
+        # -------------------------------
+        
+        rr_score = 0
+        rr_half_score = 0
+        rr = 0
+        rr_half = 0
+        
+        if buy_target > 0 and p_full > 0 and sl_price > 0:
+        
+            risk = buy_target - sl_price
+        
+            if risk > 0:
+                reward_full = p_full - buy_target
+                reward_half = p_half - buy_target
+        
+                rr = reward_full / risk if reward_full > 0 else 0
+                rr_half = reward_half / risk if reward_half > 0 else 0
+        
+                # 全利確RR評価
+                if rr >= 2.0:
+                    rr_score = 20
+                elif rr >= 1.5:
+                    rr_score = 10
+                elif rr >= 1.0:
+                    rr_score = 0
+                elif rr >= 0.8:
+                    rr_score = -5
+                else:
+                    rr_score = -15  # RR悪すぎ → 投資不適格寄り
+        
+                # 半益RR評価
+                if rr_half >= 1.0:
+                    rr_half_score = 5
+                elif rr_half <= 0.5:
+                    rr_half_score = -5
+        
+                score += rr_score + rr_half_score
+        
+            else:
+                # 損切りが買値より上など不正ケース
+                score -= 20
+        
+        # 利確が存在しない場合は大幅減点
+        if p_full <= 0 or p_half <= 0:
+            score -= 25
+        
+        
+        # -------------------------------
+        # ボラティリティ補正（ATR使用）
+        # -------------------------------
+        
+        volatility_deduct = 0
+        if atr_val and buy_target > 0:
+        
+            vol_ratio = atr_val / buy_target
+        
+            if vol_ratio > 0.08:        # 荒すぎ
+                volatility_deduct = -15
+            elif vol_ratio > 0.05:      # やや荒い
+                volatility_deduct = -5
+            elif vol_ratio < 0.01:      # 動かなさすぎ
+                volatility_deduct = -5
+        
+            score += volatility_deduct
+        
+        
+        # -------------------------------
+        # 従来のリスク減点（改良版）
+        # -------------------------------
+        
         mdd_risk_deduct = 0
         sl_risk_deduct = 0
+        
         abs_mdd = abs(max_dd_pct) if max_dd_pct is not None else 0.0
-        if abs_mdd > 10.0:
+        
+        if abs_mdd > 15.0:
+            mdd_risk_deduct = -15
+        elif abs_mdd > 10.0:
             mdd_risk_deduct = -10
         elif abs_mdd > 5.0:
             mdd_risk_deduct = -5
         elif abs_mdd > 2.0:
             mdd_risk_deduct = -3
+        
+        # 損切りが浅すぎる場合
         if sl_ma and abs(sl_pct) < 3.0:
-            if "順張り" in strategy:
-                sl_risk_deduct = -5
+            sl_risk_deduct = -5
+        
+        # 市場警戒モード
         is_market_alert = market_25d_ratio >= 125.0
         if is_market_alert:
+        
             if mdd_risk_deduct < -5:
-                mdd_risk_deduct = max(mdd_risk_deduct, -10)
+                mdd_risk_deduct = -15
+        
             if sl_risk_deduct < 0:
                 sl_risk_deduct = -10
+        
+            # 過熱市場でRRが悪いものは強制減点
+            if rr < 1.2:
+                score -= 10
+        
+        
         score += mdd_risk_deduct + sl_risk_deduct
+        
+        
+        # -------------------------------
+        # 最終補正
+        # -------------------------------
+        
+        score = round(score)
         score = min(100, max(0, score))
+        
+        
+        # 出来高系
         avg_vol_5d = last['Vol_SMA5'] if not pd.isna(last['Vol_SMA5']) else 0
         low_liquidity_flag = avg_vol_5d < 10000
         vol_disp = f"🔥{vol_ratio:.1f}倍" if vol_ratio > 1.5 else f"{vol_ratio:.1f}倍"
+        
+        
         return {
-            "code": ticker, "name": info.get("name", "不明"), "price": curr_price, "cap_val": info.get("cap", 0),
-            "cap_disp": fmt_market_cap(info.get("cap", 0)), "per": info.get("per", "-"), "pbr": info.get("pbr", "-"),
-            "rsi": rsi_val, "rsi_disp": f"{rsi_mark}{rsi_val:.1f}", "vol_ratio": vol_ratio,
-            "vol_disp": vol_disp, "momentum": momentum_str, "strategy": strategy, "score": score,
-            "buy": buy_target, "p_half": p_half, "p_full": p_full,
+            "code": ticker,
+            "name": info.get("name", "不明"),
+            "price": curr_price,
+            "cap_val": info.get("cap", 0),
+            "cap_disp": fmt_market_cap(info.get("cap", 0)),
+            "per": info.get("per", "-"),
+            "pbr": info.get("pbr", "-"),
+            "rsi": rsi_val,
+            "rsi_disp": f"{rsi_mark}{rsi_val:.1f}",
+            "vol_ratio": vol_ratio,
+            "vol_disp": vol_disp,
+            "momentum": momentum_str,
+            "strategy": strategy,
+        
+            "score": score,
+        
+            "buy": buy_target,
+            "p_half": p_half,
+            "p_full": p_full,
+            "rr": round(rr,2),
+            "rr_half": round(rr_half,2),
+        
             "backtest": bt_str,
             "backtest_raw": re.sub(r'<[^>]+>', '', str(bt_str).replace("<br>", " ")).replace("(", "").replace(")", ""),
+        
             "max_dd_pct": max_dd_pct,
             "sl_pct": sl_pct,
             "sl_ma": sl_ma,
+        
             "avg_volume_5d": avg_vol_5d,
             "is_low_liquidity": low_liquidity_flag,
+        
             "kabutan_open": info.get("open"),
             "kabutan_high": info.get("high"),
             "kabutan_low": info.get("low"),
@@ -753,4 +881,5 @@ if st.session_state.analyzed_data:
         if 'backtest_raw' in df_raw.columns:
             df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'})
         st.dataframe(df_raw)
+
 
