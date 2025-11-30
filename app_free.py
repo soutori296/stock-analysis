@@ -105,7 +105,7 @@ st.markdown(f"""
     .ai-table {{ 
         width: 100%; 
         border-collapse: collapse; 
-        min-width: 1300px; /* ★ 再計算した最小幅: 1300px */
+        min-width: 1100px; /* ★ 最低幅を設定し、確実にスクロールを出す */
         background-color: #ffffff; 
         color: #000000;
         font-family: "Meiryo", sans-serif;
@@ -144,12 +144,6 @@ st.markdown(f"""
     .td-left {{ text-align: left; }}
     .td-bold {{ font-weight: bold; }}
     .td-blue {{ color: #0056b3; font-weight: bold; }}
-    
-    /* ★ アイの所感専用のセルスタイル：折り返しを禁止し、画面外に伸びるようにする */
-    .td-comment {{ 
-        white-space: nowrap !important; /* 絶対に折り返さない */
-        line-height: 1.4; /* 標準の行高を維持 */
-    }}
     
     /* タイトルアイコン用のカスタムスタイル (変更なし) */
     .custom-title {{
@@ -270,7 +264,7 @@ with st.expander("📘 取扱説明書 (データ仕様・判定基準)"):
         <tr><td><b>対象期間</b></td><td>直近75営業日</td></tr>
         <tr><td><b>エントリー条件</b></td><td>「5日MA > 25日MA」の状態で、かつ終値が5日移動平均線以下に<b>タッチまたは下回った日</b>（押し目と判断）。</td></tr>
         <tr><td><b>利確目標</b><br><span style="font-size:12px;">(時価総額別の目標リターン)</span></td><td><b>1兆円以上</b>：エントリー価格から<b>2%の上昇</b> / <b>500億円未満</b>：エントリー価格から<b>5%の上昇</b></td></tr>
-        <tr><td><b>利確目標(半/全)</b><br><span style="font-size:12px;">(売買戦略の推奨値)</span></td><td><b>🔥 順張り</b>：全益は「時価総額別目標の100%」、半益は「全益価格の50%」を計算後、**1円単位で切り捨て**。 / <b>🌊 逆張り</b>：半益は「5日移動平均線」から<b>-1円</b>、全益は「25日移動平均線」から<b>-1円</b>を目安。</td></tr>
+        <tr><td><b>利確目標(半/全)</b><br><span style="font-size:12px;">(売買戦略の推奨値)</span></td><td><b>🔥 順張り</b>：全益は「時価総額別目標の100%」、半益は「全益価格の50%」を計算後、<b>1円単位で切り捨て</b>。 / <b>🌊 逆張り</b>：半益は「5日移動平均線」から<b>-1円</b>、全益は「25日移動平均線」から<b>-1円</b>を目安。</td></tr>
         <tr><td><b>保有期間</b></td><td>最大10営業日。10日以内に利確目標に到達しなければ「敗北」としてカウント。</td></tr>
         <tr><td><b>解説</b></td><td>このロジックで過去にトレードした場合の勝敗数。心理的な節目・抵抗線手前での確実な利確を推奨するロジックを適用しています。</td></tr>
     </table>
@@ -824,8 +818,8 @@ def batch_analyze_with_ai(data_list):
         - リスク情報（MDD、SL乖離率）を参照し、リスク管理の重要性に言及してください。
         - MDDが-8.0%を超える（下落幅が大きい）場合は、「過去の損失リスクが高い」旨を明確に伝えてください。
         - **流動性:** **低流動性:警告**の銘柄については、コメントの冒頭で「平均出来高が1万株未満と極めて低く、希望価格での売買が困難な<b>流動性リスク</b>を伴います。ロット調整を強く推奨します。」といった**明確な警告**を必ず含めてください。
-        - **損切り目安:** 「長期サポートラインである<b>SL目安MA（{sl_ma_disp}）を終値で明確に割り込んだ場合</b>は、速やかに損切りを検討すべき」といった**撤退基準**を明示してください。
-        - **強調表現の制限**: 10銘柄中、最大3銘柄のコメントでのみ、<b>AIスコア80点以上</b>で**特に重要な部分**（例：大口の買い、強力なトレンド）を<b>1箇所（10文字以内）</b>に限り、赤太字のHTMLタグ（<b><span style="color:red;">...</span></b>）を使用して強調しても良い。それ以外のコメントでは赤太字を絶対に使用しないでください。
+        - **損切り目安:** 「長期サポートラインである**SL目安MA（{sl_ma_disp}）を終値で明確に割り込んだ場合**は、速やかに損切りを検討すべき」といった**撤退基準**を明示してください。
+        - **強調表現の制限**: 10銘柄中、最大3銘柄のコメントでのみ、<b>AIスコア80点以上</b>で**特に重要な部分**（例：大口の買い、強力なトレンド）を**1箇所（10文字以内）**に限り、赤太字のHTMLタグ（<b><span style="color:red;">...</span></b>）を使用して強調しても良い。それ以外のコメントでは赤太字を絶対に使用しないでください。
     
     【出力形式】
     ID:コード | コメント
@@ -852,6 +846,7 @@ def batch_analyze_with_ai(data_list):
         comment_lines = parts[0].strip().split("\n")
         
         # ★ モノローグのクリーンアップ：HTMLタグとMarkdown太字の両方を削除
+        # モノローグは常体・独白調で強調不要のため、全てプレーンテキストに戻す
         monologue_raw = parts[1].strip()
         monologue = re.sub(r'<[^>]+>', '', monologue_raw) # HTMLタグ除去
         monologue = re.sub(r'\*\*(.*?)\*\*', r'\1', monologue) # Markdown太字除去 (中身だけ残す)
@@ -1021,7 +1016,7 @@ if st.session_state.analyzed_data:
 
             # 【★ テーブル行の追加（新しい並び順と2段組み対応）】
             # AIコメントはHTMLタグ（<b>, <span style="color:red;">）を許可
-            rows += f'<tr><td class="td-center">{i+1}</td><td class="td-center">{d.get("code")}</td><td class="th-left td-bold">{d.get("name")}</td><td class="td-right">{d.get("cap_disp")}</td><td class="td-center">{score_disp}</td><td class="td-center">{d.get("strategy")}</td><td class="td-right td-bold">{price_disp}</td><td class="td-right">{buy:,.0f}<br><span style="font-size:10px;color:#666">{diff_txt}</span></td><td class="td-right">{mdd_disp}<br>{sl_pct_disp}</td><td class="td-left" style="line-height:1.2;font-size:11px;">{target_txt}</td><td class="td-center">{d.get("rsi_disp")}</td><td class="td-right">{vol_disp}<br>({avg_vol_html})</td><td class="td-center td-blue">{bt_cell_content}</td><td class="td-center">{d.get("per")}<br>{d.get("pbr")}</td><td class="td-center">{d.get("momentum")}</td><td class="th-left td-comment">{d.get("comment")}</td></tr>'
+            rows += f'<tr><td class="td-center">{i+1}</td><td class="td-center">{d.get("code")}</td><td class="th-left td-bold">{d.get("name")}</td><td class="td-right">{d.get("cap_disp")}</td><td class="td-center">{score_disp}</td><td class="td-center">{d.get("strategy")}</td><td class="td-right td-bold">{price_disp}</td><td class="td-right">{buy:,.0f}<br><span style="font-size:10px;color:#666">{diff_txt}</span></td><td class="td-right">{mdd_disp}<br>{sl_pct_disp}</td><td class="td-left" style="line-height:1.2;font-size:11px;">{target_txt}</td><td class="td-center">{d.get("rsi_disp")}</td><td class="td-right">{vol_disp}<br>({avg_vol_html})</td><td class="td-center td-blue">{bt_cell_content}</td><td class="td-center">{d.get("per")}<br>{d.get("pbr")}</td><td class="td-center">{d.get("momentum")}</td><td class="th-left">{d.get("comment")}</td></tr>'
 
 
         # ヘッダーとツールチップデータの定義 (2段組みに対応するため\nを使用)
@@ -1041,7 +1036,7 @@ if st.session_state.analyzed_data:
             ("押し目\n勝敗数", "60px", "過去75日のバックテストにおける、推奨エントリー（押し目）での勝敗数。"), 
             ("PER\nPBR", "60px", "株価収益率/株価純資産倍率。市場の評価指標。"), # 修正
             ("直近\n勝率", "40px", "直近5日間の前日比プラスだった日数の割合。"), # 修正
-            ("アイの所感", "min-width:175px;", "アイ（プロトレーダー）による分析コメント。リスクや流動性に関する警告を最優先して発言します。"), # ★ 幅を175pxに縮小
+            ("アイの所感", "min-width:350px;", "アイ（プロトレーダー）による分析コメント。リスクや流動性に関する警告を最優先して発言します。"), 
         ]
 
         # ヘッダーHTMLの生成
