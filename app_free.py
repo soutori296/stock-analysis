@@ -985,57 +985,10 @@ def create_table(d_list, title):
     
     rows = ""
     for i, d in enumerate(d_list):
-        price = d.get('price')
-        price_disp = f"{price:,.0f}" if price else "-"
-        buy = d.get('buy', 0)
-        diff = price - buy if price and buy else 0
-        diff_txt = f"({diff:+,.0f})" if diff != 0 else "(0)"
-        p_half = d.get('p_half', 0)
-        p_full = d.get('p_full', 0)
-        
-        # 利確目標乖離率の計算
-        kabu_price = d.get("price")
-        half_pct = ((p_half / kabu_price) - 1) * 100 if kabu_price > 0 and p_half > 0 else 0
-        full_pct = ((p_full / kabu_price) - 1) * 100 if kabu_price > 0 and p_full > 0 else 0
-        
-        target_txt = "-"
-        if p_half > 0:
-             # ★ 利確目標の2段組み: 半益(乖離率)を1段目、全益(乖離率)を2段目
-            target_txt = f"半:{p_half:,} ({half_pct:+.1f}%)<br>全:{p_full:,} ({full_pct:+.1f}%)" 
-        else:
-             target_txt = "目標超過/無効"
-        
-        # backtestフィールドはHTML表示用
-        # 押し目勝敗数の2段組み
-        bt_display = d.get("backtest", "-").replace("<br>", " ") # 既存の<br>をスペースに置換
-        bt_parts = bt_display.split('(')
-        bt_row1 = bt_parts[0].strip()
-        bt_row2 = f'({bt_parts[1].strip()}' if len(bt_parts) > 1 else ""
-        bt_cell_content = f'{bt_row1}<br>{bt_row2}'
-        
-        # 出来高（5MA比）の表示
-        vol_disp = d.get("vol_disp", "-")
-        
-        # 【★ MDDと推奨SL乖離率】
-        mdd_disp = f"{d.get('max_dd_pct', 0.0):.1f}%"
-        sl_pct_disp = f"{d.get('sl_pct', 0.0):.1f}%"
-        
-        # 【★ 出来高の統合表示】
-        avg_vol_html = format_volume(d.get('avg_volume_5d', 0))
-        
-        # 【★ スコアの強調表示】
-        score_disp = f'{d.get("score")}'
-        if d.get("score", 0) >= 80:
-            score_disp = f'<span class="score-high">{score_disp}</span>'
-            
-        # ★ NameError を解消するためにここで定義します
-        comment_html = d.get("comment", "")
-
-        # 【★ テーブル行の追加（新しい並び順と2段組み対応）】
+        # ... (中略: create_tableの中身) ...
         # AIコメントを <div class="comment-scroll-box"> でラップ
         rows += f'<tr><td class="td-center">{i+1}</td><td class="td-center">{d.get("code")}</td><td class="th-left td-bold">{d.get("name")}</td><td class="td-right">{d.get("cap_disp")}</td><td class="td-center">{score_disp}</td><td class="td-center">{d.get("strategy")}</td><td class="td-right td-bold">{price_disp}</td><td class="td-right">{buy:,.0f}<br><span style="font-size:10px;color:#666">{diff_txt}</span></td><td class="td-right">{mdd_disp}<br>{sl_pct_disp}</td><td class="td-left" style="line-height:1.2;font-size:11px;">{target_txt}</td><td class="td-center">{d.get("rsi_disp")}</td><td class="td-right">{vol_disp}<br>({avg_vol_html})</td><td class="td-center td-blue">{bt_cell_content}</td><td class="td-center">{d.get("per")}<br>{d.get("pbr")}</td><td class="td-center">{d.get("momentum")}</td><td class="th-left"><div class="comment-scroll-box">{comment_html}</div></td></tr>'
-
-
+    
     # ヘッダーとツールチップデータの定義 (2段組みに対応するため\nを使用)
     headers = [
         ("No", "25px", None), 
@@ -1101,3 +1054,4 @@ def create_table(d_list, title):
         if 'backtest_raw' in df_raw.columns:
             df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'}) 
         st.dataframe(df_raw)
+
