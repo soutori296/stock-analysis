@@ -217,61 +217,84 @@ st.markdown(f"""
 </p>
 """, unsafe_allow_html=True)
 
-# --- 説明書 (最終合意ロジックに更新 - 表示安全性を最優先) ---
-# --- 説明書 (最終合意ロジックに更新 - 表示安全性を最優先) ---
-with st.expander("📘 取扱説明書 (最終分析ロジック)"):
-    # 安全のため、装飾用のCSSクラス定義を一切使わず、インラインスタイルと単純なHTMLのみを使用します。
+# --- 説明書 (マニュアル詳細化 - 最終版の利確目標を更新) ---
+with st.expander("📘 取扱説明書 (データ仕様・判定基準)"):
     st.markdown("""
     <div class="center-text">
     
-    <h4>1. データ取得とハイブリッドデータ仕様</h4>
+    <h4>1. データ取得と時間の仕組み</h4>
     <table class="desc-table">
-        <tr><th>状態・時刻</th><th>テクニカル分析用データ</th><th>表示用データ (株価・出来高)</th></tr>
-        <tr><td><b>ザラ場中 (~15:50)</b></td><td><b>前日までの確定データ (Stooq)</b></td><td><b>リアルタイムデータ (株探)</b></td></tr>
-        <tr><td><b>引け後 (15:50~)</b></td><td><b>当日確定足結合データ (Stooq+株探OHLCV)</b></td><td><b>当日確定値 (株探)</b></td></tr>
+      <tr><th style="width:20%">項目</th><th style="width:20%">取得元</th><th style="width:20%">状態</th><th>解説</th></tr>
+      <tr>
+        <td>現在値・出来高</td><td><b>株情報サイト</b></td><td><b>リアルタイム</b></td>
+        <td>データは<b>20分遅延</b>します。ザラ場中は参考値、<b>15:50以降</b>が当日の確定値となります。</td>
+      </tr>
+      <tr>
+        <td>テクニカル</td><td><b>Stooq</b></td><td><b>前日確定</b></td>
+        <td>移動平均線、RSI、勝率などは「前日終値」基準で判定します。ザラ場中は前日までのデータで分析します。</td>
+      </tr>
+      <tr>
+        <td>市場環境</td><td><b>外部サイト</b></td><td><b>リアルタイム</b></td>
+        <td>日経平均25日騰落レシオを取得し、市場全体の過熱感を評価します。</td>
+      </tr> 
     </table>
     <br>
 
-    <h4>2. 時価総額分類と目標リターン ($T_{pct}$)</h4>
-    <table class="desc-table">
-        <tr><th style="width:20%">分類</th><th style="width:20%">基準額 (億円)</th><th style="width:15%">目標 $T_{pct}$</th><th>順張り目標価格</th></tr>
-        <tr><td><b>超大型株</b></td><td>10,000 億円 以上</td><td>1.5%</td><td rowspan="5">半益: 推奨買値 * (1 + T_pct / 2)<br>全益: 推奨買値 * (1 + T_pct)</td></tr>
-        <tr><td><b>大型株</b></td><td>3,000 億円 ～ 10,000 億円未満</td><td>2.0%</td></tr>
-        <tr><td><b>中型株</b></td><td>500 億円 ～ 3,000 億円未満</td><td>3.0%</td></tr>
-        <tr><td><b>小型株</b></td><td>100 億円 ～ 500 億円未満</td><td>4.0%</td></tr>
-        <tr><td><b>超小型株</b></td><td>100 億円 未満</td><td>5.0%</td></tr>
-    </table>
-    <p style="font-size:12px; margin-top:5px;">※ <b>🌊逆張り</b>の利確目標は、半益: 5MA-1円 / 全益: 25MA-1円</p>
+    <h4>2. 分析ロジック詳細</h4>
 
-    <h4>3. AIスコア（点数）配分とリスクウェイト強化</h4>
-    <p style="font-size:14px; margin-bottom:5px;"><b>リスク管理を最優先する厳格な評価システムです。</b></p>
+    <h5>① 戦略判定（🔥順張り / 🌊逆張り）</h5>
     <table class="desc-table">
-        <tr><th>項目</th><th>条件</th><th>配点/減点</th><th>備考</th></tr>
-        
-        <tr><td style="font-weight:bold; color:#5D4037;">ベーススコア</td><td>-</td><td><b>+50点</b></td><td>全ての分析の起点</td></tr>
-        
-        <tr><th style="background-color:#f44336; color:white;" colspan="4">構造的リスク減点 (最大-80点)</th></tr>
-        <tr><td style="color:#d32f2f;">R/R比 不利</td><td>R/R比 &lt; 1.0</td><td><b>-25点</b></td><td>リワードがリスクを下回る。</td></tr>
-        <tr><td style="color:#d32f2f;">RSI極端 (大型株G)</td><td>🔥順張りでRSI &ge; 85 / 🌊逆張りでRSI &le; 20 <br>(時価総額 &ge; 3000億円)</td><td><b>-15点</b></td><td>大型株のトレンド継続性を許容し緩和。</td></tr>
-        <tr><td style="color:#d32f2f;">RSI極端 (小型株G)</td><td>🔥順張りでRSI &ge; 80 / 🌊逆張りでRSI &le; 20 <br>(時価総額 &lt; 3000億円)</td><td><b>-25点</b></td><td>小型株の急落リスクを厳しく評価。</td></tr>
-        <tr><td style="color:#d32f2f;">流動性不足(致命的)</td><td>5日平均出来高が 1,000株未満</td><td><b>-30点</b></td><td>換金リスクが極めて高い。</td></tr>
-        
-        <tr><th style="background-color:#4CAF50; color:white;" colspan="4">戦略・トレンド・勢い加点 (最大+45点)</th></tr>
-        <tr><td style="color:#1976d2;">順張り戦略</td><td>パーフェクトオーダー＆5日線上昇</td><td><b>+15点</b></td><td>勢いの評価。</td></tr>
-        <tr><td style="color:#1976d2;">逆張り戦略</td><td>RSI &le; 30 または 25MAから -10%乖離</td><td><b>+15点</b></td><td>反発期待値を評価。</td></tr>
-        <tr><td style="color:#1976d2;">RSI適正</td><td>RSI 55〜65</td><td><b>+10点</b></td><td>トレンドが最も継続しやすい水準。</td></tr>
-        <tr><td style="color:#1976d2;">出来高活発</td><td>出来高が5日平均の1.5倍超</td><td><b>+10点</b></td><td>市場の注目度を評価。</td></tr> 
-        <tr><td style="color:#1976d2;"><b>究極の出来高</b></td><td>出来高が5日平均の<b>3.0倍超</b></td><td><b>+5点</b> (追加)</td><td><b>満点100点到達のトリガー。</b></td></tr> 
-        <tr><td style="color:#1976d2;">直近勝率</td><td>直近5日で4日以上上昇</td><td><b>+5点</b></td><td>短期的な上値追いの勢いを評価。</td></tr>
-
-        <tr><th style="background-color:#FF9800; color:white;" colspan="4">個別リスク評価 (最大-40点)</th></tr>
-        <tr><td style="color:#1976d2;">DD率 優秀</td><td>最大DD率 &lt; 1.0%</td><td><b>+5点</b></td><td>過去の損失リスクが極めて低い。</td></tr>
-        <tr><td style="color:#d32f2f;">DD率 連続減点</td><td>2.0% &lt; DD &le; 10.0%</td><td><b>-2 * floor(DD-2.0)</b></td><td>DD率に比例した減点 (強化)。</td></tr>
-        <tr><td style="color:#d32f2f;">DD率 高リスク</td><td>最大DD率 &gt; 10.0%</td><td><b>-20点</b></td><td>大幅な損失リスク (強化)。</td></tr>
-        <tr><td style="color:#d32f2f;">SL乖離率小</td><td>SL乖離率が &plusmn;3.0%未満</td><td><b>-5点</b></td><td>損切り余地が少ない (ウェイト調整)。</td></tr>
-        <tr><td style="color:#d32f2f;">SL乖離率小(警戒)</td><td><b>市場警戒時</b> (レシオ&ge;125%)</td><td><b>-20点</b></td><td>市場警戒時はリスクを極度に嫌う (強化)。</td></tr>
+        <tr><th style="width:20%">戦略</th><th style="width:80%">判定基準と解説</th></tr>
+        <tr>
+            <td><b>🔥 順張り</b></td>
+            <td><b>【判定条件】</b>移動平均線が「5日 ＞ 25日 ＞ 75日」のパーフェクトオーダーで、かつ5日移動平均線が前日より上昇している場合。<br><b>【解説】</b>明確な上昇トレンドの初期または継続と判断し、一時的な下落（押し目）でのエントリーを推奨します。</td>
+        </tr>
+        <tr>
+            <td><b>🌊 逆張り</b></td>
+            <td><b>【判定条件】</b>「RSIが30以下」<b>または</b>「現在値が25日移動平均線から-10%以上乖離している」場合。<br><b>【解説】</b>売られすぎ水準、または短期的な急落局面と判断し、テクニカルな反発（リバウンド）を狙います。</td>
+        </tr>
+        <tr>
+            <td><b>👀 様子見</b></td>
+            <td>上記以外の条件。明確なトレンドがなく、レンジ相場や方向感が定まらないと判断します。</td>
+        </tr>
     </table>
     
+    <h5>② AIスコア（点数）配分</h5>
+    <table class="desc-table">
+        <tr><th style="width:20%">項目</th><th>条件</th><th>配点</th><th>備考</th></tr>
+        <tr><td><b>ベーススコア</b></td><td>-</td><td>50点</td><td>-</td></tr>
+        <tr><td><b>順張り</b></td><td>パーフェクトオーダー＆5日線上昇</td><td>+20点</td><td>強いトレンドの形成を評価</td></tr>
+        <tr><td><b>逆張り</b></td><td>RSI30以下または25MA-10%乖離</td><td>+15点</td><td>反発期待値を評価</td></tr>
+        <tr><td><b>RSI適正</b></td><td>RSI 55〜65</td><td>+10点</td><td>トレンドが最も継続しやすい水準を評価</td></tr>
+        <tr><td><b>出来高活発</b></td><td>出来高が5日平均の1.5倍超。出来高時間配分ロジックを使いリサーチ時点の出来高を評価します。</td><td>+10点</td><td>市場の注目度とエネルギーを評価。<b>大口参入の可能性</b>を示唆します。</td></tr> 
+        <tr><td><b>直近勝率</b></td><td>直近5日で4日以上上昇</td><td>+5点</td><td>短期的な上値追いの勢いを評価</td></tr>
+        <tr><td><b>リスク減点</b></td><td>最大ドローダウン高 or SL乖離率小</td><td>-5点 / -5点（市場過熱時は-10点 / -10点に強化）</td><td>最大ドローダウン(-10%超)や、損切り余地(MA75/25乖離率±3%以内)が少ない銘柄を減点します。市場が過熱している場合（25日騰落レシオ125%以上）は減点を強化します。</td></tr> 
+        <tr><td><b>合計</b></td><td>(各項目の合計)</td><td><b>最大100点</b></td><td>算出されたスコアが100点を超えた場合でも、<b>上限は100点</b>となります。</td></tr>
+    </table>
+
+    <h5>③ 押し目勝敗数（バックテスト）と推奨利確目標</h5>
+    <table class="desc-table">
+        <tr><th style="width:20%">項目</th><th style="width:80%">ロジック詳細</th></tr>
+        <tr><td><b>対象期間</b></td><td>直近75営業日</td></tr>
+        <tr><td><b>エントリー条件</b></td><td>「5日MA > 25日MA」の状態で、かつ終値が5日移動平均線以下に<b>タッチまたは下回った日</b>（押し目と判断）。</td></tr>
+        <tr><td><b>利確目標</b><br><span style="font-size:12px;">(時価総額別の目標リターン)</span></td><td><b>1兆円以上</b>：エントリー価格から<b>2%の上昇</b> / <b>500億円未満</b>：エントリー価格から<b>5%の上昇</b></td></tr>
+        <tr><td><b>利確目標(半/全)</b><br><span style="font-size:12px;">(売買戦略の推奨値)</span></td><td><b>🔥 順張り</b>：全益は「時価総額別目標の100%」、半益は「全益価格の50%」を計算後、<b>1円単位で切り捨て</b>。 / <b>🌊 逆張り</b>：半益は「5日移動平均線」から<b>-1円</b>、全益は「25日移動平均線」から<b>-1円</b>を目安。</td></tr>
+        <tr><td><b>保有期間</b></td><td>最大10営業日。10日以内に利確目標に到達しなければ「敗北」としてカウント。</td></tr>
+        <tr><td><b>解説</b></td><td>このロジックで過去にトレードした場合の勝敗数。心理的な節目・抵抗線手前での確実な利確を推奨するロジックを適用しています。</td></tr>
+    </table>
+
+    <h5>④ 各種指標の基準</h5>
+    <table class="desc-table">
+        <tr><th style="width:20%">指標</th><th>解説</th></tr>
+        <tr><td><b>出来高比（5日平均）</b></td><td><b>当日のリアルタイム出来高</b>を<b>過去5日間の出来高平均</b>と<b>市場の経過時間比率</b>で調整した倍率。<br>市場が開いている時間帯に応じて、出来高の偏りを考慮し、公平に大口流入を評価します。</td></tr>
+        <tr><td><b>直近勝率</b></td><td>直近5営業日のうち、前日比プラスだった割合。 (例: 80% = 5日中4日上昇)</td></tr>
+        <tr><td><b>RSI</b></td><td>🔵30以下(売られすぎ) / 🟢55-65(上昇トレンド) / 🔴70以上(過熱)</td></tr>
+        <tr><td><b>PER/PBR</b></td><td>市場の評価。低ければ割安とされるが、業績や成長性との兼ね合いが重要。</td></tr>
+        <tr><td><b>最大DD率</b></td><td>過去75日の押し目トレードで、エントリーから期間中最安値までの<b>最大下落率</b>。値が大きいほど過去の損失リスクが高かったことを示します。</td></tr> 
+        <tr><td><b>SL乖離率</b></td><td>現在値と<b>推奨損切りライン（順張り: 25MA、逆張り: 75MA）</b>との乖離率。損切り目安までの<b>下落余地の目安</b>です。</td></tr> 
+        <tr><td><b>流動性(5MA)</b></td><td>過去5日間の平均出来高。<b>1万株未満</b>は流動性リスクが高いと判断し、AIコメントで強く警告されます。</td></tr> 
+        <tr><td><b>25日レシオ</b></td><td>日経平均の25日騰落レシオ。<b>125.0%以上で市場全体が過熱（警戒モード）</b>と判断し、個別株のリスク減点を強化します。</td></tr> 
+    </table>
     </div>
     """, unsafe_allow_html=True)
     
@@ -1137,6 +1160,7 @@ if st.session_state.analyzed_data:
         if 'backtest_raw' in df_raw.columns:
             df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'}) 
         st.dataframe(df_raw)
+
 
 
 
