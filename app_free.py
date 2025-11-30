@@ -684,7 +684,7 @@ def get_stock_data(ticker):
         # --- 2. 戦略/トレンド加点 (最大+45点) ---
         # 2-A. 戦略加点 (順張りは+15に減額)
         if "順張り" in strategy: score += 15 # +15点に減額
-        if "逆張り" in strategy: score += 15
+        if "逆張り" in strategy: score += 10
         
         # 2-B. RSI適正
         if 55 <= rsi_val <= 65: score += 10
@@ -1098,6 +1098,7 @@ if st.session_state.analyzed_data:
         if 'backtest_raw' in df_raw.columns:
             df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'}) 
         st.dataframe(df_raw)
+
 
 
 
