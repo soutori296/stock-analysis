@@ -136,11 +136,12 @@ st.markdown(f"""
     .desc-table {{ width: 90%; margin: 0 auto; border-collapse: collapse; background-color: #fff; color: #000; font-family: "Meiryo", sans-serif; }}
     .desc-table th {{ background-color: #d0d0d0; border: 1px solid #999; padding: 8px; text-align: center !important; }}
     .desc-table td {{ border: 1px solid #ccc; padding: 8px; text-align: left !important; }}
-    /* 説明書内の強調文字色を設定 */
-    .desc-risk { color: #d32f2f; font-weight:bold; }
-    .desc-add { color: #1976d2; font-weight:bold; }
-    .desc-base { color: #5D4037; font-weight:bold; }
-    .desc-head { background-color: #f0f0f0; font-weight:bold; }
+    
+    /* 説明書内の強調文字色を定義 (後で説明書ブロックに移動) */
+    /* .desc-risk { color: #d32f2f; font-weight:bold; } */
+    /* .desc-add { color: #1976d2; font-weight:bold; } */
+    /* .desc-base { color: #5D4037; font-weight:bold; } */
+    /* .desc-head { background-color: #f0f0f0; font-weight:bold; } */
     
     /* クラス定義 (変更なし) */
     .th-left {{ text-align: left !important; }}
@@ -224,8 +225,15 @@ st.markdown(f"""
 
 # --- 説明書 (最終合意ロジックに更新 - HTMLタグ問題を解消) ---
 with st.expander("📘 取扱説明書 (最終分析ロジック)"):
-    # HTMLタグが丸見えになるのを防ぐため、可能な限りHTMLとCSSクラスで表現
+    # NameErrorを避けるため、CSSクラスの定義を<style>タグに含める
     st.markdown("""
+    <style>
+        .desc-risk { color: #d32f2f; font-weight:bold; }
+        .desc-add { color: #1976d2; font-weight:bold; }
+        .desc-base { color: #5D4037; font-weight:bold; }
+        .desc-head { background-color: #f0f0f0; font-weight:bold; }
+    </style>
+    
     <div class="center-text">
     
     <h4>1. データ取得とハイブリッドデータ仕様</h4>
@@ -255,7 +263,7 @@ with st.expander("📘 取扱説明書 (最終分析ロジック)"):
         
         <tr><td class="desc-head" colspan="4" style="background-color:#f44336; color:white;">構造的リスク減点 (投資適格性フィルター)</td></tr>
         <tr><td class="desc-risk">R/R比 不利</td><td>R/R比 &lt; 1.0</td><td><b>-25点</b></td><td>リワードがリスクを下回る。</td></tr>
-        <tr><td class="desc-risk">RSI極端 (大型株G)</td><td>🔥順張りでRSI &ge; 85 / 🌊逆張りでRSI &le; 20 <br>(時価総額 &ge; 3000億円)</td><td><b>-15点</b></td><td>大型株のトレンド継続性を考慮し緩和。</td></tr>
+        <tr><td class="desc-risk">RSI極端 (大型株G)</td><td>🔥順張りでRSI &ge; 85 / 🌊逆張りでRSI &le; 20 <br>(時価総額 &ge; 3000億円)</td><td><b>-15点</b></td><td>大型株のトレンド継続性を許容し緩和。</td></tr>
         <tr><td class="desc-risk">RSI極端 (小型株G)</td><td>🔥順張りでRSI &ge; 80 / 🌊逆張りでRSI &le; 20 <br>(時価総額 &lt; 3000億円)</td><td><b>-25点</b></td><td>小型株の急落リスクを厳しく評価。</td></tr>
         <tr><td class="desc-risk">流動性不足(致命的)</td><td>5日平均出来高が 1,000株未満</td><td><b>-30点</b></td><td>換金リスクが極めて高い。</td></tr>
         
