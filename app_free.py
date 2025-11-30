@@ -105,7 +105,7 @@ st.markdown(f"""
     .ai-table {{ 
         width: 100%; 
         border-collapse: collapse; 
-        min-width: 1500px; /* ★ 最低幅を大きく設定し、確実にスクロールを出す */
+        min-width: 1100px; /* ★ 元の最低幅に戻す */
         background-color: #ffffff; 
         color: #000000;
         font-family: "Meiryo", sans-serif;
@@ -1041,7 +1041,7 @@ if st.session_state.analyzed_data:
             ("押し目\n勝敗数", "60px", "過去75日のバックテストにおける、推奨エントリー（押し目）での勝敗数。"), 
             ("PER\nPBR", "60px", "株価収益率/株価純資産倍率。市場の評価指標。"), # 修正
             ("直近\n勝率", "40px", "直近5日間の前日比プラスだった日数の割合。"), # 修正
-            ("アイの所感", "min-width:450px;", "アイ（プロトレーダー）による分析コメント。リスクや流動性に関する警告を最優先して発言します。"), # min-widthを大きく設定
+            ("アイの所感", "min-width:350px;", "アイ（プロトレーダー）による分析コメント。リスクや流動性に関する警告を最優先して発言します。"), # min-widthを元の350pxに戻す
         ]
 
         # ヘッダーHTMLの生成
