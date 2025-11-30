@@ -219,7 +219,7 @@ st.markdown(f"""
 
 # --- 説明書 (最終合意ロジックに更新 - 表示安全性を最優先) ---
 with st.expander("📘 取扱説明書 (最終分析ロジック)"):
-    # **最終安全対策**: HTMLタグを排除し、純粋なMarkdownテーブル記法のみを使用します。
+    # **最終安全対策**: 崩壊の原因となるMarkdownとHTMLの境界線を厳密に管理します。
     st.markdown("""
     <div class="center-text">
     
@@ -1139,6 +1139,7 @@ if st.session_state.analyzed_data:
         if 'backtest_raw' in df_raw.columns:
             df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'}) 
         st.dataframe(df_raw)
+
 
 
 
