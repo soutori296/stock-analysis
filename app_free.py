@@ -105,7 +105,7 @@ st.markdown(f"""
     .ai-table {{ 
         width: 100%; 
         border-collapse: collapse; 
-        min-width: 1100px; 
+        min-width: 1100px; /* ★ 最低幅を設定し、確実にスクロールを出す */
         background-color: #ffffff; 
         color: #000000;
         font-family: "Meiryo", sans-serif;
@@ -119,7 +119,7 @@ st.markdown(f"""
         text-align: center; 
         vertical-align: middle; 
         font-weight: bold; 
-        white-space: normal !important; 
+        white-space: normal !important; /* 2段組みを強制 */
         position: relative; 
         line-height: 1.2; 
     }}
@@ -701,7 +701,6 @@ def get_stock_data(ticker):
             
         # 2. 現在値がSLラインに近すぎる場合 (SL余地が小さい、乖離率が±3%未満)
         if sl_ma > 0 and abs(sl_pct) < 3.0: 
-             # 順張り戦略でのみリスク高とみなし減点（逆張りはサポート付近がエントリーポイント）
              if "順張り" in strategy: sl_risk_deduct = -5 
              
         # 3. 市場警戒モード判定と減点強化
@@ -966,12 +965,18 @@ if st.session_state.analyzed_data:
             
             target_txt = "-"
             if p_half > 0:
-                target_txt = f"半:{p_half:,} ({half_pct:+.1f}%)<br>全:{p_full:,} ({full_pct:+.1f}%)"
+                 # ★ 利確目標の2段組みを修正: 半益を1段目、全益（+乖離率%）を2段目
+                target_txt = f"半:{p_half:,}<br>全:{p_full:,} ({full_pct:+.1f}%)" 
             else:
                  target_txt = "目標超過/無効"
             
             # backtestフィールドはHTML表示用
-            bt_display = d.get("backtest", "-").replace(" (", "<br>(") 
+            # ★ 押し目勝敗数の2段組みを修正: 勝敗を1段目、(目標リターン%)を2段目
+            bt_display = d.get("backtest", "-").replace("<br>", " ") # 既存の<br>をスペースに置換
+            bt_parts = bt_display.split('(')
+            bt_row1 = bt_parts[0].strip()
+            bt_row2 = f'({bt_parts[1].strip()}' if len(bt_parts) > 1 else ""
+            bt_cell_content = f'{bt_row1}<br>{bt_row2}'
             
             # 出来高（5MA比）の表示
             vol_disp = d.get("vol_disp", "-")
@@ -989,11 +994,10 @@ if st.session_state.analyzed_data:
                 score_disp = f'<span class="score-high">{score_disp}</span>'
 
             # 【★ テーブル行の追加（新しい並び順と2段組み対応）】
-            rows += f'<tr><td class="td-center">{i+1}</td><td class="td-center">{d.get("code")}</td><td class="th-left td-bold">{d.get("name")}</td><td class="td-right">{d.get("cap_disp")}</td><td class="td-center">{score_disp}</td><td class="td-center">{d.get("strategy")}</td><td class="td-right td-bold">{price_disp}</td><td class="td-right">{buy:,.0f}<br><span style="font-size:10px;color:#666">{diff_txt}</span></td><td class="td-right">{mdd_disp}<br>{sl_pct_disp}</td><td class="td-left" style="line-height:1.2;font-size:11px;">{target_txt}</td><td class="td-center">{d.get("rsi_disp")}</td><td class="td-right">{vol_disp}<br>({avg_vol_html})</td><td class="td-center td-blue">{bt_display}</td><td class="td-center">{d.get("per")}<br>{d.get("pbr")}</td><td class="td-center">{d.get("momentum")}</td><td class="th-left">{d.get("comment")}</td></tr>'
+            rows += f'<tr><td class="td-center">{i+1}</td><td class="td-center">{d.get("code")}</td><td class="th-left td-bold">{d.get("name")}</td><td class="td-right">{d.get("cap_disp")}</td><td class="td-center">{score_disp}</td><td class="td-center">{d.get("strategy")}</td><td class="td-right td-bold">{price_disp}</td><td class="td-right">{buy:,.0f}<br><span style="font-size:10px;color:#666">{diff_txt}</span></td><td class="td-right">{mdd_disp}<br>{sl_pct_disp}</td><td class="td-left" style="line-height:1.2;font-size:11px;">{target_txt}</td><td class="td-center">{d.get("rsi_disp")}</td><td class="td-right">{vol_disp}<br>({avg_vol_html})</td><td class="td-center td-blue">{bt_cell_content}</td><td class="td-center">{d.get("per")}<br>{d.get("pbr")}</td><td class="td-center">{d.get("momentum")}</td><td class="th-left">{d.get("comment")}</td></tr>'
 
 
         # ヘッダーとツールチップデータの定義
-        # ★ 2段組みに合わせてヘッダーテキストを修正
         headers = [
             ("No", "25px", None), 
             ("コード", "45px", None), 
@@ -1007,8 +1011,8 @@ if st.session_state.analyzed_data:
             ("利確目標\n(乖離率%)", "85px", "時価総額別リターンと心理的な節目を考慮した目標値。"), 
             ("RSI", "50px", "相対力指数。🔵30以下(売られすぎ) / 🟢55-65(上昇トレンド) / 🔴70以上(過熱)"), 
             ("出来高\n(5MA比)", "80px", "上段は当日の出来高と5日平均出来高（補正済み）の比率。下段は5日平均出来高（流動性）。1万株未満は赤字で警告。"), 
-            ("押し目\n勝敗数", "65px", "過去75日のバックテストにおける、推奨エントリー（押し目）での勝敗数。"), 
-            ("PER\nPBR", "65px", "株価収益率/株価純資産倍率。市場の評価指標。"), # ★ 2段組み
+            ("押し目\n勝敗数", "70px", "過去75日のバックテストにおける、推奨エントリー（押し目）での勝敗数。"), # ★ 7文字分を確保するため70pxに拡大
+            ("PER\nPBR", "65px", "株価収益率/株価純資産倍率。市場の評価指標。"), 
             ("直近\n勝率", "50px", "直近5日間の前日比プラスだった日数の割合。"),
             ("アイの所感", "min-width:350px;", "アイ（プロトレーダー）による分析コメント。リスクや流動性に関する警告を最優先して発言します。"), 
         ]
