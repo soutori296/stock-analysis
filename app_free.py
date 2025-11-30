@@ -335,7 +335,7 @@ def get_stock_info(code):
     }
     
     try:
-        res = requests.get(url, headers=headers, timeout=5)
+        res = requests.get(url, headers=headers, timeout=8)
         res.encoding = res.apparent_encoding
         html = res.text.replace("\n", "")
         
@@ -914,8 +914,11 @@ if st.button("🚀 分析開始 (アイに聞く)"):
     elif not tickers_input.strip():
         st.warning("銘柄コードを入力してください。")
     else:
-        st.session_state.analyzed_data = []
-        raw_tickers = list(set([t.strip() for t in tickers_input.replace("\n", ",").split(",") if t.strip()]))
+        raw_tickers_str = tickers_input.replace("\n", ",") \
+                                       .replace(" ", ",") \
+                                       .replace("、", ",")                                  
+        raw_tickers = list(set([t.strip() for t in raw_tickers_str.split(",") if t.strip()]))
+        
         data_list = []
         bar = st.progress(0)
         
@@ -1111,3 +1114,4 @@ if st.session_state.analyzed_data:
         if 'backtest_raw' in df_raw.columns:
             df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'}) 
         st.dataframe(df_raw)
+
