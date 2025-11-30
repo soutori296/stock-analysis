@@ -272,7 +272,7 @@ with st.expander("📘 取扱説明書 (データ仕様・判定基準)"):
     <h5>④ 各種指標の基準</h5>
     <table class="desc-table">
         <tr><th style="width:20%">指標</th><th>解説</th></tr>
-        <tr><td><b>出来高比（5MA平均）</b></td><td><b>当日のリアルタイム出来高</b>を<b>過去5日間の出来高平均</b>と<b>市場の経過時間比率</b>で調整した倍率。<br>市場が開いている時間帯に応じて、出来高の偏りを考慮し、公平に大口流入を評価します。</td></tr>
+        <tr><td><b>出来高比（5日平均）</b></td><td><b>当日のリアルタイム出来高</b>を<b>過去5日間の出来高平均</b>と<b>市場の経過時間比率</b>で調整した倍率。<br>市場が開いている時間帯に応じて、出来高の偏りを考慮し、公平に大口流入を評価します。</td></tr>
         <tr><td><b>直近勝率</b></td><td>直近5営業日のうち、前日比プラスだった割合。 (例: 80% = 5日中4日上昇)</td></tr>
         <tr><td><b>RSI</b></td><td>🔵30以下(売られすぎ) / 🟢55-65(上昇トレンド) / 🔴70以上(過熱)</td></tr>
         <tr><td><b>PER/PBR</b></td><td>市場の評価。低ければ割安とされるが、業績や成長性との兼ね合いが重要。</td></tr>
@@ -752,7 +752,7 @@ def get_stock_data(ticker):
         st.session_state.error_messages.append(f"データ処理エラー (コード:{ticker}): 予期せぬエラーが発生しました。詳細: {e}")
         return None
 
-# 【★ 修正箇所 3: batch_analyze_with_ai 関数の改修】(変更なし)
+# 【★ 修正箇所 3: batch_analyze_with_ai 関数の改修】
 def batch_analyze_with_ai(data_list):
     if not model: 
         return {}, "⚠️ AIモデルが設定されていません。APIキーを確認してください。"
@@ -783,7 +783,7 @@ def batch_analyze_with_ai(data_list):
         sl_ma_disp = f"SL目安MA:{sl_ma:,.0f}" if sl_ma > 0 else "SL目安:なし"
 
         # ★ プロンプトにリスク情報と流動性を追加
-        prompt_text += f"ID:{d['code']} | {d['name']} | 現在:{price:,.0f} | 戦略:{d['strategy']} | RSI:{d['rsi']:.1f} | 5MA乖離率:{ma_div:+.1f}% | {target_info} | 出来高倍率:{d['vol_ratio']:.1f}倍 | リスク情報: MDD:{mdd:+.1f}%, MA75乖離率:{sl_pct:+.1f}% | {sl_ma_disp} | {low_liquidity_status}\n" 
+        prompt_text += f"ID:{d['code']} | {d['name']} | 現在:{price:,.0f} | 戦略:{d['strategy']} | RSI:{d['rsi']:.1f} | 5MA乖離率:{ma_div:+.1f}% | {target_info} | 出来高倍率:{d['vol_ratio']:.1f}倍 | リスク情報: MDD:{mdd:+.1f}%, MA75乖離率:{sl_pct:+.1f}% | {sl_ma_disp} | {low_liquidity_status} | AIスコア:{d['score']}\n" # AIスコアをプロンプトに追加 (強調表現の判断用)
     
     # 【★ 市場環境の再設定】
     r25 = market_25d_ratio
@@ -804,19 +804,22 @@ def batch_analyze_with_ai(data_list):
     {market_alert_info}
     
     【コメント作成の指示】
-    1.  <b>表現の多様性を最重視してください。</b>10銘柄あれば10通りの異なる視点やボキャブラリーを使用し、紋切り型な文章は厳禁です。
-    2.  <b>AIスコアに応じた文章量と熱量を厳格に調整してください。</b>
-        - **AIスコア 85点以上 (超高評価)**: 70文字〜90文字程度。**「注目すべき銘柄」「大口の買い」**など、熱意と期待感を示す表現を盛り込んでください。
+    1.  <b>Markdownの太字（**）は絶対に使用せず、HTMLの太字（<b>）のみをコメント内で使用してください。</b>
+    2.  <b>表現の多様性を最重視してください。</b>10銘柄あれば10通りの異なる視点やボキャブラリーを使用し、紋切り型な文章は厳禁です。
+    3.  <b>AIスコアに応じた文章量と熱量を厳格に調整してください。</b>
+        - **AIスコア 85点以上 (超高評価)**: 70文字〜90文字程度。<b>「注目すべき銘柄」「大口の買い」</b>など、熱意と期待感を示す表現を盛り込んでください。
         - **AIスコア 75点 (高評価)**: 60文字〜80文字程度。<b>「トレンド良好」「妙味がある」</b>など、期待と冷静な分析を両立させた表現にしてください。
         - **AIスコア 65点以下 (中立/様子見)**: 50文字〜70文字程度。<b>「様子見が賢明」「慎重な見極め」</b>など、リスクを強調し、冷静沈着なトーンを維持してください。
-    3.  市場環境が【明確な過熱ゾーン】の場合、全てのコメントのトーンを控えめにし、「市場全体が過熱しているため、この銘柄にも調整が入るリスクがある」といった**強い警戒感**を盛り込んでください。
-    4.  戦略の根拠（パーフェクトオーダー、売られすぎ、乖離率など）と、RSIの状態を必ず具体的に盛り込んでください。
-    5.  **利確目標:目標超過または無効**と記載されている銘柄については、「既に利確水準を大きく超過しており、新規の買いは慎重にすべき」といった**明確な警告**を含めてください。
-    6.  出来高倍率が1.5倍を超えている場合は、「大口の買い」といった表現を使い、その事実を盛り込んでください。
-    7.  **【最重要: リスク情報と損切り基準】** リスク情報として提供された **MDD (最大ドローダウン)** や **MA75乖離率** を参照し、**リスク管理の重要性**に言及してください。
+    4.  市場環境が【明確な過熱ゾーン】の場合、全てのコメントのトーンを控えめにし、「市場全体が過熱しているため、この銘柄にも調整が入るリスクがある」といった**強い警戒感**を盛り込んでください。
+    5.  戦略の根拠（パーフェクトオーダー、売られすぎ、乖離率など）と、RSIの状態を必ず具体的に盛り込んでください。
+    6.  **利確目標:目標超過または無効**と記載されている銘柄については、「既に利確水準を大きく超過しており、新規の買いは慎重にすべき」といった**明確な警告**を含めてください。
+    7.  出来高倍率が1.5倍を超えている場合は、<b>「大口の買い」</b>といった表現を使い、その事実を盛り込んでください。
+    8.  **【最重要: リスク情報と損切り基準・強調表現の制限】**
+        - リスク情報（MDD、SL乖離率）を参照し、リスク管理の重要性に言及してください。
         - MDDが-8.0%を超える（下落幅が大きい）場合は、「過去の損失リスクが高い」旨を明確に伝えてください。
-        - **流動性:** **低流動性:警告**の銘柄については、「平均出来高が1万株未満と極めて低く、希望価格での売買が困難な**流動性リスク**を伴います。ロット調整を強く推奨します。」といった**明確な警告**を必ずコメントの冒頭に含めてください。
+        - **流動性:** **低流動性:警告**の銘柄については、コメントの冒頭で「平均出来高が1万株未満と極めて低く、希望価格での売買が困難な<b>流動性リスク</b>を伴います。ロット調整を強く推奨します。」といった**明確な警告**を必ず含めてください。
         - **損切り目安:** 「長期サポートラインである**SL目安MA（{sl_ma_disp}）を終値で明確に割り込んだ場合**は、速やかに損切りを検討すべき」といった**撤退基準**を明示してください。
+        - **強調表現の制限**: 10銘柄中、最大3銘柄のコメントでのみ、<b>AIスコア80点以上</b>で**特に重要な部分**（例：大口の買い、強力なトレンド）を**1箇所（10文字以内）**に限り、赤太字のHTMLタグ（<b><span style="color:red;">...</span></b>）を使用して強調しても良い。それ以外のコメントでは赤太字を絶対に使用しないでください。
     
     【出力形式】
     ID:コード | コメント
@@ -842,8 +845,12 @@ def batch_analyze_with_ai(data_list):
         parts = text.split("END_OF_LIST", 1)
         comment_lines = parts[0].strip().split("\n")
         
-        # ★ AIが生成したコメントからHTMLタグを全て除去
-        monologue = re.sub(r'<[^>]+>', '', parts[1]).strip()
+        # ★ モノローグのクリーンアップ：HTMLタグとMarkdown太字の両方を削除
+        # モノローグは常体・独白調で強調不要のため、全てプレーンテキストに戻す
+        monologue_raw = parts[1].strip()
+        monologue = re.sub(r'<[^>]+>', '', monologue_raw) # HTMLタグ除去
+        monologue = re.sub(r'\*\*(.*?)\*\*', r'\1', monologue) # Markdown太字除去 (中身だけ残す)
+        monologue = monologue.replace('**', '').strip() # 残ったMarkdown記号を除去
         
         for line in comment_lines:
             line = line.strip()
@@ -851,8 +858,21 @@ def batch_analyze_with_ai(data_list):
                 try:
                     c_code_part, c_com = line.split("|", 1)
                     c_code = c_code_part.replace("ID:", "").strip()
-                    # ★ AIが生成したコメントからHTMLタグを全て除去
-                    comments[c_code] = re.sub(r'<[^>]+>', '', c_com).strip()
+                    c_com_cleaned = c_com.strip()
+                    
+                    # ★ AIコメントのクリーンアップ: <b>タグと赤太字の<span>タグは保持し、Markdown太字記号（**）は除去
+                    c_com_cleaned = re.sub(r'\*\*(.*?)\*\*', r'\1', c_com_cleaned) # Markdown太字の中身だけ残す
+                    c_com_cleaned = c_com_cleaned.replace('**', '').strip() # 残った**を除去
+                    
+                    # 最初の銘柄名+ '|'が残っている場合を再確認し削除 (念のため)
+                    target_name = next((d['name'] for d in data_list if d['code'] == c_code), None)
+                    if target_name and c_com_cleaned.startswith(target_name):
+                        if c_com_cleaned.startswith(f"{target_name} |"):
+                            c_com_cleaned = c_com_cleaned.split("|", 1)[-1].strip()
+                        else:
+                            c_com_cleaned = c_com_cleaned[len(target_name):].strip()
+
+                    comments[c_code] = c_com_cleaned
                 except:
                     pass
 
@@ -884,19 +904,12 @@ if st.button("🚀 分析開始 (アイに聞く)"):
             time.sleep(0.5)
             
         with st.spinner("アイが全銘柄を診断中..."):
+            # ★ AI分析にスコア情報を渡していることを確認 (batch_analyze_with_ai内のprompt_textで追加済み)
             comments_map, monologue = batch_analyze_with_ai(data_list)
             
-            # コメントの先頭から「銘柄名 | 」のような不要な文字列を削除する処理 (変更なし)
-            final_comments_map = {}
-            for code, comment in comments_map.items():
-                target_name = next((d['name'] for d in data_list if d['code'] == code), None)
-                if target_name:
-                    if comment.startswith(target_name) and "|" in comment:
-                        comment = comment.split("|", 1)[-1].strip()
-                    elif comment.startswith(target_name):
-                        comment = comment[len(target_name):].strip()
-
-                final_comments_map[code] = comment
+            # コメントのクリーンアップはbatch_analyze_with_ai内でほぼ実施
+            
+            final_comments_map = comments_map # コメントマップはそのまま使用
 
             for d in data_list:
                 d["comment"] = final_comments_map.get(d["code"], "コメント生成失敗")
@@ -1002,6 +1015,7 @@ if st.session_state.analyzed_data:
                 score_disp = f'<span class="score-high">{score_disp}</span>'
 
             # 【★ テーブル行の追加（新しい並び順と2段組み対応）】
+            # AIコメントはHTMLタグ（<b>, <span style="color:red;">）を許可
             rows += f'<tr><td class="td-center">{i+1}</td><td class="td-center">{d.get("code")}</td><td class="th-left td-bold">{d.get("name")}</td><td class="td-right">{d.get("cap_disp")}</td><td class="td-center">{score_disp}</td><td class="td-center">{d.get("strategy")}</td><td class="td-right td-bold">{price_disp}</td><td class="td-right">{buy:,.0f}<br><span style="font-size:10px;color:#666">{diff_txt}</span></td><td class="td-right">{mdd_disp}<br>{sl_pct_disp}</td><td class="td-left" style="line-height:1.2;font-size:11px;">{target_txt}</td><td class="td-center">{d.get("rsi_disp")}</td><td class="td-right">{vol_disp}<br>({avg_vol_html})</td><td class="td-center td-blue">{bt_cell_content}</td><td class="td-center">{d.get("per")}<br>{d.get("pbr")}</td><td class="td-center">{d.get("momentum")}</td><td class="th-left">{d.get("comment")}</td></tr>'
 
 
@@ -1069,6 +1083,3 @@ if st.session_state.analyzed_data:
         if 'backtest_raw' in df_raw.columns:
             df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'}) 
         st.dataframe(df_raw)
-
-
-
