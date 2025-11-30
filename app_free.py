@@ -607,7 +607,8 @@ if st.button("🚀 分析開始 (アイに聞く)"):
         st.warning("銘柄コードを入力してください。")
     else:
         st.session_state.analyzed_data = []
-        raw_tickers = list(dict.fromkeys([t.strip() for t in re.split(r'[,\\n]+', tickers_input) if t.strip()]))
+        raw = tickers_input.replace(",", " ").replace("\n", " ").replace("\t", " ")
+        raw_tickers = list(set([t.strip() for t in raw.split(" ") if t.strip()]))
         data_list = []
         bar = st.progress(0)
         status_label, jst_now = get_market_status()
@@ -752,3 +753,4 @@ if st.session_state.analyzed_data:
         if 'backtest_raw' in df_raw.columns:
             df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'})
         st.dataframe(df_raw)
+
