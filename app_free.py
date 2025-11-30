@@ -89,103 +89,24 @@ def get_volume_weight(current_dt):
 # --- CSSスタイル (干渉回避版) + ツールチップCSS ---
 st.markdown(f"""
 <style>
-    /* Streamlit標準のフォント設定を邪魔しないように限定的に適用 */
-    .big-font {{ font-size:18px !important; font-weight: bold; color: #4A4A4A; font-family: "Meiryo", sans-serif; }}
-    .status-badge {{ background-color: {status_color}; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; vertical-align: middle; }}
-    
-    .center-text {{ text-align: center; font-family: "Meiryo", sans-serif; }}
-    .table-container {{ 
-        width: 100%; 
-        overflow-x: auto; 
-        -webkit-overflow-scrolling: touch; 
-        margin-bottom: 20px; 
-    }}
-    
-    /* 自作テーブルのみにスタイルを適用 (.ai-table配下のみ) */
-    .ai-table {{ 
-        width: 100%; 
-        border-collapse: collapse; 
-        min-width: 1100px; /* ★ 最低幅を設定し、確実にスクロールを出す */
-        background-color: #ffffff; 
-        color: #000000;
-        font-family: "Meiryo", sans-serif;
-        font-size: 13px;
-    }}
-    .ai-table th {{ 
-        background-color: #e0e0e0; 
-        color: #000000;
-        border: 1px solid #999; 
-        padding: 4px 2px; 
-        text-align: center; 
-        vertical-align: middle; 
-        font-weight: bold; 
-        white-space: normal !important; /* 2段組みを強制 */
-        position: relative; 
-        line-height: 1.2; 
-    }}
-    .ai-table td {{ 
-        background-color: #ffffff; 
-        color: #000000;
-        border: 1px solid #ccc; 
-        padding: 4px 2px; 
-        vertical-align: middle; 
-        line-height: 1.4;
-    }}
-
-    /* 説明書用テーブル (変更なし) */
-    .desc-table {{ width: 90%; margin: 0 auto; border-collapse: collapse; background-color: #fff; color: #000; font-family: "Meiryo", sans-serif; }}
-    .desc-table th {{ background-color: #d0d0d0; border: 1px solid #999; padding: 8px; text-align: center !important; }}
-    .desc-table td {{ border: 1px solid #ccc; padding: 8px; text-align: left !important; }}
-
-    /* クラス定義 (変更なし) */
-    .th-left {{ text-align: left !important; }}
-    .td-center {{ text-align: center; }}
-    .td-right {{ text-align: right; }}
-    .td-left {{ text-align: left; }}
-    .td-bold {{ font-weight: bold; }}
-    .td-blue {{ color: #0056b3; font-weight: bold; }}
-    
-    /* タイトルアイコン用のカスタムスタイル (変更なし) */
-    .custom-title {{
-        display: flex; 
-        align-items: center;
-        font-size: 2.25rem; 
-        font-weight: 600; 
-        margin-bottom: 1rem;
-    }}
-    .custom-title img {{
-        height: auto; 
-        max-height: 50px; 
-        margin-right: 15px;
-        vertical-align: middle;
-    }}
-    
-    /* --- ツールチップ表示用CSSの追加 --- */
-    .ai-table th.has-tooltip:hover::after {{
-        content: attr(data-tooltip);
-        position: absolute;
-        top: 100%; 
-        left: 50%;
-        transform: translateX(-50%);
-        padding: 8px 12px;
-        background-color: #333;
-        color: white;
-        border-radius: 4px;
-        font-size: 12px;
-        font-weight: normal;
-        white-space: normal; 
-        min-width: 250px;
-        max-width: 350px;
-        z-index: 10;
-        text-align: left;
-        line-height: 1.5;
-        box-shadow: 0 4px 8px rgba(0,0,0,0.3);
-    }}
-    .ai-table th.has-tooltip {{ cursor: help; }} /* ホバー時にカーソルをヘルプに変更 */
-    /* ------------------------------------- */
+    /* ... (中略: 既存のCSS) ... */
     
     /* ★ 80点以上の強調表示用 */
     .score-high {{ color: #d32f2f !important; font-weight: bold; }}
+
+    /* ========================================================== */
+    /* ★ 新規追加: AIコメントセル内のスクロールコンテナ */
+    /* ========================================================== */
+    .comment-scroll-box {{
+        max-height: 70px; /* 例: 13pxフォントで約3～4行分の高さに設定 */
+        overflow-y: auto; 
+        padding-right: 5px; /* スクロールバーのための余白 */
+        white-space: normal; /* テキストの折り返しを許可 */
+        text-align: left; /* テキストを左寄せに */
+        line-height: 1.4; /* 行の高さの再設定 */
+        margin: 0;
+    }}
+    /* ========================================================== */
 </style>
 """, unsafe_allow_html=True)
 
@@ -965,60 +886,21 @@ if st.session_state.analyzed_data:
             vol_man = round(volume / 10000)
             return f'{vol_man:,.0f}万株'
 
-
     def create_table(d_list, title):
         if not d_list: return f"<h4>{title}: 該当なし</h4>"
         
         rows = ""
         for i, d in enumerate(d_list):
             price = d.get('price')
-            price_disp = f"{price:,.0f}" if price else "-"
-            buy = d.get('buy', 0)
-            diff = price - buy if price and buy else 0
-            diff_txt = f"({diff:+,.0f})" if diff != 0 else "(0)"
-            p_half = d.get('p_half', 0)
-            p_full = d.get('p_full', 0)
+            # ... (中略: 既存の変数設定) ...
             
-            # 利確目標乖離率の計算
-            kabu_price = d.get("price")
-            half_pct = ((p_half / kabu_price) - 1) * 100 if kabu_price > 0 and p_half > 0 else 0
-            full_pct = ((p_full / kabu_price) - 1) * 100 if kabu_price > 0 and p_full > 0 else 0
-            
-            target_txt = "-"
-            if p_half > 0:
-                 # ★ 利確目標の2段組み: 半益(乖離率)を1段目、全益(乖離率)を2段目
-                target_txt = f"半:{p_half:,} ({half_pct:+.1f}%)<br>全:{p_full:,} ({full_pct:+.1f}%)" 
-            else:
-                 target_txt = "目標超過/無効"
-            
-            # backtestフィールドはHTML表示用
-            # 押し目勝敗数の2段組み
-            bt_display = d.get("backtest", "-").replace("<br>", " ") # 既存の<br>をスペースに置換
-            bt_parts = bt_display.split('(')
-            bt_row1 = bt_parts[0].strip()
-            bt_row2 = f'({bt_parts[1].strip()}' if len(bt_parts) > 1 else ""
-            bt_cell_content = f'{bt_row1}<br>{bt_row2}'
-            
-            # 出来高（5MA比）の表示
-            vol_disp = d.get("vol_disp", "-")
-            
-            # 【★ MDDと推奨SL乖離率】
-            mdd_disp = f"{d.get('max_dd_pct', 0.0):.1f}%"
-            sl_pct_disp = f"{d.get('sl_pct', 0.0):.1f}%"
-            
-            # 【★ 出来高の統合表示】
-            avg_vol_html = format_volume(d.get('avg_volume_5d', 0))
-            
-            # 【★ スコアの強調表示】
-            score_disp = f'{d.get("score")}'
-            if d.get("score", 0) >= 80:
-                score_disp = f'<span class="score-high">{score_disp}</span>'
-
             # 【★ テーブル行の追加（新しい並び順と2段組み対応）】
             # AIコメントはHTMLタグ（<b>, <span style="color:red;">）を許可
-            rows += f'<tr><td class="td-center">{i+1}</td><td class="td-center">{d.get("code")}</td><td class="th-left td-bold">{d.get("name")}</td><td class="td-right">{d.get("cap_disp")}</td><td class="td-center">{score_disp}</td><td class="td-center">{d.get("strategy")}</td><td class="td-right td-bold">{price_disp}</td><td class="td-right">{buy:,.0f}<br><span style="font-size:10px;color:#666">{diff_txt}</span></td><td class="td-right">{mdd_disp}<br>{sl_pct_disp}</td><td class="td-left" style="line-height:1.2;font-size:11px;">{target_txt}</td><td class="td-center">{d.get("rsi_disp")}</td><td class="td-right">{vol_disp}<br>({avg_vol_html})</td><td class="td-center td-blue">{bt_cell_content}</td><td class="td-center">{d.get("per")}<br>{d.get("pbr")}</td><td class="td-center">{d.get("momentum")}</td><td class="th-left">{d.get("comment")}</td></tr>'
-
-
+            # ★ ここを修正: d.get("comment")を<div class="comment-scroll-box">でラップ
+            comment_html = d.get("comment")
+            
+            rows += f'<tr><td class="td-center">{i+1}</td><td class="td-center">{d.get("code")}</td><td class="th-left td-bold">{d.get("name")}</td><td class="td-right">{d.get("cap_disp")}</td><td class="td-center">{score_disp}</td><td class="td-center">{d.get("strategy")}</td><td class="td-right td-bold">{price_disp}</td><td class="td-right">{buy:,.0f}<br><span style="font-size:10px;color:#666">{diff_txt}</span></td><td class="td-right">{mdd_disp}<br>{sl_pct_disp}</td><td class="td-left" style="line-height:1.2;font-size:11px;">{target_txt}</td><td class="td-center">{d.get("rsi_disp")}</td><td class="td-right">{vol_disp}<br>({avg_vol_html})</td><td class="td-center td-blue">{bt_cell_content}</td><td class="td-center">{d.get("per")}<br>{d.get("pbr")}</td><td class="td-center">{d.get("momentum")}</td><td class="th-left"><div class="comment-scroll-box">{comment_html}</div></td></tr>'
+       
         # ヘッダーとツールチップデータの定義 (2段組みに対応するため\nを使用)
         headers = [
             ("No", "25px", None), 
@@ -1083,3 +965,4 @@ if st.session_state.analyzed_data:
         if 'backtest_raw' in df_raw.columns:
             df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'}) 
         st.dataframe(df_raw)
+
