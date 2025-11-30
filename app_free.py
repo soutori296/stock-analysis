@@ -137,11 +137,13 @@ st.markdown(f"""
     .desc-table th {{ background-color: #d0d0d0; border: 1px solid #999; padding: 8px; text-align: center !important; }}
     .desc-table td {{ border: 1px solid #ccc; padding: 8px; text-align: left !important; }}
     
-    /* 説明書内の強調文字色を定義 (後で説明書ブロックに移動) */
-    /* .desc-risk { color: #d32f2f; font-weight:bold; } */
-    /* .desc-add { color: #1976d2; font-weight:bold; } */
-    /* .desc-base { color: #5D4037; font-weight:bold; } */
-    /* .desc-head { background-color: #f0f0f0; font-weight:bold; } */
+    /* 説明書内の強調文字色をメインCSSブロックに移動して安全性を確保 */
+    .desc-risk { color: #d32f2f; font-weight:bold; }
+    .desc-add { color: #1976d2; font-weight:bold; }
+    .desc-base { color: #5D4037; font-weight:bold; }
+    .desc-head-risk { background-color: #f44336; color:white; font-weight:bold; }
+    .desc-head-add { background-color: #4CAF50; color:white; font-weight:bold; }
+    .desc-head-indiv { background-color: #FF9800; color:white; font-weight:bold; }
     
     /* クラス定義 (変更なし) */
     .th-left {{ text-align: left !important; }}
@@ -225,15 +227,8 @@ st.markdown(f"""
 
 # --- 説明書 (最終合意ロジックに更新 - HTMLタグ問題を解消) ---
 with st.expander("📘 取扱説明書 (最終分析ロジック)"):
-    # NameErrorを避けるため、CSSクラスの定義を<style>タグに含める
+    # HTMLタグが丸見えになるのを防ぐため、可能な限りHTMLとCSSクラスで表現
     st.markdown("""
-    <style>
-        .desc-risk { color: #d32f2f; font-weight:bold; }
-        .desc-add { color: #1976d2; font-weight:bold; }
-        .desc-base { color: #5D4037; font-weight:bold; }
-        .desc-head { background-color: #f0f0f0; font-weight:bold; }
-    </style>
-    
     <div class="center-text">
     
     <h4>1. データ取得とハイブリッドデータ仕様</h4>
@@ -261,13 +256,13 @@ with st.expander("📘 取扱説明書 (最終分析ロジック)"):
         <tr><th>項目</th><th>条件</th><th>配点/減点</th><th>備考</th></tr>
         <tr><td class="desc-base"><b>ベーススコア</b></td><td>-</td><td><b>+50点</b></td><td>全ての分析の起点</td></tr>
         
-        <tr><td class="desc-head" colspan="4" style="background-color:#f44336; color:white;">構造的リスク減点 (投資適格性フィルター)</td></tr>
+        <tr><td class="desc-head-risk" colspan="4">構造的リスク減点 (投資適格性フィルター)</td></tr>
         <tr><td class="desc-risk">R/R比 不利</td><td>R/R比 &lt; 1.0</td><td><b>-25点</b></td><td>リワードがリスクを下回る。</td></tr>
         <tr><td class="desc-risk">RSI極端 (大型株G)</td><td>🔥順張りでRSI &ge; 85 / 🌊逆張りでRSI &le; 20 <br>(時価総額 &ge; 3000億円)</td><td><b>-15点</b></td><td>大型株のトレンド継続性を許容し緩和。</td></tr>
         <tr><td class="desc-risk">RSI極端 (小型株G)</td><td>🔥順張りでRSI &ge; 80 / 🌊逆張りでRSI &le; 20 <br>(時価総額 &lt; 3000億円)</td><td><b>-25点</b></td><td>小型株の急落リスクを厳しく評価。</td></tr>
         <tr><td class="desc-risk">流動性不足(致命的)</td><td>5日平均出来高が 1,000株未満</td><td><b>-30点</b></td><td>換金リスクが極めて高い。</td></tr>
         
-        <tr><td class="desc-head" colspan="4" style="background-color:#4CAF50; color:white;">戦略・トレンド・勢い加点</td></tr>
+        <tr><td class="desc-head-add" colspan="4">戦略・トレンド・勢い加点</td></tr>
         <tr><td class="desc-add">順張り戦略</td><td>パーフェクトオーダー＆5日線上昇</td><td><b>+15点</b></td><td>勢いの評価。</td></tr>
         <tr><td class="desc-add">逆張り戦略</td><td>RSI &le; 30 または 25MAから -10%乖離</td><td><b>+15点</b></td><td>反発期待値を評価。</td></tr>
         <tr><td class="desc-add">RSI適正</td><td>RSI 55〜65</td><td><b>+10点</b></td><td>トレンドが最も継続しやすい水準。</td></tr>
@@ -275,7 +270,7 @@ with st.expander("📘 取扱説明書 (最終分析ロジック)"):
         <tr><td class="desc-add"><b>究極の出来高</b></td><td>出来高が5日平均の<b>3.0倍超</b></td><td><b>+5点</b> (追加)</td><td><b>満点100点到達のトリガー。</b></td></tr> 
         <tr><td class="desc-add">直近勝率</td><td>直近5日で4日以上上昇</td><td><b>+5点</b></td><td>短期的な上値追いの勢いを評価。</td></tr>
 
-        <tr><td class="desc-head" colspan="4" style="background-color:#FF9800; color:white;">個別リスク評価 (市場環境連動)</td></tr>
+        <tr><td class="desc-head-indiv" colspan="4">個別リスク評価 (市場環境連動)</td></tr>
         <tr><td class="desc-add">DD率 優秀</td><td>最大DD率 &lt; 1.0%</td><td><b>+5点</b></td><td>過去の損失リスクが極めて低い。</td></tr>
         <tr><td class="desc-risk">DD率 連続減点</td><td>2.0% &lt; DD &le; 10.0%</td><td><b>-2 * floor(DD-2.0)</b></td><td>DD率に比例した減点 (強化)。</td></tr>
         <tr><td class="desc-risk">DD率 高リスク</td><td>最大DD率 &gt; 10.0%</td><td><b>-20点</b></td><td>大幅な損失リスク (強化)。</td></tr>
@@ -871,7 +866,7 @@ def batch_analyze_with_ai(data_list):
     5.  戦略の根拠、RSIの状態（極端な減点があったか否か）、出来高倍率（1.5倍超）、およびR/R比（1.0未満の不利、2.0超の有利など）を必ず具体的に盛り込んでください。
     6.  **【最重要: リスク情報と損切り基準・強調表現の制限】**
         - リスク情報（MDD、SL乖離率）を参照し、リスク管理の重要性に言及してください。MDDが-8.0%を超える場合は、「過去の損失リスクが高い」旨を明確に伝えてください。
-        - **流動性:** **致命的低流動性:警告(1000株未満)**の銘柄については、コメントの冒頭で「平均出来高が1,000株未満と極めて低く、希望価格での売買が困難な<b>流動性リスク</b>を伴います。ロット調整を<b>強く推奨します</b>。」といった<b>明確な警告</b>を必ず含めてください。
+        - **流動性:** **致命적低流動性:警告(1000株未満)**の銘柄については、コメントの冒頭で「平均出来高が1,000株未満と極めて低く、希望価格での売買が困難な<b>流動性リスク</b>を伴います。ロット調整を<b>強く推奨します</b>。」といった<b>明確な警告</b>を必ず含めてください。
         - **損切り目安:** 「長期サポートラインである<b>SL目安MA（{sl_ma_disp}）を終値で明確に割り込んだ場合</b>は、速やかに損切りを検討すべき」といった<b>撤退基準</b>を明示してください。
         - **強調表現の制限**: **AIスコア85点以上**の銘柄コメントに限り、**全体の5%の割合**（例: 20銘柄中1つ程度）で、特に重要な部分（例：大口の買い、強力なトレンド）を**1箇所（10文字以内）**に限り、**赤太字のHTMLタグ（<b><span style="color:red;">...</span></b>）**を使用して強調しても良い。それ以外のコメントでは赤太字を絶対に使用しないでください。85点未満は<b>黒太字</b>のみ使用してください。
     
