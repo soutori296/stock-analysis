@@ -98,21 +98,22 @@ st.markdown(f"""
     
     /* 自作テーブルのみにスタイルを適用 (.ai-table配下のみ) */
     .ai-table {{ 
-        width: 100%; border-collapse: collapse; min-width: 1300px; 
+        width: 100%; border-collapse: collapse; min-width: 1000px; /* ★ 最低幅を狭める */
         background-color: #ffffff; color: #000000;
         font-family: "Meiryo", sans-serif;
         font-size: 13px;
     }}
     .ai-table th {{ 
         background-color: #e0e0e0; color: #000000;
-        border: 1px solid #999; padding: 8px 4px; 
+        border: 1px solid #999; padding: 4px 2px; /* ★ パディングを減らす */
         text-align: center; vertical-align: middle; font-weight: bold; white-space: nowrap; 
-        position: relative; /* ツールチップ親要素 */
-        line-height: 1.2; /* 2段組みに調整 */
+        position: relative; 
+        line-height: 1.2; 
     }}
     .ai-table td {{ 
         background-color: #ffffff; color: #000000;
-        border: 1px solid #ccc; padding: 6px 5px; vertical-align: middle; line-height: 1.4;
+        border: 1px solid #ccc; padding: 4px 2px; /* ★ パディングを減らす */
+        vertical-align: middle; line-height: 1.4;
     }}
 
     /* 説明書用テーブル (変更なし) */
@@ -257,7 +258,7 @@ with st.expander("📘 取扱説明書 (データ仕様・判定基準)"):
         <tr><td><b>RSI</b></td><td>🔵30以下(売られすぎ) / 🟢55-65(上昇トレンド) / 🔴70以上(過熱)</td></tr>
         <tr><td><b>PER/PBR</b></td><td>市場の評価。低ければ割安とされるが、業績や成長性との兼ね合いが重要。</td></tr>
         <tr><td><b>最大MDD %</b></td><td>過去75日の押し目トレードで、エントリーから期間中最安値までの<b>最大下落率</b>。値が大きいほど過去の損失リスクが高かったことを示します。</td></tr> 
-        <tr><td><b>SL乖離率</b></td><td>現在値と**推奨損切りライン（順張り: 25MA、逆張り: 75MA）**との乖離率。損切り目安までの<b>下落余地の目安</b>です。</td></tr> 
+        <tr><td><b>SL乖離率</b></td><td>現在値と**推奨損切りライン（順張り: 25MA、逆張り: 75MA）**との乖離率。損切り目安までの**下落余地の目安**です。</td></tr> 
         <tr><td><b>流動性(5MA)</b></td><td>過去5日間の平均出来高。<b>1万株未満</b>は流動性リスクが高いと判断し、AIコメントで強く警告されます。</td></tr> 
         <tr><td><b>25日レシオ</b></td><td>日経平均の25日騰落レシオ。<b>125.0%以上で市場全体が過熱（警戒モード）</b>と判断し、個別株のリスク減点を強化します。</td></tr> 
     </table>
@@ -337,15 +338,15 @@ def get_stock_info(code):
             raw_name = m_name.group(1).strip()
             data["name"] = re.sub(r'[\(\（].*?[\)\）]', '', raw_name).replace("<br>", " ").strip()
 
-        # 現在値 (価格)
+        # 現在値 (価格) (変更なし)
         m_price = re.search(r'現在値</th>\s*<td[^>]*>([0-9,]+)</td>', html)
         if m_price: data["price"] = float(m_price.group(1).replace(",", ""))
 
-        # 出来高
+        # 出来高 (変更なし)
         m_vol = re.search(r'出来高</th>\s*<td[^>]*>([0-9,]+).*?株</td>', html)
         if m_vol: data["volume"] = float(m_vol.group(1).replace(",", ""))
 
-        # 時価総額
+        # 時価総額 (変更なし)
         m_cap = re.search(r'時価総額</th>\s*<td[^>]*>(.*?)</td>', html)
         if m_cap:
             cap_str = re.sub(r'<[^>]+>', '', m_cap.group(1)).strip() 
@@ -363,7 +364,7 @@ def get_stock_info(code):
                 if b_match: val = float(b_match.group(1).replace(",", ""))
             data["cap"] = val
 
-        # PER/PBR
+        # PER/PBR (変更なし)
         i3_match = re.search(r'<div id="stockinfo_i3">.*?<tbody>(.*?)</tbody>', html)
         if i3_match:
             tbody = i3_match.group(1)
@@ -376,7 +377,7 @@ def get_stock_info(code):
                 data["per"] = clean_tag_and_br(tds[0])
                 data["pbr"] = clean_tag_and_br(tds[1])
 
-        # 4本値の取得ロジック
+        # 4本値の取得ロジック (変更なし)
         ohlc_map = {"始値": "open", "高値": "high", "安値": "low", "終値": "close"}
         ohlc_tbody_match = re.search(r'<table[^>]*>.*?<tbody>\s*(<tr>.*?</tr>\s*){4}.*?</tbody>', html, re.DOTALL)
 
@@ -713,7 +714,7 @@ def get_stock_data(ticker):
             "backtest_raw": re.sub(r'<[^>]+>', '', bt_str.replace("<br>", " ")).replace("(", "").replace(")", ""),
             "max_dd_pct": max_dd_pct,
             "sl_pct": sl_pct,
-            "sl_ma": sl_ma, # ★ 損切りラインMAの値を保持 (AIコメント用)
+            "sl_ma": sl_ma, # 損切りラインMAの値を保持 (AIコメント用)
             "avg_volume_5d": avg_vol_5d, 
             "is_low_liquidity": low_liquidity_flag, 
             "kabutan_open": info.get("open"),
@@ -749,7 +750,7 @@ def batch_analyze_with_ai(data_list):
         # 【★ 追加情報: リスク指標・流動性】
         mdd = d.get('max_dd_pct', 0.0)
         sl_pct = d.get('sl_pct', 0.0)
-        sl_ma = d.get('sl_ma', 0) # ★ 損切りラインMAの値を取得
+        sl_ma = d.get('sl_ma', 0) 
         avg_vol = d.get('avg_volume_5d', 0)
         low_liquidity_status = "低流動性:警告" if d.get('is_low_liquidity', False) else "流動性:問題なし"
         
@@ -965,7 +966,7 @@ if st.session_state.analyzed_data:
 
 
         # ヘッダーとツールチップデータの定義
-        # ★ 2段組みに合わせてヘッダーテキストと幅を大幅に修正
+        # ★ 2段組みに合わせてヘッダーテキストを修正
         headers = [
             ("No", "25px", None), 
             ("コード", "45px", None), 
@@ -981,7 +982,7 @@ if st.session_state.analyzed_data:
             ("利確目標\n(乖離率%)", "95px", "時価総額別リターンと心理的な節目を考慮した目標値。"), 
             ("押し目\n勝敗数", "65px", "過去75日のバックテストにおける、推奨エントリー（押し目）での勝敗数。"), 
             ("PER\nPBR", "65px", "株価収益率/株価純資産倍率。市場の評価指標。"), 
-            ("MDD %\nSL乖離率", "75px", "<b>MDD %</b>: 過去の最大下落率（最大痛手）。<b>SL乖離率</b>: 順張り(25MA)、逆張り(75MA)までの余裕。"), 
+            ("MDD %\nSL乖離率", "75px", "MDD %: 過去の同条件トレードでの最大下落率（最大痛手）。SL乖離率: 順張り(25MA)、逆張り(75MA)までの余裕。"), # ★ ツールチップ内のHTMLタグを削除
             ("アイの所感", "min-width:300px;", "アイ（プロトレーダー）による分析コメント。リスクや流動性に関する警告を最優先して発言します。"), # ★ 幅を広げる
         ]
 
