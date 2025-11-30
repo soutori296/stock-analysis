@@ -105,7 +105,7 @@ st.markdown(f"""
     .ai-table {{ 
         width: 100%; 
         border-collapse: collapse; 
-        min-width: 1100px; /* ★ 最低幅を設定し、確実にスクロールを出す */
+        min-width: 1100px; 
         background-color: #ffffff; 
         color: #000000;
         font-family: "Meiryo", sans-serif;
@@ -119,7 +119,7 @@ st.markdown(f"""
         text-align: center; 
         vertical-align: middle; 
         font-weight: bold; 
-        white-space: normal !important; /* 2段組みを強制 */
+        white-space: normal !important; 
         position: relative; 
         line-height: 1.2; 
     }}
@@ -203,7 +203,7 @@ st.markdown(f"""
 </p>
 """, unsafe_allow_html=True)
 
-# --- 説明書 (マニュアル詳細化 - 最終版の利確目標を更新) --- (ヘルプのSL乖離率説明を更新)
+# --- 説明書 (マニュアル詳細化 - 最終版の利確目標を更新) --- (変更なし)
 with st.expander("📘 取扱説明書 (データ仕様・判定基準)"):
     st.markdown("""
     <div class="center-text">
@@ -254,7 +254,7 @@ with st.expander("📘 取扱説明書 (データ仕様・判定基準)"):
         <tr><td><b>RSI適正</b></td><td>RSI 55〜65</td><td>+10点</td><td>トレンドが最も継続しやすい水準を評価</td></tr>
         <tr><td><b>出来高活発</b></td><td>出来高が5日平均の1.5倍超。出来高時間配分ロジックを使いリサーチ時点の出来高を評価します。</td><td>+10点</td><td>市場の注目度とエネルギーを評価。<b>大口参入の可能性</b>を示唆します。</td></tr> 
         <tr><td><b>直近勝率</b></td><td>直近5日で4日以上上昇</td><td>+5点</td><td>短期的な上値追いの勢いを評価</td></tr>
-        <tr><td><b>リスク減点</b></td><td>最大ドローダウン高 or SL余地小</td><td>-5点 / -5点（市場過熱時は-10点 / -10点に強化）</td><td>最大ドローダウン(-10%超)や、損切り余地(推奨SLラインとの乖離率±3%以内)が少ない銘柄を減点します。市場が過熱している場合（25日騰落レシオ125%以上）は減点を強化します。</td></tr> 
+        <tr><td><b>リスク減点</b></td><td>最大ドローダウン高 or SL余地小</td><td>-5点 / -5点（市場過熱時は-10点 / -10点に強化）</td><td>最大ドローダウン(-10%超)や、損切り余地(MA75/25乖離率±3%以内)が少ない銘柄を減点します。市場が過熱している場合（25日騰落レシオ125%以上）は減点を強化します。</td></tr> 
         <tr><td><b>合計</b></td><td>(各項目の合計)</td><td><b>最大100点</b></td><td>算出されたスコアが100点を超えた場合でも、<b>上限は100点</b>となります。</td></tr>
     </table>
 
@@ -269,7 +269,7 @@ with st.expander("📘 取扱説明書 (データ仕様・判定基準)"):
         <tr><td><b>解説</b></td><td>このロジックで過去にトレードした場合の勝敗数。心理的な節目・抵抗線手前での確実な利確を推奨するロジックを適用しています。</td></tr>
     </table>
 
-    <h5>④ 各種指標の基準</h5>
+    <h5>④ 各種指標の基準 (変更なし)</h5>
     <table class="desc-table">
         <tr><th style="width:20%">指標</th><th>解説</th></tr>
         <tr><td><b>出来高（5MA比）</b></td><td><b>当日のリアルタイム出来高</b>を<b>過去5日間の出来高平均</b>と<b>市場の経過時間比率</b>で調整した倍率。<br>市場が開いている時間帯に応じて、出来高の偏りを考慮し、公平に大口流入を評価します。</td></tr>
@@ -835,7 +835,9 @@ def batch_analyze_with_ai(data_list):
 
         parts = text.split("END_OF_LIST", 1)
         comment_lines = parts[0].strip().split("\n")
-        monologue = parts[1].strip().replace("```", "")
+        
+        # ★ AIが生成したコメントからHTMLタグを全て除去
+        monologue = re.sub(r'<[^>]+>', '', parts[1]).strip()
         
         for line in comment_lines:
             line = line.strip()
@@ -843,7 +845,8 @@ def batch_analyze_with_ai(data_list):
                 try:
                     c_code_part, c_com = line.split("|", 1)
                     c_code = c_code_part.replace("ID:", "").strip()
-                    comments[c_code] = c_com.strip()
+                    # ★ AIが生成したコメントからHTMLタグを全て除去
+                    comments[c_code] = re.sub(r'<[^>]+>', '', c_com).strip()
                 except:
                     pass
 
@@ -990,7 +993,7 @@ if st.session_state.analyzed_data:
 
 
         # ヘッダーとツールチップデータの定義
-        # ★ 新しい並び順と最適化された幅
+        # ★ 2段組みに合わせてヘッダーテキストを修正
         headers = [
             ("No", "25px", None), 
             ("コード", "45px", None), 
@@ -1005,9 +1008,9 @@ if st.session_state.analyzed_data:
             ("RSI", "50px", "相対力指数。🔵30以下(売られすぎ) / 🟢55-65(上昇トレンド) / 🔴70以上(過熱)"), 
             ("出来高\n(5MA比)", "80px", "上段は当日の出来高と5日平均出来高（補正済み）の比率。下段は5日平均出来高（流動性）。1万株未満は赤字で警告。"), 
             ("押し目\n勝敗数", "65px", "過去75日のバックテストにおける、推奨エントリー（押し目）での勝敗数。"), 
-            ("PER\nPBR", "65px", "株価収益率/株価純資産倍率。市場の評価指標。"), 
+            ("PER\nPBR", "65px", "株価収益率/株価純資産倍率。市場の評価指標。"), # ★ 2段組み
             ("直近\n勝率", "50px", "直近5日間の前日比プラスだった日数の割合。"),
-            ("アイの所感", "min-width:350px;", "アイ（プロトレーダー）による分析コメント。リスクや流動性に関する警告を最優先して発言します。"), # ★ 幅を最大化
+            ("アイの所感", "min-width:350px;", "アイ（プロトレーダー）による分析コメント。リスクや流動性に関する警告を最優先して発言します。"), 
         ]
 
         # ヘッダーHTMLの生成
