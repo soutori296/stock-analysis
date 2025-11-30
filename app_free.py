@@ -188,7 +188,7 @@ st.markdown(f"""
     .score-high {{ color: #d32f2f !important; font-weight: bold; }}
     
     /* ========================================================== */
-    /* ★ AIコメントセル内のスクロールコンテナ (修正/追加) */
+    /* ★ AIコメントセル内のスクロールコンテナ */
     /* ========================================================== */
     .comment-scroll-box {{
         max-height: 70px; /* 例: 13pxフォントで約3～4行分の高さに設定 */
@@ -217,7 +217,7 @@ st.markdown(f"""
 </p>
 """, unsafe_allow_html=True)
 
-# --- 説明書 (マニュアル詳細化 - 最終版の利確目標を更新) ---
+# --- 説明書 (マニュアル詳細化 - 最大DDのロジックを更新) ---
 with st.expander("📘 取扱説明書 (データ仕様・判定基準)"):
     st.markdown("""
     <div class="center-text">
@@ -268,7 +268,7 @@ with st.expander("📘 取扱説明書 (データ仕様・判定基準)"):
         <tr><td><b>RSI適正</b></td><td>RSI 55〜65</td><td>+10点</td><td>トレンドが最も継続しやすい水準を評価</td></tr>
         <tr><td><b>出来高活発</b></td><td>出来高が5日平均の1.5倍超。出来高時間配分ロジックを使いリサーチ時点の出来高を評価します。</td><td>+10点</td><td>市場の注目度とエネルギーを評価。<b>大口参入の可能性</b>を示唆します。</td></tr> 
         <tr><td><b>直近勝率</b></td><td>直近5日で4日以上上昇</td><td>+5点</td><td>短期的な上値追いの勢いを評価</td></tr>
-        <tr><td><b>リスク減点</b></td><td>最大ドローダウン高 or SL乖離率小</td><td>-5点 / -5点（市場過熱時は-10点 / -10点に強化）</td><td>最大ドローダウン(-10%超)や、損切り余地(MA75/25乖離率±3%以内)が少ない銘柄を減点します。市場が過熱している場合（25日騰落レシオ125%以上）は減点を強化します。</td></tr> 
+        <tr><td><b>リスク減点</b></td><td>最大ドローダウン高 or SL乖離率小</td><td><b>-3点 / -5点 / -10点</b>（市場過熱時は最大<b>-10点</b>に強化）</td><td>最大ドローダウン(-2%超、-5%超、-10%超で段階的に減点)や、損切り余地(MA75/25乖離率±3%以内)が少ない銘柄を減点します。市場が過熱している場合（25日騰落レシオ125%以上）は減点を強化します。</td></tr> 
         <tr><td><b>合計</b></td><td>(各項目の合計)</td><td><b>最大100点</b></td><td>算出されたスコアが100点を超えた場合でも、<b>上限は100点</b>となります。</td></tr>
     </table>
 
@@ -712,13 +712,19 @@ def get_stock_data(ticker):
         if vol_ratio > 1.5: score += 10 
         if up_days >= 4: score += 5
         
-        # --- 【★ 追加箇所 2.3: リスクによる減点ロジックと警戒モード】 --- (変更なし)
+        # --- 【★ 追加箇所 2.3: リスクによる減点ロジックと警戒モード】 --- 
         mdd_risk_deduct = 0
         sl_risk_deduct = 0
-        
-        # 1. バックテストMDDが一定水準を超える場合 (絶対値で10%超)
-        if abs(max_dd_pct) > 10.0: 
+        abs_mdd = abs(max_dd_pct)
+
+        # ★★★ 段階的MDD減点ロジックの適用 (修正) ★★★
+        if abs_mdd > 10.0: 
+            mdd_risk_deduct = -10
+        elif abs_mdd > 5.0: # 5%超の減点
             mdd_risk_deduct = -5
+        elif abs_mdd > 2.0: # 2%超の減点
+            mdd_risk_deduct = -3
+        # ★★★ ---------------------------------- ★★★
             
         # 2. 現在値がSLラインに近すぎる場合 (SL余地が小さい、乖離率が±3%未満)
         if sl_ma > 0 and abs(sl_pct) < 3.0: 
@@ -728,7 +734,10 @@ def get_stock_data(ticker):
         is_market_alert = market_25d_ratio >= 125.0
         
         if is_market_alert:
-            if mdd_risk_deduct < 0: mdd_risk_deduct = -10 
+            # MDD減点の強化
+            if abs_mdd > 5.0 and mdd_risk_deduct < -10: mdd_risk_deduct = -10 # 5%超を-10点に強化
+            elif abs_mdd > 2.0 and mdd_risk_deduct < -5: mdd_risk_deduct = -5 # 2%超を-5点に強化
+            # SL減点の強化
             if sl_risk_deduct < 0: sl_risk_deduct = -10
             
         score += mdd_risk_deduct
@@ -821,19 +830,19 @@ def batch_analyze_with_ai(data_list):
     1.  <b>Markdownの太字（**）は絶対に使用せず、HTMLの太字（<b>）のみをコメント内で使用してください。</b>
     2.  <b>表現の多様性を最重視してください。</b>10銘柄あれば10通りの異なる視点やボキャブラリーを使用し、紋切り型な文章は厳禁です。
     3.  <b>AIスコアに応じた文章量と熱量を厳格に調整してください。</b>
-        - **AIスコア 85点以上 (超高評価)**: 70文字〜90文字程度。<b>「注目すべき銘柄」「大口の買い」</b>など、熱意と期待感を示す表現を盛り込んでください。
-        - **AIスコア 75点 (高評価)**: 60文字〜80文字程度。<b>「トレンド良好」「妙味がある」</b>など、期待と冷静な分析を両立させた表現にしてください。
-        - **AIスコア 65点以下 (中立/様子見)**: 50文字〜70文字程度。<b>「様子見が賢明」「慎重な見極め」</b>など、リスクを強調し、冷静沈着なトーンを維持してください。
-    4.  市場環境が【明確な過熱ゾーン】の場合、全てのコメントのトーンを控えめにし、「市場全体が過熱しているため、この銘柄にも調整が入るリスクがある」といった**強い警戒感**を盛り込んでください。
+        - <b>AIスコア 85点以上 (超高評価)</b>: 70文字〜90文字程度。<b>「注目すべき銘柄」「大口の買い」</b>など、熱意と期待感を示す表現を盛り込んでください。
+        - <b>AIスコア 75点 (高評価)</b>: 60文字〜80文字程度。<b>「トレンド良好」「妙味がある」</b>など、期待と冷静な分析を両立させた表現にしてください。
+        - <b>AIスコア 65点以下 (中立/様子見)</b>: 50文字〜70文字程度。<b>「様子見が賢明」「慎重な見極め」</b>など、リスクを強調し、冷静沈着なトーンを維持してください。
+    4.  市場環境が【明確な過熱ゾーン】の場合、全てのコメントのトーンを控えめにし、「市場全体が過熱しているため、この銘柄にも調整が入るリスクがある」といった<b>強い警戒感</b>を盛り込んでください。
     5.  戦略の根拠（パーフェクトオーダー、売られすぎ、乖離率など）と、RSIの状態を必ず具体的に盛り込んでください。
-    6.  **利確目標:目標超過または無効**と記載されている銘柄については、「既に利確水準を大きく超過しており、新規の買いは慎重にすべき」といった**明確な警告**を含めてください。
+    6.  <b>利確目標:目標超過または無効</b>と記載されている銘柄については、「既に利確水準を大きく超過しており、新規の買いは慎重にすべき」といった<b>明確な警告</b>を含めてください。
     7.  出来高倍率が1.5倍を超えている場合は、<b>「大口の買い」</b>といった表現を使い、その事実を盛り込んでください。
-    8.  **【最重要: リスク情報と損切り基準・強調表現の制限】**
+    8.  <b>【最重要: リスク情報と損切り基準・強調表現の制限】</b>
         - リスク情報（MDD、SL乖離率）を参照し、リスク管理の重要性に言及してください。
         - MDDが-8.0%を超える（下落幅が大きい）場合は、「過去の損失リスクが高い」旨を明確に伝えてください。
-        - **流動性:** **低流動性:警告**の銘柄については、コメントの冒頭で「平均出来高が1万株未満と極めて低く、希望価格での売買が困難な<b>流動性リスク</b>を伴います。ロット調整を強く推奨します。」といった**明確な警告**を必ず含めてください。
-        - **損切り目安:** 「長期サポートラインである**SL目安MA（{sl_ma_disp}）を終値で明確に割り込んだ場合**は、速やかに損切りを検討すべき」といった**撤退基準**を明示してください。
-        - **強調表現の制限**: 10銘柄中、最大3銘柄のコメントでのみ、<b>AIスコア80点以上</b>で**特に重要な部分**（例：大口の買い、強力なトレンド）を**1箇所（10文字以内）**に限り、赤太字のHTMLタグ（<b><span style="color:red;">...</span></b>）を使用して強調しても良い。それ以外のコメントでは赤太字を絶対に使用しないでください。
+        - <b>流動性:</b> <b>低流動性:警告</b>の銘柄については、コメントの冒頭で「平均出来高が1万株未満と極めて低く、希望価格での売買が困難な<b>流動性リスク</b>を伴います。ロット調整を強く推奨します。」といった<b>明確な警告</b>を必ず含めてください。
+        - <b>損切り目安:</b> 「長期サポートラインである<b>SL目安MA（{sl_ma_disp}）を終値で明確に割り込んだ場合</b>は、速やかに損切りを検討すべき」といった<b>撤退基準</b>を明示してください。
+        - <b>強調表現の制限:</b> 10銘柄中、最大3銘柄のコメントでのみ、<b>AIスコア80点以上</b>で<b>特に重要な部分</b>（例：大口の買い、強力なトレンド）を<b>1箇所（10文字以内）</b>に限り、赤太字のHTMLタグ（<b><span style="color:red;">...</span></b>）を使用して強調しても良い。それ以外のコメントでは赤太字を絶対に使用しないでください。
     
     【出力形式】
     ID:コード | コメント
@@ -844,7 +853,7 @@ def batch_analyze_with_ai(data_list):
     リストの最後に「END_OF_LIST」と書き、その後に続けて「アイの独り言（常体・独白調）」を3行程度で書いてください。
     ※見出し不要。
     独り言の内容：
-    現在の**市場25日騰落レシオ({r25:.2f}%)**をメインテーマとして総括する。市場が【過熱ゾーン】にある場合は「市場全体の調整リスク」を、市場が【底値ゾーン】にある場合は「絶好の仕込み場」を強調しつつ、**個別株の規律ある撤退の重要性**を合わせて説く。
+    現在の<b>市場25日騰落レシオ({r25:.2f}%)</b>をメインテーマとして総括する。市場が【過熱ゾーン】にある場合は「市場全体の調整リスク」を、市場が【底値ゾーン】にある場合は「絶好の仕込み場」を強調しつつ、<b>個別株の規律ある撤退の重要性</b>を合わせて説く。
     """ 
     try:
         res = model.generate_content(prompt)
@@ -1033,16 +1042,16 @@ if st.session_state.analyzed_data:
 
             # 【★ テーブル行の追加（新しい並び順と2段組み対応）】
             # AIコメントを <div class="comment-scroll-box"> でラップ
-            rows += f'<tr><td class="td-center">{i+1}</td><td class="td-center">{d.get("code")}</td><td class="th-left td-bold">{d.get("name")}</td><td class="td-right">{d.get("cap_disp")}</td><td class="td-center">{score_disp}</td><td class="td-center">{d.get("strategy")}</td><td class="td-right td-bold">{price_disp}</td><td class="td-right">{buy:,.0f}<br><span style="font-size:10px;color:#666">{diff_txt}</span></span></td><td class="td-right">{mdd_disp}<br>{sl_pct_disp}</td><td class="td-left" style="line-height:1.2;font-size:11px;">{target_txt}</td><td class="td-center">{d.get("rsi_disp")}</td><td class="td-right">{vol_disp}<br>({avg_vol_html})</td><td class="td-center td-blue">{bt_cell_content}</td><td class="td-center">{d.get("per")}<br>{d.get("pbr")}</td><td class="td-center">{d.get("momentum")}</td><td class="th-left"><div class="comment-scroll-box">{comment_html}</div></td></tr>'
+            rows += f'<tr><td class="td-center">{i+1}</td><td class="td-center">{d.get("code")}</td><td class="th-left td-bold">{d.get("name")}</td><td class="td-right">{d.get("cap_disp")}</td><td class="td-center">{score_disp}</td><td class="td-center">{d.get("strategy")}</td><td class="td-right td-bold">{price_disp}</td><td class="td-right">{buy:,.0f}<br><span style="font-size:10px;color:#666">{diff_txt}</span></td><td class="td-right">{mdd_disp}<br>{sl_pct_disp}</td><td class="td-left" style="line-height:1.2;font-size:11px;">{target_txt}</td><td class="td-center">{d.get("rsi_disp")}</td><td class="td-right">{vol_disp}<br>({avg_vol_html})</td><td class="td-center td-blue">{bt_cell_content}</td><td class="td-center">{d.get("per")}<br>{d.get("pbr")}</td><td class="td-center">{d.get("momentum")}</td><td class="th-left"><div class="comment-scroll-box">{comment_html}</div></td></tr>'
 
 
         # ヘッダーとツールチップデータの定義 (2段組みに対応するため\nを使用)
         headers = [
             ("No", "25px", None), 
             ("コード", "45px", None), 
-            ("企業名", "125px", None), 
-            ("時価総額", "90px", None), 
-            ("点", "35px", "AIスコア。市場警戒モード発動時はMDD/SL減点が-10点に強化されます。"), 
+            ("企業名", "130px", None), 
+            ("時価総額", "85px", None), 
+            ("点", "35px", "AIスコア。最大DD率が-2%超、-5%超、-10%超で段階的に減点されます。市場過熱時は減点強化。"), 
             ("戦略", "75px", "🔥順張り: パーフェクトオーダーなど。🌊逆張り: RSI30以下など。"), 
             ("現在値", "60px", None), 
             ("推奨買値\n(乖離)", "65px", "戦略に基づく推奨エントリー水準。乖離は現在値との差額。"), 
@@ -1053,7 +1062,7 @@ if st.session_state.analyzed_data:
             ("押し目\n勝敗数", "60px", "過去75日のバックテストにおける、推奨エントリー（押し目）での勝敗数。"), 
             ("PER\nPBR", "60px", "株価収益率/株価純資産倍率。市場の評価指標。"), # 修正
             ("直近\n勝率", "40px", "直近5日間の前日比プラスだった日数の割合。"), # 修正
-            ("アイの所感", "min-width:350px;", None), 
+            ("アイの所感", "min-width:350px;", None), # ★★★ ここを None に変更 ★★★
         ]
 
         # ヘッダーHTMLの生成
@@ -1101,5 +1110,3 @@ if st.session_state.analyzed_data:
         if 'backtest_raw' in df_raw.columns:
             df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'}) 
         st.dataframe(df_raw)
-
-
