@@ -12,7 +12,7 @@ import numpy as np # for np.floor/ceil
 # --- アイコン設定 ---
 ICON_URL = "https://raw.githubusercontent.com/soutori296/stock-analysis/main/aisan.png"
 # --- 外部説明書URL ---
-# ⚠️ 注意: 実際にデプロイする際には、このURLをGitHub Pagesなど、アクセス可能な場所に配置したHTMLのURLに置き換えてください。
+# 最終合意されたURLに更新
 MANUAL_URL = "https://soutori296.stars.ne.jp/SoutoriWebShop/ai2_manual.html" 
 
 
@@ -223,14 +223,14 @@ st.markdown(f"""
 
 # --- 説明書 (外部HTMLリンクに変更) ---
 with st.expander("📘 取扱説明書 (データ仕様・判定基準)"):
-    # ★ 修正: st.markdown() に f-string プレフィックス 'f' を追加
+    # ★ 修正: f-stringプレフィックスを追加し、HTMLタグを有効化
     st.markdown(f"""
     <p>
         詳細な分析ロジック、スコア配点、時価総額別の目標リターンについては、<br>
         以下の外部マニュアルリンクをご参照ください。<br>
         <b><a href="{MANUAL_URL}" target="_blank">🔗 詳細ロジックマニュアルを開く</a></b>
     </p>
-    """, unsafe_allow_html=True) # unsafe_allow_html=True も追加してHTMLタグを有効化
+    """, unsafe_allow_html=True)
 
 # --- サイドバー --- (変更なし)
 if "GEMINI_API_KEY" in st.secrets:
@@ -583,7 +583,7 @@ def get_stock_data(ticker):
         ma5 = last['SMA5'] if not pd.isna(last['SMA5']) else 0
         ma25 = last['SMA25'] if not pd.isna(last['SMA25']) else 0
         ma75 = last['SMA75'] if not pd.isna(last['SMA75']) else 0 
-        buy_target = int(ma25) 
+        buy_target = int(ma5) 
         p_half = 0; p_full = 0
         
         prev_ma5 = prev['SMA5'] if not pd.isna(prev['SMA5']) else ma5
@@ -891,12 +891,16 @@ if st.button("🚀 分析開始 (アイに聞く)"):
     else:
         st.session_state.analyzed_data = []
         
-        # ★★★ 修正箇所: 入力文字列の柔軟な解析ロジック ★★★
+        # ★★★ 修正箇所: 入力銘柄数の制限 (30銘柄) ★★★
         raw_tickers_str = tickers_input.replace("\n", ",") \
                                        .replace(" ", ",") \
                                        .replace("、", ",")
                                        
         raw_tickers = list(set([t.strip() for t in raw_tickers_str.split(",") if t.strip()]))
+        
+        if len(raw_tickers) > 30:
+            st.warning(f"⚠️ 入力銘柄数が30を超えています。分析対象を最初の30銘柄に限定しました。")
+            raw_tickers = raw_tickers[:30]
         # ★★★ 修正箇所ここまで ★★★
         
         data_list = []
@@ -1094,5 +1098,3 @@ if st.session_state.analyzed_data:
         if 'backtest_raw' in df_raw.columns:
             df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'}) 
         st.dataframe(df_raw)
-
-
