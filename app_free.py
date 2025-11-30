@@ -219,7 +219,8 @@ st.markdown(f"""
 
 # --- 説明書 (最終合意ロジックに更新 - NameErrorの原因を根絶) ---
 with st.expander("📘 取扱説明書 (最終分析ロジック)"):
-    # **安全対策**: エラー回避のため、HTMLタグやCSSクラス定義は最小限のMarkdown記法に置き換え。
+    # HTMLタグが丸見えになるのを防ぐため、可能な限りHTMLとCSSクラスで表現
+    # **注意**: 数式やCSSの中括弧をPythonのエスケープシーケンス{{}}で囲み、レンダリング破壊を防ぐ。
     st.markdown("""
     <div class="center-text">
     
@@ -246,33 +247,32 @@ with st.expander("📘 取扱説明書 (最終分析ロジック)"):
     <p style="font-size:14px; margin-bottom:5px;"><b>リスク管理を最優先する厳格な評価システムです。</b></p>
     <table class="desc-table">
         <tr><th>項目</th><th>条件</th><th>配点/減点</th><th>備考</th></tr>
-        <tr><td style="font-weight:bold;">ベーススコア</td><td>-</td><td><b>+50点</b></td><td>全ての分析の起点</td></tr>
+        <tr><td style="color:#5D4037; font-weight:bold;"><b>ベーススコア</b></td><td>-</td><td><b>+50点</b></td><td>全ての分析の起点</td></tr>
         
-        <tr><td style="font-weight:bold; background-color:#ffcccc;" colspan="4">構造的リスク減点 (投資適格性フィルター)</td></tr>
-        <tr><td style="font-weight:bold; color:#d32f2f;">R/R比 不利</td><td>R/R比 &lt; 1.0</td><td><b>-25点</b></td><td>リワードがリスクを下回る。</td></tr>
-        <tr><td style="font-weight:bold; color:#d32f2f;">RSI極端 (大型株G)</td><td>🔥順張りでRSI &ge; 85 / 🌊逆張りでRSI &le; 20 <br>(時価総額 &ge; 3000億円)</td><td><b>-15点</b></td><td>大型株のトレンド継続性を許容し緩和。</td></tr>
-        <tr><td style="font-weight:bold; color:#d32f2f;">RSI極端 (小型株G)</td><td>🔥順張りでRSI &ge; 80 / 🌊逆張りでRSI &le; 20 <br>(時価総額 &lt; 3000億円)</td><td><b>-25点</b></td><td>小型株の急落リスクを厳しく評価。</td></tr>
-        <tr><td style="font-weight:bold; color:#d32f2f;">流動性不足(致命的)</td><td>5日平均出来高が 1,000株未満</td><td><b>-30点</b></td><td>換金リスクが極めて高い。</td></tr>
+        <tr><td style="background-color:#f44336; color:white; font-weight:bold;" colspan="4">構造的リスク減点 (投資適格性フィルター)</td></tr>
+        <tr><td style="color:#d32f2f; font-weight:bold;">R/R比 不利</td><td>R/R比 &lt; 1.0</td><td><b>-25点</b></td><td>リワードがリスクを下回る。</td></tr>
+        <tr><td style="color:#d32f2f; font-weight:bold;">RSI極端 (大型株G)</td><td>🔥順張りでRSI &ge; 85 / 🌊逆張りでRSI &le; 20 <br>(時価総額 &ge; 3000億円)</td><td><b>-15点</b></td><td>大型株のトレンド継続性を許容し緩和。</td></tr>
+        <tr><td style="color:#d32f2f; font-weight:bold;">RSI極端 (小型株G)</td><td>🔥順張りでRSI &ge; 80 / 🌊逆張りでRSI &le; 20 <br>(時価総額 &lt; 3000億円)</td><td><b>-25点</b></td><td>小型株の急落リスクを厳しく評価。</td></tr>
+        <tr><td style="color:#d32f2f; font-weight:bold;">流動性不足(致命的)</td><td>5日平均出来高が 1,000株未満</td><td><b>-30点</b></td><td>換金リスクが極めて高い。</td></tr>
         
-        <tr><td style="font-weight:bold; background-color:#ccffcc;" colspan="4">戦略・トレンド・勢い加点</td></tr>
-        <tr><td style="font-weight:bold; color:#1976d2;">順張り戦略</td><td>パーフェクトオーダー＆5日線上昇</td><td><b>+15点</b></td><td>勢いの評価。</td></tr>
-        <tr><td style="font-weight:bold; color:#1976d2;">逆張り戦略</td><td>RSI &le; 30 または 25MAから -10%乖離</td><td><b>+15点</b></td><td>反発期待値を評価。</td></tr>
-        <tr><td style="font-weight:bold; color:#1976d2;">RSI適正</td><td>RSI 55〜65</td><td><b>+10点</b></td><td>トレンドが最も継続しやすい水準。</td></tr>
-        <tr><td style="font-weight:bold; color:#1976d2;">出来高活発</td><td>出来高が5日平均の1.5倍超</td><td><b>+10点</b></td><td>市場の注目度を評価。</td></tr> 
-        <tr><td style="font-weight:bold; color:#1976d2;"><b>究極の出来高</b></td><td>出来高が5日平均の<b>3.0倍超</b></td><td><b>+5点</b> (追加)</td><td><b>満点100点到達のトリガー。</b></td></tr> 
-        <tr><td style="font-weight:bold; color:#1976d2;">直近勝率</td><td>直近5日で4日以上上昇</td><td><b>+5点</b></td><td>短期的な上値追いの勢いを評価。</td></tr>
+        <tr><td style="background-color:#4CAF50; color:white; font-weight:bold;" colspan="4">戦略・トレンド・勢い加点</td></tr>
+        <tr><td style="color:#1976d2; font-weight:bold;">順張り戦略</td><td>パーフェクトオーダー＆5日線上昇</td><td><b>+15点</b></td><td>勢いの評価。</td></tr>
+        <tr><td style="color:#1976d2; font-weight:bold;">逆張り戦略</td><td>RSI &le; 30 または 25MAから -10%乖離</td><td><b>+15点</b></td><td>反発期待値を評価。</td></tr>
+        <tr><td style="color:#1976d2; font-weight:bold;">RSI適正</td><td>RSI 55〜65</td><td><b>+10点</b></td><td>トレンドが最も継続しやすい水準。</td></tr>
+        <tr><td style="color:#1976d2; font-weight:bold;">出来高活発</td><td>出来高が5日平均の1.5倍超</td><td><b>+10点</b></td><td>市場の注目度を評価。</td></tr> 
+        <tr><td style="color:#1976d2; font-weight:bold;"><b>究極の出来高</b></td><td>出来高が5日平均の<b>3.0倍超</b></td><td><b>+5点</b> (追加)</td><td><b>満点100点到達のトリガー。</b></td></tr> 
+        <tr><td style="color:#1976d2; font-weight:bold;">直近勝率</td><td>直近5日で4日以上上昇</td><td><b>+5点</b></td><td>短期的な上値追いの勢いを評価。</td></tr>
 
-        <tr><td style="font-weight:bold; background-color:#ffebcc;" colspan="4">個別リスク評価 (市場環境連動)</td></tr>
-        <tr><td style="font-weight:bold; color:#1976d2;">DD率 優秀</td><td>最大DD率 &lt; 1.0%</td><td><b>+5点</b></td><td>過去の損失リスクが極めて低い。</td></tr>
-        <tr><td style="font-weight:bold; color:#d32f2f;">DD率 連続減点</td><td>2.0% &lt; DD &le; 10.0%</td><td><b>-2 * floor(DD-2.0)</b></td><td>DD率に比例した減点 (強化)。</td></tr>
-        <tr><td style="font-weight:bold; color:#d32f2f;">DD率 高リスク</td><td>最大DD率 &gt; 10.0%</td><td><b>-20点</b></td><td>大幅な損失リスク (強化)。</td></tr>
-        <tr><td style="font-weight:bold; color:#d32f2f;">SL乖離率小</td><td>SL乖離率が &plusmn;3.0%未満</td><td><b>-5点</b></td><td>損切り余地が少ない (ウェイト調整)。</td></tr>
-        <tr><td style="font-weight:bold; color:#d32f2f;">SL乖離率小(警戒)</td><td><b>市場警戒時</b> (レシオ&ge;125%)</td><td><b>-20点</b></td><td>市場警戒時はリスクを極度に嫌う (強化)。</td></tr>
+        <tr><td style="background-color:#FF9800; color:white; font-weight:bold;" colspan="4">個別リスク評価 (市場環境連動)</td></tr>
+        <tr><td style="color:#1976d2; font-weight:bold;">DD率 優秀</td><td>最大DD率 &lt; 1.0%</td><td><b>+5点</b></td><td>過去の損失リスクが極めて低い。</td></tr>
+        <tr><td style="color:#d32f2f; font-weight:bold;">DD率 連続減点</td><td>2.0% &lt; DD &le; 10.0%</td><td><b>-2 * floor(DD-2.0)</b></td><td>DD率に比例した減点 (強化)。</td></tr>
+        <tr><td style="color:#d32f2f; font-weight:bold;">DD率 高リスク</td><td>最大DD率 &gt; 10.0%</td><td><b>-20点</b></td><td>大幅な損失リスク (強化)。</td></tr>
+        <tr><td style="color:#d32f2f; font-weight:bold;">SL乖離率小</td><td>SL乖離率が &plusmn;3.0%未満</td><td><b>-5点</b></td><td>損切り余地が少ない (ウェイト調整)。</td></tr>
+        <tr><td style="color:#d32f2f; font-weight:bold;">SL乖離率小(警戒)</td><td><b>市場警戒時</b> (レシオ&ge;125%)</td><td><b>-20点</b></td><td>市場警戒時はリスクを極度に嫌う (強化)。</td></tr>
     </table>
     
     </div>
     """, unsafe_allow_html=True)
-
 # --- サイドバー --- (変更なし)
 if "GEMINI_API_KEY" in st.secrets:
     api_key = st.secrets["GEMINI_API_KEY"]
@@ -1135,3 +1135,4 @@ if st.session_state.analyzed_data:
         if 'backtest_raw' in df_raw.columns:
             df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'}) 
         st.dataframe(df_raw)
+
