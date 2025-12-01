@@ -45,20 +45,50 @@ def get_market_status():
 status_label, jst_now = get_market_status()
 status_color = "#d32f2f" if "進行中" in status_label else "#1976d2"
 
-# --- 出来高調整ウェイト（ご要望の出来高偏重ロジック） ---
-TIME_WEIGHTS = {
-    (9 * 60 + 0): 0.00,   # 9:00: 0%
-    (9 * 60 + 60): 0.55,  # 10:00: 55%
-    (11 * 60 + 30): 0.625, # 11:30: 62.5%
-    (12 * 60 + 30): 0.625, # 12:30: 62.5% (昼休み中)
-    (13 * 60 + 0): 0.725,  # 13:00: 72.5% (後場寄り10%の反映)
-    (15 * 60 + 25): 0.85, # 15:25: 85%
-    (15 * 60 + 30): 1.00  # 15:30: 100% (クロージング・オークション終了)
+# --- 出来高調整ウェイト（時価総額別ロジック） ---
+# 時価総額別の累積出来高ウェイトモデルを定義 (market_capは億円単位)
+WEIGHT_MODELS = {
+    # 大型株 (5000億円〜, 超大型も含む) - 引け(+CA) 集中型
+    "large": {
+        (9 * 60 + 0): 0.00,
+        (9 * 60 + 30): 0.25,  # 寄り30分
+        (10 * 60 + 0): 0.30,  # 10:00
+        (11 * 60 + 30): 0.50, # 前引け 
+        (12 * 60 + 30): 0.525, # 昼休み中
+        (13 * 60 + 0): 0.60,  # 後場寄り
+        (15 * 60 + 0): 0.70,  # 15:00
+        (15 * 60 + 25): 0.85, # 15:25 (CA前)
+        (15 * 60 + 30): 1.00  # 15:30 (CA後)
+    },
+    # 中型株 (500億円〜5000億円未満) - 標準型
+    "mid": {
+        (9 * 60 + 0): 0.00,
+        (9 * 60 + 30): 0.30, 
+        (10 * 60 + 0): 0.35,  # 10:00: 35%
+        (11 * 60 + 30): 0.55, # 11:30: 55%
+        (12 * 60 + 30): 0.575, # 12:30: 57.5% 
+        (13 * 60 + 0): 0.675,  # 13:00: 67.5% 
+        (15 * 60 + 0): 0.75,   # 15:00
+        (15 * 60 + 25): 0.90, # 15:25: 90%
+        (15 * 60 + 30): 1.00  # 15:30: 100%
+    },
+    # 小型株 (〜500億円未満, 超小型も含む) - 寄り付き依存型
+    "small": {
+        (9 * 60 + 0): 0.00,
+        (9 * 60 + 30): 0.40,  # 寄り30分 (40%に拡張)
+        (10 * 60 + 0): 0.45,  # 10:00
+        (11 * 60 + 30): 0.65, # 前引け
+        (12 * 60 + 30): 0.675, # 昼休み中
+        (13 * 60 + 0): 0.75,  # 後場寄り
+        (15 * 60 + 0): 0.88, # 15:00
+        (15 * 60 + 25): 0.95, # 15:25 (CA: 5%以下に圧縮)
+        (15 * 60 + 30): 1.00  # 15:30 (CA後)
+    }
 }
 
-def get_volume_weight(current_dt):
+def get_volume_weight(current_dt, market_cap):
     """
-    出来高補正ウエイトを返す。引け後・休日は1.0。
+    時価総額に応じた出来高補正ウエイトを返す。引け後・休日は1.0。
     """
     status, _ = get_market_status()
     if "休日" in status or "引け後" in status or current_dt.hour < 9:
@@ -72,10 +102,18 @@ def get_volume_weight(current_dt):
     if current_minutes < (9 * 60):
         return 0.01
 
+    # 時価総額によるウェイトモデルの選択
+    if market_cap >= 5000: # 5000億円〜 (大型/超大型)
+        weights = WEIGHT_MODELS["large"]
+    elif market_cap >= 500: # 500億円〜5000億円未満 (中型)
+        weights = WEIGHT_MODELS["mid"]
+    else: # 500億円未満 (小型/超小型)
+        weights = WEIGHT_MODELS["small"]
+
     last_weight = 0.0
     last_minutes = (9 * 60)
 
-    for end_minutes, weight in TIME_WEIGHTS.items():
+    for end_minutes, weight in weights.items():
         if current_minutes <= end_minutes:
             if end_minutes == last_minutes:
                  return weight
@@ -214,9 +252,10 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
+# 【★ 投資顧問業回避のため、文言を変更】
 st.markdown(f"""
 <p class="big-font">
-    あなたの提示した銘柄についてアイが分析して売買戦略を伝えます。<br>
+    あなたの提示した銘柄についてアイが分析を行い、<b>判断の参考となる見解</b>を提示します。<br>
     <span class="status-badge">{status_label}</span>
 </p>
 """, unsafe_allow_html=True)
@@ -565,7 +604,8 @@ def get_stock_data(ticker):
         
         # 出来高倍率の計算
         vol_ratio = 0
-        volume_weight = get_volume_weight(jst_now_local) 
+        # ★ get_volume_weightに時価総額（info["cap"]）を渡す
+        volume_weight = get_volume_weight(jst_now_local, info["cap"]) 
         
         if info.get("volume") and not pd.isna(last['Vol_SMA5']) and volume_weight > 0.0001: 
             adjusted_vol_avg = last['Vol_SMA5'] * volume_weight
@@ -799,6 +839,7 @@ def batch_analyze_with_ai(data_list):
     else:
         market_alert_info += "市場の過熱感は中立的です。"
     
+    # 【★ 投資顧問回避のため、プロンプトの指示を修正】
     prompt = f"""
     あなたは「アイ」という名前のプロトレーダー（30代女性、冷静・理知的）。
     以下の【市場環境】と【銘柄リスト】に基づき、それぞれの「所感コメント（丁寧語）」を作成してください。
@@ -809,16 +850,16 @@ def batch_analyze_with_ai(data_list):
     【コメント作成の指示】
     1.  <b>Markdownの太字（**）は絶対に使用せず、HTMLの太字（<b>）のみをコメント内で使用してください。</b>
     2.  <b>表現の多様性を最重視してください。</b>数十銘柄あっても10通りの異なる視点やボキャブラリーを使用し、紋切り型な文章は厳禁です。
-    3.  <b>AIスコアに応じた文章量と熱量を厳格に調整してください。</b>
-        - **AIスコア 85点以上 (超高評価)**: 70文字〜90文字程度。<b>「注目すべき銘柄」「大口の買い」</b>など、熱意と期待感を示す表現を盛り込んでください。
-        - **AIスコア 75点 (高評価)**: 60文字〜80文字程度。<b>「トレンド良好」「妙味がある」</b>など、期待と冷静な分析を両立させた表現にしてください。
-        - **AIスコア 65点以下 (中立/様子見)**: 50文字〜70文字程度。<b>「様子見が賢明」「慎重な見極め」</b>など、リスクを強調し、冷静沈着なトーンを維持してください。
+    3.  <b>AIスコアに応じた文章量とトーンを厳格に調整してください。</b>
+        - **AIスコア 85点以上 (超高評価)**: 70文字〜90文字程度。<b>「注目度が高いと見られる動き」「大口のフローが観測されている可能性」</b>など、期待感を示すが断定は避けた表現にしてください。
+        - **AIスコア 75点 (高評価)**: 60文字〜80文字程度。<b>「トレンドは良好」「分析上の妙味がある」</b>など、期待と冷静な分析を両立させた表現にしてください。
+        - **AIスコア 65点以下 (中立/様子見)**: 50文字〜70文字程度。<b>「様子見が賢明な局面」「慎重な見極めが必要」</b>など、リスクを強調し、冷静沈着なトーンを維持してください。
     4.  市場環境が【明確な過熱ゾーン】の場合、全てのコメントのトーンを控えめにし、「市場全体が過熱しているため、この銘柄にも調整が入るリスクがある」といった<b>強い警戒感</b>を盛り込んでください。
     5.  戦略の根拠、RSIの状態（極端な減点があったか否か）、出来高倍率（1.5倍超）、およびR/R比（1.0未満の不利、2.0超の有利など）を必ず具体的に盛り込んでください。
-    6.  **【最重要: リスク情報と損切り基準・強調表現の制限】**
-        - リスク情報（MDD、SL乖離率）を参照し、リスク管理の重要性に言及してください。MDDが-8.0%を超える場合は、「過去の損失リスクが高い」旨を明確に伝えてください。
-        - **流動性:** **致命的低流動性:警告(1000株未満)**の銘柄については、コメントの冒頭で「平均出来高が1,000株未満と極めて低く、希望価格での売買が困難な<b>流動性リスク</b>を伴います。ロット調整を<b>強く推奨します</b>。」といった<b>明確な警告</b>を必ず含めてください。
-        - **損切り目安:** 「長期サポートラインである<b>SL目安MA（{sl_ma_disp}）を終値で明確に割り込んだ場合</b>は、速やかに損切りを検討すべき」といった<b>撤退基準</b>を明示してください。
+    6.  **【最重要: リスク情報と撤退基準・強調表現の制限】**
+        - リスク情報（MDD、SL乖離率）を参照し、リスク管理の重要性に言及してください。MDDが-8.0%を超える場合は、「過去の損失リスクが高いデータ」がある旨を明確に伝えてください。
+        - **流動性:** **致命的低流動性:警告(1000株未満)**の銘柄については、コメントの冒頭で「平均出来高が1,000株未満と極めて低く、希望価格での売買が困難な<b>流動性リスク</b>を伴います。<b>ご自身の資金規模に応じたロット調整をご検討ください</b>。」といった<b>明確な警告</b>を必ず含めてください。
+        - **損切り目安:** 「長期サポートラインである<b>SL目安MA（{sl_ma_disp}）を終値で明確に割り込んだ場合</b>は、<b>撤退判断の基準</b>としてご検討ください」といった<b>撤退基準</b>を明示してください。
         - **強調表現の制限**: **AIスコア85点以上**の銘柄コメントに限り、**全体の5%の割合**（例: 20銘柄中1つ程度）で、特に重要な部分（例：大口の買い、強力なトレンド）を**1箇所（10文字以内）**に限り、**赤太字のHTMLタグ（<b><span style="color:red;">...</span></b>）**を使用して強調しても良い。それ以外のコメントでは赤太字を絶対に使用しないでください。85点未満は<b>黒太字</b>のみ使用してください。
     
     【出力形式】
@@ -1029,26 +1070,28 @@ if st.session_state.analyzed_data:
             comment_html = d.get("comment", "")
 
             # 【★ テーブル行の追加（R/R比列を挿入）】
+            # 【★ 「推奨買値」の表示を「想定買付水準」に変更】
             rows += f'<tr><td class="td-center">{i+1}</td><td class="td-center">{d.get("code")}</td><td class="th-left td-bold">{d.get("name")}</td><td class="td-right">{d.get("cap_disp")}</td><td class="td-center">{score_disp}</td><td class="td-center">{d.get("strategy")}</td><td class="td-right td-bold">{price_disp}</td><td class="td-right">{buy:,.0f}<br><span style="font-size:10px;color:#666">{diff_txt}</span></span></td><td class="td-center">{rr_disp}</td><td class="td-right">{mdd_disp}<br>{sl_pct_disp}</td><td class="td-left" style="line-height:1.2;font-size:11px;">{target_txt}</td><td class="td-center">{d.get("rsi_disp")}</td><td class="td-right">{vol_disp}<br>({avg_vol_html})</td><td class="td-center td-blue">{bt_cell_content}</td><td class="td-center">{d.get("per")}<br>{d.get("pbr")}</td><td class="td-center">{d.get("momentum")}</td><td class="th-left"><div class="comment-scroll-box">{comment_html}</div></td></tr>'
 
 
-        # ヘッダーとツールチップデータの定義 (R/R比を追加)
+        # ヘッダーとツールチップデータの定義 
+        # 【★ 推奨買値 → 想定買付水準、戦略 → 戦略/水準、推奨買値(乖離) → 想定買付水準(乖離) に変更】
         headers = [
             ("No", "25px", None), 
             ("コード", "45px", None), 
             ("企業名", "125px", None), 
             ("時価総額", "95px", None), 
             ("点", "35px", "AIスコア。リスク管理を最優先した厳格な評価。85点以上で超高評価。"), 
-            ("戦略", "75px", "🔥順張り: パーフェクトオーダーなど。🌊逆張り: RSI30以下など。"), 
+            ("戦略/\n水準", "75px", "🔥順張り: パーフェクトオーダーなど。🌊逆張り: RSI30以下など。"), # ★ 修正:戦略/水準
             ("現在値", "60px", None), 
-            ("推奨買値\n(乖離)", "65px", "戦略に基づく推奨エントリー水準。乖離は現在値との差額。"), 
-            ("R/R比", "40px", "最重要:推奨買値から半益目標までの値幅を、SL MAまでの値幅で割った比率。1.0未満は-25点。"), # ★ R/R比を追加
+            ("想定買付\n水準(乖離)", "65px", "戦略に基づくエントリーの目安水準。乖離は現在値との差額。"), # ★ 修正:想定買付水準(乖離)
+            ("R/R比", "40px", "最重要:想定買付水準から半益目標までの値幅を、SL MAまでの値幅で割った比率。1.0未満は-25点。"), # ★ 修正
             ("最大DD率\nSL乖離率", "70px", "最大DD率: 過去の同条件トレードでの最大下落率。SL乖離率: SLラインまでの余地。"), 
             ("利確目標\n(乖離率)", "120px", "時価総額別リターンと心理的な節目を考慮した目標値。"), 
             ("RSI", "50px", "相対力指数。🔵30以下(売られすぎ) / 🟢55-65(上昇トレンド) / 🔴70以上(過熱)"), 
             ("出来高比\n（5日平均）", "80px", "上段は当日の出来高と5日平均出来高（補正済み）の比率。下段は5日平均出来高。1000株未満は-30点。"), 
-            ("押し目買い\n勝敗数", "70px", "過去75日のバックテストにおける、推奨エントリー（押し目）での勝敗数。"), 
-            ("PER\nPBR", "60px", "株価収益率/株価純資産倍率。市場の評価指標。"), 
+            ("押し目買い\n勝敗数", "70px", "過去75日のバックテストにおける、想定エントリー（押し目）での勝敗数。"), # ★ 修正:想定エントリー
+            ("PER\nPBR", "60px", "株価収益率/株価純資産倍率。株価の相対的な評価指標。"), 
             ("直近\n勝率", "40px", "直近5日間の前日比プラスだった日数の割合。"), 
             ("アイの所感", "min-width:350px;", None), 
         ]
@@ -1078,13 +1121,13 @@ if st.session_state.analyzed_data:
         </table></div>'''
 
 
-    st.markdown("### 📊 アイ推奨ポートフォリオ")
+    st.markdown("### 📊 アイ分析結果")
     # 【★ 市場騰落レシオの表示】
     r25 = market_25d_ratio
     ratio_color = "#d32f2f" if r25 >= 125.0 else ("#1976d2" if r25 <= 80.0 else "#4A4A4A")
     st.markdown(f'<p class="big-font"><b>市場環境（25日騰落レシオ）：<span style="color:{ratio_color};">{r25:.2f}%</span></b></p>', unsafe_allow_html=True)
     
-    st.markdown(create_table(rec_data, "🔥 推奨銘柄"), unsafe_allow_html=True)
+    st.markdown(create_table(rec_data, "🔥 注目銘柄"), unsafe_allow_html=True)
     st.markdown(create_table(watch_data, "👀 様子見銘柄"), unsafe_allow_html=True)
     
     st.markdown("---")
@@ -1098,8 +1141,3 @@ if st.session_state.analyzed_data:
         if 'backtest_raw' in df_raw.columns:
             df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'}) 
         st.dataframe(df_raw)
-
-
-
-
-
