@@ -687,6 +687,8 @@ def get_stock_data(ticker):
             
             if risk_value > 0 and reward_value > 0:
                  risk_reward_ratio = reward_value / risk_value
+                 # 【★ 異常値対策: R/R比の上限を50.0に設定】
+                 risk_reward_ratio = min(risk_reward_ratio, 50.0)
             
         # 【★ スコア計算ロジック - リスクウェイト強化版】
         score = 50 # ベーススコア
