@@ -8,6 +8,7 @@ import io
 import re
 import math
 import numpy as np
+import random # ★ 新規追加: ランダムな待機時間に使用
 # import yfinance as yf # Yahoo! Finance ライブラリは使用しません
 
 # --- アイコン設定 ---
@@ -31,6 +32,11 @@ if 'clear_confirmed' not in st.session_state:
     st.session_state.clear_confirmed = False # ★ 確認ステップ用フラグ
 if 'tickers_input_value' not in st.session_state:
     st.session_state.tickers_input_value = "" # ★ 入力欄の値をセッションで管理
+if 'overflow_tickers' not in st.session_state:
+    st.session_state.overflow_tickers = "" # ★ 超過銘柄コードを格納するセッションステート
+    
+# --- 分析上限定数 ---
+MAX_TICKERS = 20 # ★ 30銘柄から20銘柄に修正
 
 
 # --- 時間管理 (JST) ---
@@ -250,13 +256,23 @@ st.markdown(f"""
     }}
     /* ========================================================== */
     
-    /* ★ ボタンの幅を揃えるためのCSSを追加 */
+    /* ★ ボタンの幅を揃えるためのCSSを修正 */
     /* 横並びボタンの幅をウィンドウサイズに依らずテキスト+αに固定 */
     div.stButton button {{
         width: auto !important; /* 幅の拡張を無効化 */
         min-width: 180px; /* 最小幅を設定して小さくなりすぎないようにする */
-        margin-right: 5px;
+        margin-right: 5px; /* 元のCSSに戻す */
     }}
+
+    /* 【新規追加】コピー成功時のフィードバック */
+    .copy-feedback {{ 
+        color: #1976d2; 
+        font-weight: bold; 
+        margin-left: 10px;
+        display: inline-block;
+        font-size: 14px;
+    }}
+
 
 </style>
 """, unsafe_allow_html=True)
@@ -298,7 +314,7 @@ else:
 
 # ★ 入力欄の値はセッションステートから取得/更新する
 tickers_input = st.text_area(
-    "Analysing Targets (銘柄コードを入力)", 
+    f"Analysing Targets (銘柄コードを入力) - 上限{MAX_TICKERS}銘柄/回", 
     value=st.session_state.tickers_input_value, 
     placeholder="例:\n7203\n8306\n9984",
     height=150,
@@ -320,22 +336,55 @@ sort_option = st.sidebar.selectbox("並べ替え順", [
     "コード順"
 ])
 
+# --- JavaScriptによるクリップボードへのコピー機能 ---
+def copy_to_clipboard_js(target_id, feedback_id):
+    """ 指定されたIDのテキストエリアの内容をクリップボードにコピーするJSを埋め込む """
+    js_code = f"""
+    <script>
+    function copyText() {{
+        var copyText = document.getElementById("{target_id}");
+        if (!copyText) {{ return; }}
+        
+        // テキストエリアを一時的に選択可能にする
+        copyText.select();
+        copyText.setSelectionRange(0, 99999); // モバイル対応
+        
+        try {{
+            document.execCommand("copy");
+            
+            // フィードバック表示
+            var feedback = document.getElementById("{feedback_id}");
+            if (feedback) {{
+                feedback.innerHTML = "コピーしました！";
+                setTimeout(function(){{ feedback.innerHTML = ""; }}, 2000);
+            }}
+
+        }} catch (err) {{
+            // console.error('Copy failed', err);
+        }}
+    }}
+    </script>
+    """
+    st.markdown(js_code, unsafe_allow_html=True)
+
 # --- ★ ボタン横並びと確認ダイアログのロジック ---
-# ★ ボタン幅を固定するために、空のカラムを設けてボタンを左寄せ
-col_clear_result, col_analyze, col_spacer = st.columns([0.28, 0.28, 0.44]) 
+# ★ ボタン横並びと縦並びを両立させるため、元のカラム構造に戻す
+col_main_button, col_spacer, col_clear_button = st.columns([0.33, 0.33, 0.34]) 
 
-# ボタンラベルの調整
-clear_button_label = "分析結果を全てクリア"
-analyze_button_label = "🚀 分析開始（アイに聞く）" 
+# ボタンラベルの調整 (ご提案の短いラベルと絵文字を適用)
+clear_button_label = "🗑️ 結果を消去"
+analyze_button_label = "🚀 分析開始" 
 
-# 【左】分析結果クリアボタン（確認ステップへ移行）
-# ★ use_container_width=Falseに変更し、幅を固定
-if col_clear_result.button(clear_button_label, use_container_width=False): 
-    st.session_state.clear_confirmed = True
-
-# 【右】分析開始ボタン
-# ★ use_container_width=Falseに変更し、幅を固定
-analyze_start_clicked = col_analyze.button(analyze_button_label, use_container_width=False, disabled=st.session_state.clear_confirmed) 
+# 【左】分析開始ボタン（主目的：上側に配置）
+# Streamlitの仕様上、同じカラム内に複数のボタンを続けて配置すると縦並びになる
+with col_main_button:
+    # 1. 分析開始ボタン (上側に配置)
+    analyze_start_clicked = st.button(analyze_button_label, use_container_width=False, disabled=st.session_state.clear_confirmed) 
+    
+    # 2. 分析結果クリアボタン (下側に配置)
+    clear_button_clicked = st.button(clear_button_label, use_container_width=False)
+    if clear_button_clicked: 
+        st.session_state.clear_confirmed = True
 
 
 # 確認ステップの表示 (画面上部に固定)
@@ -350,6 +399,7 @@ if st.session_state.clear_confirmed:
         st.session_state.ai_monologue = ""
         st.session_state.error_messages = []
         st.session_state.clear_confirmed = False
+        st.session_state.overflow_tickers = "" # クリア時にメモ欄もリセット
         st.rerun() # ★ st.rerun()で画面を再実行
     
     if col_cancel.button("❌ キャンセル", use_container_width=False): # ★ use_container_width=False
@@ -1006,16 +1056,17 @@ def batch_analyze_with_ai(data_list):
     【生成コメントの原則（厳守）】
     1.  <b>Markdownの太字（**）は絶対に使用せず、HTMLの太字（<b>）のみをコメント内で使用してください。</b>
     2.  <b>表現の多様性を最重視してください。</b>紋切り型な文章は厳禁です。
-    3.  <b>AIコメントの最重要原則：全てのコメントの末尾には、必ず「最終的な売買判断は、ご自身の分析とリスク許容度に基づいて行うことが重要です。」という旨の中立的な文言を付記してください。具体的な行動（「買い」「売り」など）を促す表現は厳禁です。</b>
-    4.  <b>総合分析点に応じた文章量とトーンを厳格に調整してください。</b>
-        - 総合分析点 85点以上 (超高評価): 70文字〜90文字程度。客観的な事実と技術的な評価のみに言及し、期待感を示す言葉や断定的な表現は厳禁とする。
-        - 総合分析点 75点 (高評価): 60文字〜80文字程度。分析上の結果と客観的なデータ提示に留める。
+    3.  <b>コメントの先頭に、必ず「<b>[銘柄名]</b>｜」というプレフィックスを挿入してください。</b>
+    4.  <b>最大文字数の厳守：全てのコメント（プレフィックス含む）は最大でも150文字とします。この150文字制限は、プレフィックスを含めた全体の文字数です。</b>投資助言と誤解される表現、特に「最終的な売買判断は、ご自身の分析とリスク許容度に基づいて行うことが重要です。」という定型文は、<b>全てのコメントから完全に削除してください。</b>具体的な行動（「買い」「売り」など）を促す表現は厳禁です。
+    5.  <b>総合分析点に応じた文章量とトーンを厳格に調整してください。</b>（プレフィックスの文字数も考慮し、制限を厳しくします）
+        - 総合分析点 85点以上 (超高評価): 80文字〜145文字程度。客観的な事実と技術的な評価のみに言及し、期待感を示す言葉や断定的な表現は厳禁とする。
+        - 総合分析点 75点 (高評価): 70文字〜110文字程度。分析上の結果と客観的なデータ提示に留める。
         - 総合分析点 65点以下 (中立/様子見): 50文字〜70文字程度。リスクと慎重な姿勢を強調してください。
-    5.  市場環境が【明確な過熱ゾーン】の場合、全てのコメントのトーンを控えめにし、「市場全体が過熱しているため、この銘柄にも調整が入るリスクがある」といった<b>強い警戒感</b>を盛り込んでください。
-    6.  戦略の根拠、RSIの状態（極端な減点があったか否か）、出来高倍率（1.5倍超）、およびR/R比（1.0未満の不利、2.0超の有利など）を必ず具体的に盛り込んでください。
-    7.  【リスク情報と撤退基準】
+    6.  市場環境が【明確な過熱ゾーン】の場合、全てのコメントのトーンを控えめにし、「市場全体が過熱しているため、この銘柄にも調整が入るリスクがある」といった<b>強い警戒感</b>を盛り込んでください。
+    7.  戦略の根拠、RSIの状態（極端な減点があったか否か）、出来高倍率（1.5倍超）、およびR/R比（1.0未満の不利、2.0超の有利など）を必ず具体的に盛り込んでください。
+    8.  【リスク情報と撤退基準】
         - リスク情報（MDD、SL乖離率）を参照し、リスク管理の重要性に言及してください。MDDが-8.0%を超える場合は、「過去の最大下落リスクが高いデータ」がある旨を明確に伝えてください。
-        - 流動性: 致命的低流動性:警告(1000株未満)の銘柄については、コメントの冒頭で「平均出来高が1,000株未満と極めて低く、希望価格での売買が困難な<b>流動性リスク</b>を伴います。ご自身の資金規模に応じたロット調整をご検討ください。」といった<b>明確な警告</b>を必ず含めてください。
+        - 流動性: 致命的低流動性:警告(1000株未満)の銘柄については、コメントの冒頭（プレフィックスの次）で「平均出来高が1,000株未満と極めて低く、希望価格での売買が困難な<b>流動性リスク</b>を伴います。ご自身の資金規模に応じたロット調整をご検討ください。」といった<b>明確な警告</b>を必ず含めてください。
         - 新規追加: 極端な低流動性 (流動性比率 < 0.05% や ATR < 0.5% の場合) についても、同様に<b>明確な警告</b>を盛り込んでください。
         - 撤退基準: 長期サポートラインである<b>SL目安MA（{{sl_ma_disp}}）を終値で明確に割り込んだ場合</b>は、速やかに損切りを検討すべきといった<b>撤退基準</b>を明記してください。
         - 強調表現の制限: 総合分析点85点以上の銘柄コメントに限り、全体の5%の割合（例: 20銘柄中1つ程度）で、特に重要な部分（例：出来高増加の事実、高い整合性）を1箇所（10文字以内）に限り、<b>赤太字のHTMLタグ（<span style="color:red;">...</span>）</b>を使用して強調しても良い。それ以外のコメントでは赤太字を絶対に使用しないでください。
@@ -1115,17 +1166,25 @@ if analyze_start_clicked:
                                        
         raw_tickers = list(set([t.strip() for t in raw_tickers_str.split(",") if t.strip()]))
         
-        # ★★★ 修正箇所: 入力銘柄数の制限 (最大50銘柄) ★★★
-        if len(raw_tickers) > 50:
-            st.warning(f"⚠️ 入力銘柄数が50を超えています。分析対象を最初の50銘柄に限定しました。")
-            raw_tickers = raw_tickers[:50]
+        # ★★★ 修正箇所: 入力銘柄数の制限 (最大20銘柄) と超過分処理 ★★★
+        if len(raw_tickers) > MAX_TICKERS:
+            # 超過銘柄リストの作成
+            overflow_list = raw_tickers[MAX_TICKERS:]
+            st.session_state.overflow_tickers = "\n".join(overflow_list)
+            
+            # 分析対象を20銘柄に限定
+            raw_tickers = raw_tickers[:MAX_TICKERS]
+            
+            st.warning(f"⚠️ 入力銘柄数が{MAX_TICKERS}を超えています。分析対象を最初の{MAX_TICKERS}銘柄に限定しました。超過分は「次回分析用メモ」に表示されます。")
+        else:
+            st.session_state.overflow_tickers = "" # 20銘柄以下の場合はメモをクリア
         # ★★★ 修正箇所ここまで ★★★
         
         data_list = []
         
         # 銘柄数が多すぎる場合、Streamlitのプログレスバーを非表示にするか、
         # 処理時間を考慮したフィードバックが必要です。
-        if len(raw_tickers) > 50: # ★ 50銘柄を超える場合はプログレスバーを省略
+        if len(raw_tickers) > 20: # ★ 20銘柄を超える場合はプログレスバーを省略
              st.info(f"💡 {len(raw_tickers)}銘柄の分析を開始します。銘柄数が多いため、処理に時間がかかる（数分程度）場合があります。また、AIの処理能力を超えた場合、途中でエラーになる可能性があります。")
              bar = None
         else:
@@ -1139,7 +1198,10 @@ if analyze_start_clicked:
             if d: new_analyzed_data.append(d)
             if bar:
                 bar.progress((i+1)/len(raw_tickers))
-            time.sleep(2.0) # ★★★ 待機時間を2.0秒に延長 ★★★
+            
+            # ★★★ 修正箇所: ランダムな待機時間に変更 ★★★
+            time.sleep(random.uniform(1.5, 2.5)) 
+            # ★★★ 修正箇所ここまで ★★★
             
         with st.spinner("アイが全銘柄を診断中..."):
             # AI分析にスコア情報を渡していることを確認
@@ -1175,6 +1237,37 @@ if analyze_start_clicked:
 if st.session_state.analyzed_data:
     data = st.session_state.analyzed_data
     
+    # ★★★ 新規追加: 超過銘柄メモ欄の表示とコピーボタン ★★★
+    if st.session_state.overflow_tickers:
+        st.markdown("---")
+        st.markdown(f"### 📋 次回分析用メモ (分析対象外の超過{len(st.session_state.overflow_tickers.splitlines())}銘柄)")
+        
+        # テキストエリアとコピーボタンを横に並べる
+        col_memo, col_copy, col_memo_spacer = st.columns([0.8, 0.2, 0.0])
+        
+        # テキストエリアに超過銘柄コードを表示
+        with col_memo:
+            st.text_area(
+                "メモの内容をコピーし、入力欄に貼り付けてご使用ください。", 
+                value=st.session_state.overflow_tickers, 
+                height=150, 
+                key='overflow_memo_area', 
+                label_visibility="collapsed"
+            )
+            # StreamlitのテキストエリアのIDを取得するため、JSの埋め込みで対応
+            memo_id = "overflow_memo_area" # Streamlitが自動生成するIDを特定するためのKey
+            feedback_id = "copy_feedback_msg"
+            copy_to_clipboard_js(f"component-overflow_memo_area-textarea", feedback_id)
+            
+        # コピーボタンとフィードバックメッセージ
+        with col_copy:
+             # ★ コピーボタンのonClickでJSのcopyText関数を実行
+            st.button("📋 コピー", on_click=lambda: st.markdown(f'<script>copyText();</script>', unsafe_allow_html=True), use_container_width=True)
+            st.markdown(f'<span id="{feedback_id}" class="copy-feedback"></span>', unsafe_allow_html=True)
+            
+        st.markdown("---")
+    # ★★★ 新規追加ここまで ★★★
+
     # リスト分け (変更なし)
     rec_data = [d for d in data if d['strategy'] != "様子見" and d['score'] >= 50]
     watch_data = [d for d in data if d['strategy'] == "様子見" or d['score'] < 50]
