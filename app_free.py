@@ -1120,11 +1120,13 @@ def merge_new_data(new_data_list):
 
 # --- メイン処理 ---
 # ★ analyze_start_clickedがTrueの場合のみ実行
+# --- メイン処理 ---
+# ★ analyze_start_clickedがTrueの場合のみ実行
 if analyze_start_clicked:
     st.session_state.error_messages = [] 
     
     # tickers_input_valueから入力を取得
-    input_tickers = st.session_state.tickers_input_value
+    input_tickers = st.session_state.tickers_input_value # ★ 入力された最新の値を取得
     
     if not api_key:
         st.warning("APIキーを入力してください。")
@@ -1136,20 +1138,38 @@ if analyze_start_clicked:
                                        .replace(" ", ",") \
                                        .replace("、", ",")
                                        
+        # 重複を排除し、有効な銘柄コードリストを作成
         raw_tickers = list(set([t.strip() for t in raw_tickers_str.split(",") if t.strip()]))
+        
+        # 分析対象と超過銘柄を決定
+        analyze_tickers = raw_tickers[:MAX_TICKERS]
+        overflow_list = raw_tickers[MAX_TICKERS:] # 超過分のリスト
         
         # ★★★ 修正箇所: 入力銘柄数の制限 (最大20銘柄) と超過分処理 ★★★
         if len(raw_tickers) > MAX_TICKERS:
-            # 超過銘柄リストの作成
-            overflow_list = raw_tickers[MAX_TICKERS:]
+            # 超過銘柄リストをセッションステートに保存 (次回分析用メモに表示される)
             st.session_state.overflow_tickers = "\n".join(overflow_list)
             
-            # 分析対象を20銘柄に限定
-            raw_tickers = raw_tickers[:MAX_TICKERS]
+            # 実際に分析に回すリストを analyze_tickers (MAX_TICKERS分) に限定
+            raw_tickers = analyze_tickers 
             
             st.warning(f"⚠️ 入力銘柄数が{MAX_TICKERS}を超えています。分析対象を最初の{MAX_TICKERS}銘柄に限定しました。超過分は「次回分析用メモ」に表示されます。")
         else:
             st.session_state.overflow_tickers = "" # 20銘柄以下の場合はメモをクリア
+            
+        # 【★ 重要な追加ロジック】: 処理が完了した後、入力欄から分析対象銘柄を削除する
+        
+        # 1. 残りの超過銘柄リストを新しい入力値として準備
+        if overflow_list:
+            # 超過銘柄リストを新しい入力値として設定 (改行区切り)
+            new_input_value = "\n".join(overflow_list)
+        else:
+            # 超過がなければ、入力はクリア
+            new_input_value = ""
+            
+        # 2. セッションステートを更新 -> これで入力欄とメモ欄の値が更新される
+        st.session_state.tickers_input_value = new_input_value
+        
         # ★★★ 修正箇所ここまで ★★★
         
         data_list = []
@@ -1203,6 +1223,9 @@ if analyze_start_clicked:
         elif not st.session_state.analyzed_data and raw_tickers:
             st.warning("⚠️ 全ての銘柄コードについて、データ取得またはAI分析に失敗しました。APIキーまたは入力コードをご確認ください。")
         # --- エラーメッセージ一括表示ここまで ---
+        
+        # 【★ 処理完了後、画面を再実行して入力欄とメモ欄を最新の状態にする】
+        st.rerun()
 
 
 # --- 表示 ---
