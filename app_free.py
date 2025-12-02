@@ -1004,8 +1004,12 @@ def batch_analyze_with_ai(data_list):
         p_half = d['p_half']
         p_full = d['p_full']
         
-        # リスクリワード比の表示を追加
-        rr_disp = f"R/R:{d.get('risk_reward', 0.0):.1f}"
+        # リスクリワード比の表示を条件付きに変更 ★ 修正
+        rr_val = d.get('risk_reward', 0.0)
+        rr_disp = f"R/R:{rr_val:.1f}" if rr_val >= 0.1 else "" 
+        # R/Rが0.1未満の場合は空文字列にする
+        if rr_disp:
+             rr_disp = f" | {rr_disp}" # R/Rが存在する場合のみ区切り文字を追加
 
         half_pct = ((p_half / price) - 1) * 100 if price > 0 and p_half > 0 else 0
         
@@ -1032,8 +1036,9 @@ def batch_analyze_with_ai(data_list):
         atr_disp = f"ATR:{d.get('atr_val', 0.0):.1f}円"
 
         # ★ プロンプトにリスクリワード比とDD率を加味した最終スコアを追加
-        prompt_text += f"ID:{d['code']} | {d['name']} | 現在:{price:,.0f} | 分析戦略:{d['strategy']} | RSI:{d['rsi']:.1f} | 5MA乖離率:{ma_div:+.1f}% | {rr_disp} | 出来高倍率:{d['vol_ratio']:.1f}倍 | リスク情報: MDD:{mdd:+.1f}%, MA75乖離率:{sl_pct:+.1f}% | {sl_ma_disp} | {low_liquidity_status} | {liq_disp} | {atr_disp} | 総合分析点:{d['score']}\n" 
-    
+        # rr_disp は空文字列の場合があるため、直前の文字列と結合
+        prompt_text += f"ID:{d['code']} | {d['name']} | 現在:{price:,.0f} | 分析戦略:{d['strategy']} | RSI:{d['rsi']:.1f} | 5MA乖離率:{ma_div:+.1f}%{rr_disp} | 出来高倍率:{d['vol_ratio']:.1f}倍 | リスク情報: MDD:{mdd:+.1f}%, MA75乖離率:{sl_pct:+.1f}% | {sl_ma_disp} | {low_liquidity_status} | {liq_disp} | {atr_disp} | 総合分析点:{d['score']}\n" 
+
     # 市場環境の再設定
     r25 = market_25d_ratio
     market_alert_info = f"市場25日騰落レシオ: {r25:.2f}%。"
@@ -1199,7 +1204,7 @@ if analyze_start_clicked:
             if bar:
                 bar.progress((i+1)/len(raw_tickers))
             
-            # ★★★ 修正箇所: ランダムな待機時間に変更 ★★★
+            # ★★★ 修正箇所: ランダムな待機時間に変更 (1.5秒〜2.5秒) ★★★
             time.sleep(random.uniform(1.5, 2.5)) 
             # ★★★ 修正箇所ここまで ★★★
             
