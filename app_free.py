@@ -7,7 +7,8 @@ import requests
 import io
 import re
 import math
-import numpy as np # for np.floor/ceil
+import numpy as np
+# import yfinance as yf # ★ Yahoo! Finance ライブラリは使用しません
 
 # --- アイコン設定 ---
 ICON_URL = "https://raw.githubusercontent.com/soutori296/stock-analysis/main/aisan.png"
@@ -37,7 +38,8 @@ def get_market_status():
     """
     市場状態を返す（文字列と現在時刻のtuple）。15:50以降を引け後（当日確定値）とする。
     """
-    jst_now = datetime.datetime.utcnow() + datetime.timedelta(hours=9)
+    # DeprecationWarning回避のため、datetime.datetime.now(datetime.UTC)に修正
+    jst_now = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=9)
     current_time = jst_now.time()
     if jst_now.weekday() >= 5: return "休日(確定値)", jst_now
     # 9:00 から 15:50 (未満) をザラ場(進行中)とする
@@ -309,7 +311,6 @@ st.session_state.tickers_input_value = st.session_state.main_ticker_input
 def clear_ticker_input():
     st.session_state.tickers_input_value = ""
     # ★ on_clickコールバック内で値を変更し、次の再描画に任せる
-    # st.rerun()はno-opとなるため削除。
 
 # --- ★ 新設：入力欄クリアボタン ---
 st.button(
@@ -405,7 +406,6 @@ def get_stock_info(code):
         "name": "不明", "per": "-", "pbr": "-", 
         "price": None, "volume": None, "cap": 0,
         "open": None, "high": None, "low": None, "close": None,
-        # ★ 4. 需給分析用に追加
         "issued_shares": 0.0, 
     }
     
@@ -460,7 +460,7 @@ def get_stock_info(code):
                 data["per"] = clean_tag_and_br(tds[0])
                 data["pbr"] = clean_tag_and_br(tds[1])
 
-        # 4本値の取得ロジック (変更なし)
+        # 4本値の取得ロジック (Kabutanの4本値は参考値としてそのまま)
         ohlc_map = {"始値": "open", "高値": "high", "安値": "low", "終値": "close"}
         ohlc_tbody_match = re.search(r'<table[^>]*>.*?<tbody>\s*(<tr>.*?</tr>\s*){4}.*?</tbody>', html, re.DOTALL)
 
@@ -476,7 +476,7 @@ def get_stock_info(code):
                     except ValueError:
                         pass
 
-        # ★ 4. 需給分析用: 発行済株式数の取得
+        # 発行済株式数の取得
         m_issued = re.search(r'発行済株式数.*?<td>([0-9,]+).*?株</td>', html)
         if m_issued:
              data["issued_shares"] = float(m_issued.group(1).replace(",", ""))
@@ -549,7 +549,7 @@ def run_backtest(df, market_cap):
         while i < n - 5: 
             row = test_data.iloc[i]
             
-            low = row.get('Low') if 'Low' in row.index else row.get('low', None)
+            low = row.get('Low', None)
             sma5 = row.get('SMA5', None)
             sma25 = row.get('SMA25', None)
             
@@ -568,8 +568,8 @@ def run_backtest(df, market_cap):
                 for j in range(1, 11):
                     if i + j >= n: break
                     future = test_data.iloc[i + j]
-                    future_high = future.get('High') if 'High' in future.index else future.get('high', None)
-                    future_low = future.get('Low') if 'Low' in future.index else future.get('low', None) 
+                    future_high = future.get('High', None)
+                    future_low = future.get('Low', None) 
 
                     hold_days = j
                     
@@ -604,18 +604,19 @@ def get_stock_data(ticker):
     status, jst_now_local = get_market_status() 
     
     ticker = str(ticker).strip().replace(".T", "").upper()
+    # ★ Stooqの形式に戻す
     stock_code = f"{ticker}.JP" 
     
     info = get_stock_info(ticker) 
     
     try:
-        # --- 1) Stooq データ取得 ---
+        # --- 1) Stooq データ取得 (CSV直リンクに戻す) ---
         csv_url = f"https://stooq.com/q/d/l/?s={stock_code}&i=d"
         # タイムアウトを8秒に設定
         res = requests.get(csv_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
         
         try:
-            # ★ 修正: CSV解析エラー対策として、parse_datesをより柔軟に、index_colも指定
+            # ★ CSV解析エラー対策として、parse_datesをより柔軟に、index_colも指定
             df = pd.read_csv(io.BytesIO(res.content), parse_dates=True, index_col=0) 
             df.index.name = 'Date' # インデックス名を確実に'Date'にする
         except Exception as csv_e:
@@ -636,31 +637,32 @@ def get_stock_data(ticker):
             return None
         
         # --- 2) 引け後（15:50以降）の場合、当日確定値を結合 ---
-        if status == "引け後(確定値)":
-            kabu_close = info.get("close")
-            if kabu_close is None: kabu_close = info.get("price")
-
-            if info.get("open") and info.get("high") and info.get("low") and info.get("volume") and kabu_close:
-                today_date_dt = pd.to_datetime(jst_now_local.strftime("%Y-%m-%d"))
-                
-                if today_date_dt not in df.index:
-                    new_row = pd.Series({
-                        'Open': info['open'],
-                        'High': info['high'],
-                        'Low': info['low'],
-                        'Close': kabu_close,
-                        'Volume': info['volume']
-                    }, name=today_date_dt) 
-                    df = pd.concat([df, new_row.to_frame().T])
-                else:
-                    df.loc[today_date_dt, 'Close'] = kabu_close 
-        
-        df = df.sort_index()
-
-        # --- 3) 現在値の決定ロジック (常に株探の最新データ) ---
         curr_price = info.get("close")
         if curr_price is None: curr_price = info.get("price")
         if curr_price is None: curr_price = df.iloc[-1].get('Close', None)
+        
+        if status == "引け後(確定値)" and info.get("open") and info.get("high") and info.get("low") and info.get("volume") and curr_price:
+            today_date_dt = pd.to_datetime(jst_now_local.strftime("%Y-%m-%d"))
+            
+            # 最終日が本日であれば上書き、そうでなければ新しい行を追加 
+            if df.index[-1].date() == today_date_dt.date():
+                 df.loc[df.index[-1], 'Close'] = curr_price
+                 df.loc[df.index[-1], 'High'] = max(df.loc[df.index[-1], 'High'], info['high']) if info['high'] else df.loc[df.index[-1], 'High']
+                 df.loc[df.index[-1], 'Low'] = min(df.loc[df.index[-1], 'Low'], info['low']) if info['low'] else df.loc[df.index[-1], 'Low']
+                 df.loc[df.index[-1], 'Volume'] = info['volume']
+            elif today_date_dt.date() > df.index[-1].date():
+                 new_row = pd.Series({
+                     'Open': info['open'],
+                     'High': info['high'],
+                     'Low': info['low'],
+                     'Close': curr_price,
+                     'Volume': info['volume']
+                 }, name=today_date_dt) 
+                 df = pd.concat([df, new_row.to_frame().T])
+
+        # --- 3) 現在値の最終決定 ---
+        if curr_price is None or math.isnan(curr_price):
+             curr_price = df.iloc[-1].get('Close', None)
         
         if curr_price is None or math.isnan(curr_price):
              st.session_state.error_messages.append(f"価格データ取得エラー (コード:{ticker}): 価格情報が見つかりませんでした。")
@@ -672,13 +674,11 @@ def get_stock_data(ticker):
         df['SMA75'] = df['Close'].rolling(75).mean()
         df['Vol_SMA5'] = df['Volume'].rolling(5).mean() 
         
-        # --- ★ 2. ボラティリティ指標の追加 (ATR) ---
-        # True Range (TR) の計算
+        # --- 2. ボラティリティ指標の追加 (ATR) ---
         df['High_Low'] = df['High'] - df['Low']
         df['High_PrevClose'] = abs(df['High'] - df['Close'].shift(1))
         df['Low_PrevClose'] = abs(df['Low'] - df['Close'].shift(1))
         df['TR'] = df[['High_Low', 'High_PrevClose', 'Low_PrevClose']].max(axis=1)
-        # ATR (Average True Range) の計算 (14日間)
         df['ATR'] = df['TR'].rolling(14).mean()
         
         delta = df['Close'].diff()
@@ -703,9 +703,9 @@ def get_stock_data(ticker):
         
         # 出来高倍率の計算
         vol_ratio = 0
-        # ★ get_volume_weightに時価総額（info["cap"]）を渡す
         volume_weight = get_volume_weight(jst_now_local, info["cap"]) 
         
+        # Kabutanからの出来高(info.get("volume"))を使用
         if info.get("volume") and not pd.isna(last['Vol_SMA5']) and volume_weight > 0.0001: 
             adjusted_vol_avg = last['Vol_SMA5'] * volume_weight
             if adjusted_vol_avg > 0:
@@ -780,7 +780,6 @@ def get_stock_data(ticker):
             
         # 【★ R/R比の計算】
         risk_reward_ratio = 0.0
-        # ★ 想定リスク値（分母）を事前に計算
         risk_value = 0.0
         
         if buy_target > 0 and sl_ma > 0 and p_half > 0:
@@ -827,7 +826,7 @@ def get_stock_data(ticker):
         if avg_vol_5d < 1000:
              total_structural_deduction -= 30 # -30点に強化
              
-        # --- ★ 4. 需給分析（発行済株式数）による追加流動性リスク減点 ---
+        # --- 4. 需給分析（発行済株式数）による追加流動性リスク減点 ---
         liquidity_ratio_pct = 0.0
         issued_shares = info.get("issued_shares", 0.0)
         
@@ -894,7 +893,6 @@ def get_stock_data(ticker):
         sl_risk_deduct = 0
         if sl_ma > 0 and abs(sl_pct) < 3.0: 
              if "順張り" in strategy: 
-                 # ★ 通常時の-5点減点を削除
                  if is_market_alert:
                      sl_risk_deduct = -20 # 市場警戒時は-20点に強化
                      
@@ -1004,6 +1002,7 @@ def batch_analyze_with_ai(data_list):
         market_alert_info += "市場の過熱感は中立的です。"
     
     # 【★ 投資顧問回避のため、プロンプトの指示を修正・客観的トーンに徹底】
+    # ★ f-string構文エラー回避のため、プロンプト内の波括弧を二重化 {{}}
     prompt = f"""
     あなたは「アイ」という名前のプロトレーダー（30代女性、冷静・理知的）。
     以下の【市場環境】と【銘柄リスト】に基づき、それぞれの「所感コメント（丁寧語）」を作成してください。
@@ -1038,7 +1037,7 @@ def batch_analyze_with_ai(data_list):
     ※見出し不要。
     独り言の内容：
     現在の<b>市場25日騰落レシオ({r25:.2f}%)</b>をメインテーマとして総括する。市場が【過熱ゾーン】にある場合は「市場全体の調整リスク」を、市場が【底値ゾーン】にある場合は「絶好の仕込み場」を強調しつつ、<b>個別株の規律ある撤退の重要性</b>を合わせて説く。
-    """ 
+    """
     try:
         res = model.generate_content(prompt)
         text = res.text
@@ -1148,7 +1147,7 @@ if analyze_start_clicked:
             if d: new_analyzed_data.append(d)
             if bar:
                 bar.progress((i+1)/len(raw_tickers))
-            time.sleep(0.5) # 連続アクセス防止のため、最低限の待機時間は維持
+            time.sleep(2.0) # ★★★ 待機時間を2.0秒に延長 ★★★
             
         with st.spinner("アイが全銘柄を診断中..."):
             # AI分析にスコア情報を渡していることを確認
