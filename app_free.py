@@ -9,7 +9,6 @@ import re
 import math
 import numpy as np
 import random # ★ 新規追加: ランダムな待機時間に使用
-# import yfinance as yf # Yahoo! Finance ライブラリは使用しません
 
 # --- アイコン設定 ---
 ICON_URL = "https://raw.githubusercontent.com/soutori296/stock-analysis/main/aisan.png"
@@ -36,7 +35,7 @@ if 'overflow_tickers' not in st.session_state:
     st.session_state.overflow_tickers = "" # ★ 超過銘柄コードを格納するセッションステート
     
 # --- 分析上限定数 ---
-MAX_TICKERS = 20 # ★ 30銘柄から20銘柄に修正
+MAX_TICKERS = 10 # ★ 30銘柄から10銘柄に修正
 
 
 # --- 時間管理 (JST) ---
@@ -336,39 +335,7 @@ sort_option = st.sidebar.selectbox("並べ替え順", [
     "コード順"
 ])
 
-# --- JavaScriptによるクリップボードへのコピー機能 ---
-def copy_to_clipboard_js(target_id, feedback_id):
-    """ 指定されたIDのテキストエリアの内容をクリップボードにコピーするJSを埋め込む """
-    js_code = f"""
-    <script>
-    function copyText() {{
-        var copyText = document.getElementById("{target_id}");
-        if (!copyText) {{ return; }}
-        
-        // テキストエリアを一時的に選択可能にする
-        copyText.select();
-        copyText.setSelectionRange(0, 99999); // モバイル対応
-        
-        try {{
-            document.execCommand("copy");
-            
-            // フィードバック表示
-            var feedback = document.getElementById("{feedback_id}");
-            if (feedback) {{
-                feedback.innerHTML = "コピーしました！";
-                setTimeout(function(){{ feedback.innerHTML = ""; }}, 2000);
-            }}
-
-        }} catch (err) {{
-            // console.error('Copy failed', err);
-        }}
-    }}
-    </script>
-    """
-    st.markdown(js_code, unsafe_allow_html=True)
-
 # --- ★ ボタン横並びと確認ダイアログのロジック ---
-# ★ ボタン横並びと縦並びを両立させるため、元のカラム構造に戻す
 col_main_button, col_spacer, col_clear_button = st.columns([0.33, 0.33, 0.34]) 
 
 # ボタンラベルの調整 (ご提案の短いラベルと絵文字を適用)
@@ -1247,31 +1214,21 @@ if st.session_state.analyzed_data:
         st.markdown("---")
         st.markdown(f"### 📋 次回分析用メモ (分析対象外の超過{len(st.session_state.overflow_tickers.splitlines())}銘柄)")
         
-        # テキストエリアとコピーボタンを横に並べる
-        col_memo, col_copy, col_memo_spacer = st.columns([0.8, 0.2, 0.0])
+        # テキストエリアのみを表示するためのカラム構成に変更
+        col_memo, col_spacer = st.columns([1, 0.01]) # 100%幅の1カラムを使用
         
         # テキストエリアに超過銘柄コードを表示
         with col_memo:
             st.text_area(
-                "メモの内容をコピーし、入力欄に貼り付けてご使用ください。", 
+                "メモの内容を手動でコピーし、入力欄に貼り付けてご使用ください。", # ★ 説明文を修正
                 value=st.session_state.overflow_tickers, 
                 height=150, 
                 key='overflow_memo_area', 
                 label_visibility="collapsed"
             )
-            # StreamlitのテキストエリアのIDを取得するため、JSの埋め込みで対応
-            memo_id = "overflow_memo_area" # Streamlitが自動生成するIDを特定するためのKey
-            feedback_id = "copy_feedback_msg"
-            copy_to_clipboard_js(f"component-overflow_memo_area-textarea", feedback_id)
-            
-        # コピーボタンとフィードバックメッセージ
-        with col_copy:
-             # ★ コピーボタンのonClickでJSのcopyText関数を実行
-            st.button("📋 コピー", on_click=lambda: st.markdown(f'<script>copyText();</script>', unsafe_allow_html=True), use_container_width=True)
-            st.markdown(f'<span id="{feedback_id}" class="copy-feedback"></span>', unsafe_allow_html=True)
+            # 【★ copy_to_clipboard_js の呼び出し、カスタムHTML、フィードバック表示のコードはすべて削除済み/記載しない】
             
         st.markdown("---")
-    # ★★★ 新規追加ここまで ★★★
 
     # リスト分け (変更なし)
     rec_data = [d for d in data if d['strategy'] != "様子見" and d['score'] >= 50]
