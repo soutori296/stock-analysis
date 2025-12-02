@@ -8,7 +8,7 @@ import io
 import re
 import math
 import numpy as np
-# import yfinance as yf # ★ Yahoo! Finance ライブラリは使用しません
+# import yfinance as yf # Yahoo! Finance ライブラリは使用しません
 
 # --- アイコン設定 ---
 ICON_URL = "https://raw.githubusercontent.com/soutori296/stock-analysis/main/aisan.png"
@@ -604,13 +604,13 @@ def get_stock_data(ticker):
     status, jst_now_local = get_market_status() 
     
     ticker = str(ticker).strip().replace(".T", "").upper()
-    # ★ Stooqの形式に戻す
+    # ★ Stooqの形式
     stock_code = f"{ticker}.JP" 
     
     info = get_stock_info(ticker) 
     
     try:
-        # --- 1) Stooq データ取得 (CSV直リンクに戻す) ---
+        # --- 1) Stooq データ取得 (CSV直リンク) ---
         csv_url = f"https://stooq.com/q/d/l/?s={stock_code}&i=d"
         # タイムアウトを8秒に設定
         res = requests.get(csv_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
@@ -619,11 +619,15 @@ def get_stock_data(ticker):
             # ★ CSV解析エラー対策として、parse_datesをより柔軟に、index_colも指定
             df = pd.read_csv(io.BytesIO(res.content), parse_dates=True, index_col=0) 
             df.index.name = 'Date' # インデックス名を確実に'Date'にする
+            df.columns = df.columns.str.strip() # カラム名からスペースを除去
+            # StooqはCloseに当たるカラムをAdj Closeとして返す場合があるため、統一
+            if 'Adj Close' in df.columns and 'Close' not in df.columns:
+                 df.rename(columns={'Adj Close': 'Close'}, inplace=True) 
+
         except Exception as csv_e:
             st.session_state.error_messages.append(f"データ不足エラー (コード:{ticker}): Stooq CSV解析失敗。詳細: {csv_e}。データがないか、ファイル形式が不正です。")
             return None
         
-        df.columns = df.columns.str.strip()
         df = df.sort_index()
 
         # ★ 修正: データフレームの主要カラムの存在チェックを強化
@@ -1005,22 +1009,22 @@ def batch_analyze_with_ai(data_list):
     # ★ f-string構文エラー回避のため、プロンプト内の波括弧を二重化 {{}}
     prompt = f"""
     あなたは「アイ」という名前のプロトレーダー（30代女性、冷静・理知的）。
-    以下の【市場環境】と【銘柄リスト】に基づき、それぞれの「所感コメント（丁寧語）」を作成してください。
+    以下の【市場環境】と【銘柄リスト】に基づき、それぞれの「所感コメント（丁寧語）」を【生成コメントの原則】に従って作成してください。
     
     【市場環境】
     {market_alert_info}
     
-    【コメント作成の指示】
+    【生成コメントの原則（厳守）】
     1.  <b>Markdownの太字（**）は絶対に使用せず、HTMLの太字（<b>）のみをコメント内で使用してください。</b>
-    2.  <b>表現の多様性を最重視してください。</b>数十銘柄あっても10通りの異なる視点やボキャブリーを使用し、紋切り型な文章は厳禁です。
+    2.  <b>表現の多様性を最重視してください。</b>紋切り型な文章は厳禁です。
     3.  <b>AIコメントの最重要原則：全てのコメントの末尾には、必ず「最終的な売買判断は、ご自身の分析とリスク許容度に基づいて行うことが重要です。」という旨の中立的な文言を付記してください。具体的な行動（「買い」「売り」など）を促す表現は厳禁です。</b>
-    4.  <b>総合分析点に応じた文章量とトーンを厳格に調整してください。</b>
-        - 総合分析点 85点以上 (超高評価): 70文字〜90文字程度。<b>「分析モデルとの整合性が非常に高い事実」</b>や<b>「出来高が大幅に増加している事実」</b>など、客観的な事実と技術的な評価のみに言及し、期待感を示す言葉や断定的な表現は厳禁とする。
-        - 総合分析点 75点 (高評価): 60文字〜80文字程度。<b>「分析トレンドは継続中」</b>や<b>「モデルが想定する利益水準に達する可能性」</b>など、分析上の結果と客観的なデータ提示に留める。
-        - 総合分析点 65点以下 (中立/様子見): 50文字〜70文字程度。<b>「モデルの判断は中立的」</b>、<b>「更なるデータ分析が必要な局面」</b>など、リスクと慎重な姿勢を強調してください。
+    4.  <b>AIスコアに応じた文章量とトーンを厳格に調整してください。</b>
+        - 総合分析点 85点以上 (超高評価): 70文字〜90文字程度。客観的な事実と技術的な評価のみに言及し、期待感を示す言葉や断定的な表現は厳禁とする。
+        - 総合分析点 75点 (高評価): 60文字〜80文字程度。分析上の結果と客観的なデータ提示に留める。
+        - 総合分析点 65点以下 (中立/様子見): 50文字〜70文字程度。リスクと慎重な姿勢を強調してください。
     5.  市場環境が【明確な過熱ゾーン】の場合、全てのコメントのトーンを控えめにし、「市場全体が過熱しているため、この銘柄にも調整が入るリスクがある」といった<b>強い警戒感</b>を盛り込んでください。
     6.  戦略の根拠、RSIの状態（極端な減点があったか否か）、出来高倍率（1.5倍超）、およびR/R比（1.0未満の不利、2.0超の有利など）を必ず具体的に盛り込んでください。
-    7.  【最重要: リスク情報と撤退基準・強調表現の制限】
+    7.  【リスク情報と撤退基準】
         - リスク情報（MDD、SL乖離率）を参照し、リスク管理の重要性に言及してください。MDDが-8.0%を超える場合は、「過去の最大下落リスクが高いデータ」がある旨を明確に伝えてください。
         - 流動性: 致命的低流動性:警告(1000株未満)の銘柄については、コメントの冒頭で「平均出来高が1,000株未満と極めて低く、希望価格での売買が困難な<b>流動性リスク</b>を伴います。ご自身の資金規模に応じたロット調整をご検討ください。」といった<b>明確な警告</b>を必ず含めてください。
         - 新規追加: 極端な低流動性 (流動性比率 < 0.05% や ATR < 0.5% の場合) についても、同様に<b>明確な警告</b>を盛り込んでください。
@@ -1033,10 +1037,8 @@ def batch_analyze_with_ai(data_list):
     {prompt_text}
     
     【最後に】
-    リストの最後に「END_OF_LIST」と書き、その後に続けて「アイの独り言（常体・独白調）」を3行程度で書いてください。語尾に「ね」や「だわ」などはしないこと。
-    ※見出し不要。
-    独り言の内容：
-    現在の<b>市場25日騰落レシオ({r25:.2f}%)</b>をメインテーマとして総括する。市場が【過熱ゾーン】にある場合は「市場全体の調整リスク」を、市場が【底値ゾーン】にある場合は「絶好の仕込み場」を強調しつつ、<b>個別株の規律ある撤退の重要性</b>を合わせて説く。
+    リストの最後に「END_OF_LIST」と書き、その後に続けて「アイの独り言（常体・独白調）」を1行で書いてください。語尾に「ね」や「だわ」などはしないこと。
+    ※見出し不要。独り言は、市場25日騰落レシオ({r25:.2f}%)を総括し、規律ある撤退の重要性に言及する。
     """
     try:
         res = model.generate_content(prompt)
@@ -1057,6 +1059,7 @@ def batch_analyze_with_ai(data_list):
         monologue = re.sub(r'\*\*(.*?)\*\*', r'\1', monologue) # Markdown太字除去 (中身だけ残す)
         monologue = monologue.replace('**', '').strip() # 残ったMarkdown記号を除去
         
+        # ★ 修正: AIコメントの解析を強化 (ID:コード | コメント の形式を確実に抽出)
         for line in comment_lines:
             line = line.strip()
             if line.startswith("ID:") and "|" in line:
@@ -1069,17 +1072,17 @@ def batch_analyze_with_ai(data_list):
                     c_com_cleaned = re.sub(r'\*\*(.*?)\*\*', r'\1', c_com_cleaned) 
                     c_com_cleaned = c_com_cleaned.replace('**', '').strip() 
                     
-                    # 最初の銘柄名+ '|'が残っている場合を再確認し削除 (念のため)
-                    target_name = next((d['name'] for d in data_list if d['code'] == c_code), None)
-                    if target_name and c_com_cleaned.startswith(target_name):
-                        if c_com_cleaned.startswith(f"{target_name} |"):
-                            c_com_cleaned = c_com_cleaned.split("|", 1)[-1].strip()
-                        else:
-                            c_com_cleaned = c_com_cleaned[len(target_name):].strip()
-
+                    # 最初の余計な文字や改行を削除
+                    c_com_cleaned = c_com_cleaned.lstrip('・-')
+                    
                     comments[c_code] = c_com_cleaned
                 except:
                     pass
+            # ★ 修正: AIからの応答が崩れた場合でも、コメントの途中に「総合分析点」などの指示文が迷い込まないよう、解析を簡略化
+            elif "|" not in line and line.strip().startswith('総合分析点'):
+                 # 指示文の残骸と判断し無視
+                 continue
+
 
         return comments, monologue
     except Exception as e:
