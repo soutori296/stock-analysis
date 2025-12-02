@@ -312,7 +312,7 @@ def clear_ticker_input():
     # ★ セッションステートの入力値と、テキストエリアのキーを両方空にする
     st.session_state.tickers_input_value = ""
     st.session_state.main_ticker_input = "" 
-    st.rerun() 
+    st.rerun() # ★ st.rerun()は警告が出ますが、Streamlitの動作として現時点では最も確実なクリア手段です。
 
 # --- ★ 新設：入力欄クリアボタン ---
 st.button(
@@ -363,11 +363,11 @@ if st.session_state.clear_confirmed:
         st.session_state.ai_monologue = ""
         st.session_state.error_messages = []
         st.session_state.clear_confirmed = False
-        st.rerun()
+        st.rerun() # ★ st.rerun()で画面を再実行
     
     if col_cancel.button("❌ キャンセル", use_container_width=False): # ★ use_container_width=False
         st.session_state.clear_confirmed = False
-        st.rerun()
+        st.rerun() # ★ st.rerun()で画面を再実行
 # --- ボタン横並びと確認ダイアログのロジックここまで ---
 
 
