@@ -33,6 +33,7 @@ if 'tickers_input_value' not in st.session_state:
     st.session_state.tickers_input_value = "" # ★ 入力欄の値をセッションで管理
 if 'overflow_tickers' not in st.session_state:
     st.session_state.overflow_tickers = "" # ★ 超過銘柄コードを格納するセッションステート
+# ★ 修正: previous_scores は削除済み
     
 # --- 分析上限定数 ---
 MAX_TICKERS = 10 # ★ 30銘柄から10銘柄に修正
@@ -367,11 +368,11 @@ if st.session_state.clear_confirmed:
         st.session_state.error_messages = []
         st.session_state.clear_confirmed = False
         st.session_state.overflow_tickers = "" # クリア時にメモ欄もリセット
-        st.rerun() # ★ st.rerun()で画面を再実行
+        st.rerun() 
     
     if col_cancel.button("❌ キャンセル", use_container_width=False): # ★ use_container_width=False
         st.session_state.clear_confirmed = False
-        st.rerun() # ★ st.rerun()で画面を再実行
+        st.rerun() 
 # --- ボタン横並びと確認ダイアログのロジックここまで ---
 
 
@@ -604,6 +605,110 @@ def run_backtest(df, market_cap):
         return "計算エラー", 0, 0.0
 
 
+@st.cache_data(ttl=300) 
+def get_base_score(ticker, df_base, info):
+    """
+    前日終値までの確定データのみを使用し、ベースラインとなるスコアを計算する。
+    """
+    if len(df_base) < 80: return 50 # データ不足はベーススコア50を返す
+
+    # テクニカル指標の計算 (ベースライン用)
+    df_base['SMA5'] = df_base['Close'].rolling(5).mean()
+    df_base['SMA25'] = df_base['Close'].rolling(25).mean()
+    df_base['SMA75'] = df_base['Close'].rolling(75).mean()
+    df_base['Vol_SMA5'] = df_base['Volume'].rolling(5).mean()
+    
+    # ATR (ベースライン用)
+    df_base['High_Low'] = df_base['High'] - df_base['Low']
+    df_base['High_PrevClose'] = abs(df_base['High'] - df_base['Close'].shift(1))
+    df_base['Low_PrevClose'] = abs(df_base['Low'] - df_base['Close'].shift(1))
+    df_base['TR'] = df_base[['High_Low', 'High_PrevClose', 'Low_PrevClose']].max(axis=1)
+    df_base['ATR'] = df_base['TR'].rolling(14).mean()
+
+    # RSI (ベースライン用)
+    delta = df_base['Close'].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(14).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
+    rs = gain / loss
+    df_base['RSI'] = 100 - (100 / (1 + rs))
+
+    last_base = df_base.iloc[-1]
+    prev_base = df_base.iloc[-2] if len(df_base) >= 2 else last_base
+    
+    # MA変数
+    ma5_b = last_base['SMA5'] if not pd.isna(last_base['SMA5']) else 0
+    ma25_b = last_base['SMA25'] if not pd.isna(last_base['SMA25']) else 0
+    ma75_b = last_base['SMA75'] if not pd.isna(last_base['SMA75']) else 0
+    prev_ma5_b = prev_base['SMA5'] if not pd.isna(prev_base['SMA5']) else ma5_b
+    prev_ma25_b = prev_base['SMA25'] if not pd.isna(prev_base['SMA25']) else ma25_b
+    
+    # GC/DC (ベースライン用)
+    is_gc_b = (ma5_b > ma25_b) and (prev_ma5_b <= prev_ma25_b)
+    is_dc_b = (ma5_b < ma25_b) and (prev_ma5_b >= prev_ma25_b)
+
+    # ATR, RSI, Volume
+    atr_val_b = last_base['ATR'] if not pd.isna(last_base['ATR']) else 0
+    rsi_val_b = last_base['RSI'] if not pd.isna(last_base['RSI']) else 50
+    avg_vol_5d_b = last_base['Vol_SMA5'] if not pd.isna(last_base['Vol_SMA5']) else 0
+
+    # 4本値は前日終値（ベースライン価格）を使用
+    curr_price_b = last_base.get('Close', 0)
+
+    # -----------------------------------------------------
+    # スコア計算ロジック (簡略化し、get_stock_dataと合わせる)
+    # -----------------------------------------------------
+    strategy_b = "様子見"
+    buy_target_b = int(ma5_b) if ma5_b > 0 else 0
+    p_half_b = 0
+    
+    if ma5_b > ma25_b > ma75_b and ma5_b > prev_ma5_b: strategy_b = "🔥順張り"
+    elif rsi_val_b <= 30 or (curr_price_b < ma25_b * 0.9 if ma25_b else False): strategy_b = "🌊逆張り"
+
+    # 損切りMA (ベースライン用)
+    sl_ma_b = ma25_b if "順張り" in strategy_b else ma75_b
+    
+    # R/R比 (ベースライン用: P_halfを計算せずに0として減点のみを適用する簡略化)
+    risk_value_b = buy_target_b - sl_ma_b if buy_target_b > 0 and sl_ma_b > 0 else 0
+    # 前日終値で半益目標 p_half_b の計算は複雑なので、R/R比は省略し、スコアは簡略化
+    
+    score_b = 50 # ベーススコア
+
+    # 1. 構造的リスク減点 (R/R比は計算しないため、RSIと流動性のみ)
+    total_structural_deduction_b = 0
+    if "🔥順張り" in strategy_b:
+        if info["cap"] >= 3000: 
+            if rsi_val_b >= 85: total_structural_deduction_b -= 15 
+        else:
+            if rsi_val_b >= 80: total_structural_deduction_b -= 25 
+    elif "🌊逆張り" in strategy_b:
+        if rsi_val_b <= 20: 
+            if info["cap"] >= 3000: total_structural_deduction_b -= 15
+            else: total_structural_deduction_b -= 25
+            
+    if avg_vol_5d_b < 1000: total_structural_deduction_b -= 30 
+    
+    liquidity_ratio_pct_b = (avg_vol_5d_b / info.get("issued_shares", 1.0)) * 100 if info.get("issued_shares", 0.0) > 0 else 0.0
+    if liquidity_ratio_pct_b < 0.05: total_structural_deduction_b -= 10
+    
+    if curr_price_b > 0 and atr_val_b > 0:
+        if (atr_val_b / curr_price_b) * 100 < 0.5: total_structural_deduction_b -= 10
+                  
+    score_b += total_structural_deduction_b
+
+    # 2. 戦略/トレンド加点
+    if "順張り" in strategy_b: score_b += 15 
+    if "逆張り" in strategy_b: score_b += 10
+    if 55 <= rsi_val_b <= 65: score_b += 10
+    # GC/DCボーナス/減点
+    if is_gc_b: score_b += 15
+    elif is_dc_b: score_b -= 10
+
+    # 3. 個別リスク評価（DD率、SL乖離率の評価はリアルタイム性の高い項目であり、ベーススコアでは不完全なためここでは省略）
+    
+    score_b = max(0, min(100, score_b)) 
+    return score_b
+
+
 @st.cache_data(ttl=300) # キャッシュのTTLを5分 (300秒) に設定
 def get_stock_data(ticker):
     
@@ -615,6 +720,13 @@ def get_stock_data(ticker):
     
     info = get_stock_info(ticker) 
     
+    # --- 【★ 低位株フィルタ (価格100円未満をスキップ) 】 ---
+    curr_price_for_check = info.get("price")
+    if curr_price_for_check is not None and curr_price_for_check < 100:
+         st.session_state.error_messages.append(f"データ処理エラー (コード:{ticker}): 株価が100円未満のため、分析をスキップしました (高リスク銘柄)。")
+         return None
+    # --------------------------------------------------------
+    
     try:
         # --- 1) Stooq データ取得 (CSV直リンク) ---
         csv_url = f"https://stooq.com/q/d/l/?s={stock_code}&i=d"
@@ -622,31 +734,39 @@ def get_stock_data(ticker):
         res = requests.get(csv_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
         
         try:
-            # ★ CSV解析エラー対策として、parse_datesをより柔軟に、index_colも指定
-            df = pd.read_csv(io.BytesIO(res.content), parse_dates=True, index_col=0) 
-            df.index.name = 'Date' # インデックス名を確実に'Date'にする
-            df.columns = df.columns.str.strip() # カラム名からスペースを除去
-            # StooqはCloseに当たるカラムをAdj Closeとして返す場合があるため、統一
-            if 'Adj Close' in df.columns and 'Close' not in df.columns:
-                 df.rename(columns={'Adj Close': 'Close'}, inplace=True) 
+            df_raw = pd.read_csv(io.BytesIO(res.content), parse_dates=True, index_col=0) 
+            df_raw.index.name = 'Date' 
+            df_raw.columns = df_raw.columns.str.strip() 
+            if 'Adj Close' in df_raw.columns and 'Close' not in df_raw.columns:
+                 df_raw.rename(columns={'Adj Close': 'Close'}, inplace=True) 
 
         except Exception as csv_e:
             st.session_state.error_messages.append(f"データ不足エラー (コード:{ticker}): Stooq CSV解析失敗。詳細: {csv_e}。データがないか、ファイル形式が不正です。")
             return None
         
-        df = df.sort_index()
+        df_raw = df_raw.sort_index()
 
-        # ★ 修正: データフレームの主要カラムの存在チェックを強化
         required_cols = ['Close', 'High', 'Low', 'Volume']
-        if not all(col in df.columns for col in required_cols):
+        if not all(col in df_raw.columns for col in required_cols):
              st.session_state.error_messages.append(f"データ不足エラー (コード:{ticker}): CSVに必須カラム（{', '.join(required_cols)}）が不足しています。")
              return None
 
-        if df.empty or len(df) < 80: 
+        if df_raw.empty or len(df_raw) < 80: 
             st.session_state.error_messages.append(f"データ不足エラー (コード:{ticker}): データ期間が短すぎます (80日未満) またはデータが空です。")
             return None
+            
+        # --- 4) ベーススコア（前日終値）の計算 ★ 新規追加/修正 ---
+        df_base_score = df_raw.copy()
         
-        # --- 2) 引け後（15:50以降）の場合、当日確定値を結合 ---
+        # 最終行が本日分の場合（引け後データ確定前など）、前日終値まででカット
+        if df_base_score.index[-1].date() == (jst_now_local.date() - datetime.timedelta(days=0)) and status != "引け後(確定値)":
+             df_base_score = df_base_score.iloc[:-1] # 当日行を削除
+
+        base_score = get_base_score(ticker, df_base_score, info) 
+        # -----------------------------------------------------------
+        
+        # --- 2) 当日分のデータ結合（分析用データフレーム df の準備） ---
+        df = df_raw.copy()
         curr_price = info.get("close")
         if curr_price is None: curr_price = info.get("price")
         if curr_price is None: curr_price = df.iloc[-1].get('Close', None)
@@ -702,14 +822,35 @@ def get_stock_data(ticker):
         win_rate_pct = (up_days / 5) * 100
         momentum_str = f"{win_rate_pct:.0f}%"
 
-        # バックテスト実行
-        bt_str, bt_cnt, max_dd_pct = run_backtest(df, info["cap"]) 
-        
         last = df.iloc[-1]
         prev = df.iloc[-2] if len(df) >= 2 else last
         
+        # --- 【★ 修正: MA変数の集中定義】 ---
+        ma5 = last['SMA5'] if not pd.isna(last['SMA5']) else 0
+        ma25 = last['SMA25'] if not pd.isna(last['SMA25']) else 0
+        ma75 = last['SMA75'] if not pd.isna(last['SMA75']) else 0 
+        prev_ma5 = prev['SMA5'] if not pd.isna(prev['SMA5']) else ma5
+        prev_ma25 = prev['SMA25'] if not pd.isna(prev['SMA25']) else ma25
+        # ------------------------------------
+
+        # --- 【★ ゴールデンクロス/デッドクロスの判定】 ---
+        is_gc = (ma5 > ma25) and (prev_ma5 <= prev_ma25)
+        is_dc = (ma5 < ma25) and (prev_ma5 >= prev_ma25)
+        # ----------------------------------------------------
+
         # ATR値を取得 (NaNチェック)
         atr_val = last['ATR'] if not pd.isna(last['ATR']) else 0
+        
+        # --- 【★ 修正: ATRベースの推奨SL価格計算 - 1.5倍に変更】 ---
+        atr_sl_price = 0
+        if curr_price > 0 and atr_val > 0:
+             # ★ 3倍から1.5倍に変更
+             atr_sl_price = curr_price - (atr_val * 1.5) 
+             atr_sl_price = max(0, atr_sl_price)
+        # -----------------------------------------------------
+
+        # バックテスト実行
+        bt_str, bt_cnt, max_dd_pct = run_backtest(df, info["cap"]) 
         
         # 出来高倍率の計算
         vol_ratio = 0
@@ -729,13 +870,8 @@ def get_stock_data(ticker):
         else: rsi_mark = "⚪"
         
         strategy = "様子見"
-        ma5 = last['SMA5'] if not pd.isna(last['SMA5']) else 0
-        ma25 = last['SMA25'] if not pd.isna(last['SMA25']) else 0
-        ma75 = last['SMA75'] if not pd.isna(last['SMA75']) else 0 
         buy_target = int(ma5) 
         p_half = 0; p_full = 0
-        
-        prev_ma5 = prev['SMA5'] if not pd.isna(prev['SMA5']) else ma5
         
         # 順張り/逆張りロジック 
         # 順張り
@@ -880,6 +1016,17 @@ def get_stock_data(ticker):
         
         score += rr_bonus
         
+        # --- 【★ 修正: GC/DCボーナス/減点の適用 - 引け後確定を条件とする】 ---
+        # 判定条件：市場ステータスが「引け後(確定値)」である場合のみ加減点
+        is_final_cross = (status == "引け後(確定値)")
+        
+        if is_final_cross:
+            if is_gc:
+                 score += 15 # GC発生で強めのボーナス
+            elif is_dc:
+                 score -= 10 # DC発生で減点（下落トレンド転換の警戒）
+        # ----------------------------------------
+        
         # --- 3. 個別リスク加点・減点 (DD率の連続評価とSL乖離率の強化) ---
         is_market_alert = market_25d_ratio >= 125.0 # 市場警戒モード判定
         
@@ -918,6 +1065,10 @@ def get_stock_data(ticker):
         # 【★ AIスコアを点に名称変更】
         score = max(0, min(100, score)) # 0～100点に丸める
 
+        # ★★★ 修正: スコア差分を計算 (現在スコア - ベーススコア) ★★★
+        score_diff = score - base_score 
+        # ★★★ 修正ここまで ★★★
+
         # 【★ 戻り値の追加】
         vol_disp = f"🔥{vol_ratio:.1f}倍" if vol_ratio > 1.5 else f"{vol_ratio:.1f}倍"
 
@@ -939,15 +1090,21 @@ def get_stock_data(ticker):
             "issued_shares": issued_shares, 
             "liquidity_ratio_pct": liquidity_ratio_pct, 
             "atr_val": atr_val, 
+            "is_gc": is_gc, 
+            "is_dc": is_dc, 
+            "atr_sl_price": atr_sl_price, 
+            "score_diff": score_diff, # ★ 更新: スコア差分 (現在 - ベース)
+            "base_score": base_score # ★ 新規追加: 前日終値固定のベーススコア
         }
     except Exception as e:
         st.session_state.error_messages.append(f"データ処理エラー (コード:{ticker}): 予期せぬエラーが発生しました。詳細: {e}")
         return None
 
-# 【★ 追記/更新マージロジック】
+# 【★ 追記/更新マージロジックは変更なし】
 def merge_new_data(new_data_list):
     """
     既存の分析結果に新しい結果をマージし、重複した銘柄は新しいデータで上書きする。
+    差分はget_stock_data内で計算済みのため、ここではロジックを簡素化する。
     """
     # 既存データを銘柄コードをキーとした辞書に変換
     existing_map = {d['code']: d for d in st.session_state.analyzed_data}
@@ -960,7 +1117,7 @@ def merge_new_data(new_data_list):
     st.session_state.analyzed_data = list(existing_map.values())
 
 
-# 【★ 修正箇所 3: batch_analyze_with_ai 関数の改修】
+# 【★ batch_analyze_with_ai 関数のプロンプト修正を維持】
 def batch_analyze_with_ai(data_list):
     if not model: 
         return {}, "⚠️ AIモデルが設定されていません。APIキーを確認してください。"
@@ -993,18 +1150,29 @@ def batch_analyze_with_ai(data_list):
         avg_vol = d.get('avg_volume_5d', 0)
         
         # 1000株未満の致命的な流動性リスクをプロンプトに追加
-        low_liquidity_status = "致命的低流動性:警告(1000株未満)" if avg_vol < 1000 else "流動性:問題なし"
+        low_liquidity_status = "致命적저유동성:경고(1000주 미만)" if avg_vol < 1000 else "유동성:문제 없음"
         
         # 【★ SL目安MAの表現を「過去の支持線」に統一】
-        sl_ma_disp = f"過去の支持線MA:{sl_ma:,.0f}" if sl_ma > 0 else "支持線:なし"
+        sl_ma_disp = f"過去の支持선MA:{sl_ma:,.0f}" if sl_ma > 0 else "지지선:없음"
 
-        # ★ プロンプトに流動性比率、ATR値を追加
-        liq_disp = f"流動性比率:{d.get('liquidity_ratio_pct', 0.0):.2f}%"
-        atr_disp = f"ATR:{d.get('atr_val', 0.0):.1f}円"
+        # ★ プロンプトに流動성비율, ATR값 추가
+        liq_disp = f"유동성비율:{d.get('liquidity_ratio_pct', 0.0):.2f}%"
+        atr_disp = f"ATR:{d.get('atr_val', 0.0):.1f}엔"
+        
+        # ★ GC/DC情報の追加
+        gc_dc_status = ""
+        if d.get("is_gc"):
+            gc_dc_status = "GC:발생"
+        elif d.get("is_dc"):
+            gc_dc_status = "DC:발생"
+            
+        # ★ ATR SL情報の追加
+        atr_sl_price = d.get('atr_sl_price', 0)
+        atr_sl_disp = f"ATR_SL:{atr_sl_price:,.0f}" if atr_sl_price > 0 else "ATR_SL:なし"
 
         # ★ プロンプトにリスクリワード比とDD率を加味した最終スコアを追加
         # rr_disp は空文字列の場合があるため、直前の文字列と結合
-        prompt_text += f"ID:{d['code']} | {d['name']} | 現在:{price:,.0f} | 分析戦略:{d['strategy']} | RSI:{d['rsi']:.1f} | 5MA乖離率:{ma_div:+.1f}%{rr_disp} | 出来高倍率:{d['vol_ratio']:.1f}倍 | リスク情報: MDD:{mdd:+.1f}%, MA75乖離率:{sl_pct:+.1f}% | {sl_ma_disp} | {low_liquidity_status} | {liq_disp} | {atr_disp} | 総合分析点:{d['score']}\n" 
+        prompt_text += f"ID:{d['code']} | {d['name']} | 現在:{price:,.0f} | 分析戦略:{d['strategy']} | RSI:{d['rsi']:.1f} | 5MA乖離率:{ma_div:+.1f}%{rr_disp} | 出来高倍率:{d['vol_ratio']:.1f}倍 | リスク情報: MDD:{mdd:+.1f}%, MA75乖離率:{sl_pct:+.1f}% | {sl_ma_disp} | {low_liquidity_status} | {liq_disp} | {atr_disp} | {gc_dc_status} | {atr_sl_disp} | 総合分析点:{d['score']}\n" 
 
     # 市場環境の再設定
     r25 = market_25d_ratio
@@ -1036,11 +1204,12 @@ def batch_analyze_with_ai(data_list):
         - 総合分析点 65点以下 (中立/様子見): 50文字〜70文字程度。リスクと慎重な姿勢を強調してください。
     6.  市場環境が【明確な過熱ゾーン】の場合、全てのコメントのトーンを控えめにし、「市場全体が過熱しているため、この銘柄にも調整が入るリスクがある」といった<b>強い警戒感</b>を盛り込んでください。
     7.  戦略の根拠、RSIの状態（極端な減点があったか否か）、出来高倍率（1.5倍超）、およびR/R比（1.0未満の不利、2.0超の有利など）を必ず具体的に盛り込んでください。
-    8.  【リスク情報と撤退基準】
+    8.  <b>GC:発生またはDC:発生の銘柄については、コメント内で必ずその事実に言及し、トレンド転換の可能性を慎重に伝えてください。</b>
+    9.  【リスク情報と撤退基準】
         - リスク情報（MDD、SL乖離率）を参照し、リスク管理の重要性に言及してください。MDDが-8.0%を超える場合は、「過去の最大下落リスクが高いデータ」がある旨を明確に伝えてください。
         - 流動性: 致命的低流動性:警告(1000株未満)の銘柄については、コメントの冒頭（プレフィックスの次）で「平均出来高が1,000株未満と極めて低く、希望価格での売買が困難な<b>流動性リスク</b>を伴います。ご自身の資金規模に応じたロット調整をご検討ください。」といった<b>明確な警告</b>を必ず含めてください。
         - 新規追加: 極端な低流動性 (流動性比率 < 0.05% や ATR < 0.5% の場合) についても、同様に<b>明確な警告</b>を盛り込んでください。
-        - 撤退基準: 長期サポートラインである<b>SL目安MA（{{sl_ma_disp}}）を終値で明確に割り込んだ場合</b>は、速やかに損切りを検討すべきといった<b>撤退基準</b>を明記してください。
+        - 撤退基準: コメントの末尾で、<b>SL目安MA（構造的崩壊の支持線：{{sl_ma_disp}}）</b>を終値で明確に割り込む場合と、<b>ATRに基づくボラティリティ水準（急落・ノイズ逸脱の基準：{{atr_sl_disp}}）</b>を終値で明確に下回る場合を、**両方とも**、具体的な価格を付記して言及してください。（例: 撤退基準はMA支持線（X円）またはATR水準（Y円）です。）
         - 強調表現の制限: 総合分析点85点以上の銘柄コメントに限り、全体の5%の割合（例: 20銘柄中1つ程度）で、特に重要な部分（例：出来高増加の事実、高い整合性）を1箇所（10文字以内）に限り、<b>赤太字のHTMLタグ（<span style="color:red;">...</span>）</b>を使用して強調しても良い。それ以外のコメントでは赤太字を絶対に使用しないでください。
     
     【出力形式】
@@ -1100,12 +1269,14 @@ def batch_analyze_with_ai(data_list):
     except Exception as e:
         st.session_state.error_messages.append(f"AI分析エラー: Geminiモデルからの応答解析に失敗しました。詳細: {e}")
         return {}, "AI分析失敗"
+# ... (batch_analyze_with_ai 関数終わり) ...
 
 
-# 【★ 追記/更新マージロジック】
+# 【★ 追記/更新マージロジックは変更なし】
 def merge_new_data(new_data_list):
     """
     既存の分析結果に新しい結果をマージし、重複した銘柄は新しいデータで上書きする。
+    差分はget_stock_data内で計算済みのため、ここではロジックを簡素化する。
     """
     # 既存データを銘柄コードをキーとした辞書に変換
     existing_map = {d['code']: d for d in st.session_state.analyzed_data}
@@ -1120,13 +1291,11 @@ def merge_new_data(new_data_list):
 
 # --- メイン処理 ---
 # ★ analyze_start_clickedがTrueの場合のみ実行
-# --- メイン処理 ---
-# ★ analyze_start_clickedがTrueの場合のみ実行
 if analyze_start_clicked:
     st.session_state.error_messages = [] 
     
     # tickers_input_valueから入力を取得
-    input_tickers = st.session_state.tickers_input_value # ★ 入力された最新の値を取得
+    input_tickers = st.session_state.tickers_input_value 
     
     if not api_key:
         st.warning("APIキーを入力してください。")
@@ -1143,7 +1312,7 @@ if analyze_start_clicked:
         
         # 分析対象と超過銘柄を決定
         analyze_tickers = raw_tickers[:MAX_TICKERS]
-        overflow_list = raw_tickers[MAX_TICKERS:] # 超過分のリスト
+        overflow_list = raw_tickers[MAX_TICKERS:] 
         
         # ★★★ 修正箇所: 入力銘柄数の制限 (最大20銘柄) と超過分処理 ★★★
         if len(raw_tickers) > MAX_TICKERS:
@@ -1155,7 +1324,7 @@ if analyze_start_clicked:
             
             st.warning(f"⚠️ 入力銘柄数が{MAX_TICKERS}を超えています。分析対象を最初の{MAX_TICKERS}銘柄に限定しました。超過分は「次回分析用メモ」に表示されます。")
         else:
-            st.session_state.overflow_tickers = "" # 20銘柄以下の場合はメモをクリア
+            st.session_state.overflow_tickers = "" 
             
         # 【★ 重要な追加ロジック】: 処理が完了した後、入力欄から分析対象銘柄を削除する
         
@@ -1168,15 +1337,15 @@ if analyze_start_clicked:
             new_input_value = ""
             
         # 2. セッションステートを更新 -> これで入力欄とメモ欄の値が更新される
-        st.session_state.tickers_input_value = new_input_value
-        
+        st.session_state.tickers_input_value = new_input_value 
+
         # ★★★ 修正箇所ここまで ★★★
         
         data_list = []
         
         # 銘柄数が多すぎる場合、Streamlitのプログレスバーを非表示にするか、
         # 処理時間を考慮したフィードバックが必要です。
-        if len(raw_tickers) > 20: # ★ 20銘柄を超える場合はプログレスバーを省略
+        if len(raw_tickers) > 20: 
              st.info(f"💡 {len(raw_tickers)}銘柄の分析を開始します。銘柄数が多いため、処理に時間がかかる（数分程度）場合があります。また、AIの処理能力を超えた場合、途中でエラーになる可能性があります。")
              bar = None
         else:
@@ -1224,10 +1393,8 @@ if analyze_start_clicked:
             st.warning("⚠️ 全ての銘柄コードについて、データ取得またはAI分析に失敗しました。APIキーまたは入力コードをご確認ください。")
         # --- エラーメッセージ一括表示ここまで ---
         
-        # 【★ 処理完了後、画面を再実行して入力欄とメモ欄を最新の状態にする】
-        st.rerun()
-
-
+        # 【★ 処理完了後、st.rerun()を削除したため、自動的に表示ブロックに進む】
+        
 # --- 表示 ---
 if st.session_state.analyzed_data:
     data = st.session_state.analyzed_data
@@ -1326,26 +1493,31 @@ if st.session_state.analyzed_data:
             # 出来高の統合表示
             avg_vol_html = format_volume(d.get('avg_volume_5d', 0))
             
-            # スコアの強調表示
-            score_disp = f'{d.get("score")}'
-            if d.get("score", 0) >= 80:
-                score_disp = f'<span class="score-high">{score_disp}</span>'
+            # スコアの強調表示と差分
+            current_score = d.get("score")
+            score_diff = d.get('score_diff', 0) 
+            
+            score_disp_main = f'{current_score}'
+            if current_score >= 80:
+                score_disp_main = f'<span class="score-high">{score_disp_main}</span>'
+
+            diff_color = "red" if score_diff < 0 else ("#1976d2" if score_diff > 0 else "#666")
+            diff_disp = f'<span style="font-size:10px;color:{diff_color}">{score_diff:+.0f}</span>'
                 
             comment_html = d.get("comment", "")
 
-            # 【★ テーブル行の追加（R/R比列を挿入）】
-            # 【★ 「推奨買値」の表示を「想定買付水準」に変更】
-            rows += f'<tr><td class="td-center">{i+1}</td><td class="td-center">{d.get("code")}</td><td class="th-left td-bold">{d.get("name")}</td><td class="td-right">{d.get("cap_disp")}</td><td class="td-center">{score_disp}</td><td class="td-center">{d.get("strategy")}</td><td class="td-right td-bold">{price_disp}</td><td class="td-right">{buy:,.0f}<br><span style="font-size:10px;color:#666">{diff_txt}</span></span></td><td class="td-center">{rr_disp}</td><td class="td-right">{mdd_disp}<br>{sl_pct_disp}</td><td class="td-left" style="line-height:1.2;font-size:11px;">{target_txt}</td><td class="td-center">{d.get("rsi_disp")}</td><td class="td-right">{vol_disp}<br>({avg_vol_html})</td><td class="td-center td-blue">{bt_cell_content}</td><td class="td-center">{d.get("per")}<br>{d.get("pbr")}</td><td class="td-center">{d.get("momentum")}</td><td class="th-left"><div class="comment-scroll-box">{comment_html}</div></td></tr>'
+            # 【★ テーブル行の修正: スコア列に差分を追加】
+            rows += f'<tr><td class="td-center">{i+1}</td><td class="td-center">{d.get("code")}</td><td class="th-left td-bold">{d.get("name")}</td><td class="td-right">{d.get("cap_disp")}</td><td class="td-center">{score_disp_main}<br>{diff_disp}</td><td class="td-center">{d.get("strategy")}</td><td class="td-right td-bold">{price_disp}</td><td class="td-right">{buy:,.0f}<br><span style="font-size:10px;color:#666">{diff_txt}</span></span></td><td class="td-center">{rr_disp}</td><td class="td-right">{mdd_disp}<br>{sl_pct_disp}</td><td class="td-left" style="line-height:1.2;font-size:11px;">{target_txt}</td><td class="td-center">{d.get("rsi_disp")}</td><td class="td-right">{vol_disp}<br>({avg_vol_html})</td><td class="td-center td-blue">{bt_cell_content}</td><td class="td-center">{d.get("per")}<br>{d.get("pbr")}</td><td class="td-center">{d.get("momentum")}</td><td class="th-left"><div class="comment-scroll-box">{comment_html}</div></td></tr>'
 
 
         # ヘッダーとツールチップデータの定義 
-        # 【★ 投資顧問業回避のための最終ヘッダー定義 - ツールチップから**を排除】
+        # 【★ ヘッダーの修正: スコア列の名称と幅を調整】
         headers = [
             ("No", "25px", None), 
             ("コード", "45px", None), 
             ("企業名", "125px", None), 
             ("時価総額", "95px", None), 
-            ("点", "35px", "総合分析点。モデルが判断するリスク・リワード整合性のスコア。売買推奨を示すものではありません。"), 
+            ("点", "35px", "上段: 総合分析点。下段: 前日終値時点のスコアからの差分。市場の変化に対するモデル整合性の変動を示します。"), # ★ 修正: ツールチップ
             ("分析戦略", "75px", "🔥順張り: 上昇トレンド（MA）時の押し目待ちモデル。🌊逆張り: RSI低位や長期MA乖離時の反発待ちモデル。"), 
             ("現在値", "60px", None), 
             ("想定水準\n(乖離)", "65px", "この分析モデルが買付を「想定」するテクニカル水準。乖離は現在値との差額。売買判断はご自身の責任で行ってください。"), 
@@ -1405,8 +1577,8 @@ if st.session_state.analyzed_data:
             df_raw = df_raw.drop(columns=['backtest']) 
         if 'backtest_raw' in df_raw.columns:
             df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'}) 
-        # risk_value, issued_shares, liquidity_ratio_pct, atr_val を削除 (表示上不要なため)
-        columns_to_drop = ['risk_value', 'issued_shares', 'liquidity_ratio_pct', 'atr_val']
+        # risk_value, issued_shares, liquidity_ratio_pct, atr_val, is_gc, is_dc, atr_sl_price, score_diff, base_score を削除 (表示上不要なため)
+        columns_to_drop = ['risk_value', 'issued_shares', 'liquidity_ratio_pct', 'atr_val', 'is_gc', 'is_dc', 'atr_sl_price', 'score_diff', 'base_score']
         for col in columns_to_drop:
              if col in df_raw.columns:
                  df_raw = df_raw.drop(columns=[col]) 
