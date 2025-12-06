@@ -1418,6 +1418,7 @@ if analyze_start_clicked:
         st.warning("APIキーを入力してください。")
     elif not input_tickers.strip():
         st.warning("銘柄コードを入力してください。")
+        # 【重要】分析開始ボタンが押されたが入力がない場合、進行状況をリセットしない
     else:
         
         # 1. 入力値の正規化とハッシュ計算
@@ -1445,7 +1446,7 @@ if analyze_start_clicked:
         if not raw_tickers:
              st.warning("⚠️ 分析すべき銘柄がありません。入力内容を確認してください。")
              st.session_state.analysis_index = 0 # 安全のためリセット
-             st.rerun() # スキップして終了
+             # 処理をスキップ
              
         # 4. 分析実行回数インクリメント
         st.session_state.analysis_run_count += 1
@@ -1460,7 +1461,15 @@ if analyze_start_clicked:
         # ... (分析ロジックの実行) ...
         
         data_list = []
-        # ... (プログレスバー設定) ...
+        bar = None # ★ 修正: bar を初期化
+        # 銘柄数が多すぎる場合、Streamlitのプログレスバーを非表示にするか、
+        # 処理時間を考慮したフィードバックが必要です。
+        if len(raw_tickers) > 20: 
+             st.info(f"💡 {len(raw_tickers)}銘柄の分析を開始します。銘柄数が多いため、処理に時間がかかる（数分程度）場合があります。また、AIの処理能力を超えた場合、途中でエラーになる可能性があります。")
+             bar = None
+        else:
+             bar = st.progress(0)
+        
         status_label, jst_now = get_market_status() 
         
         new_analyzed_data = [] # 新しく分析した結果を一時的に保持するリスト
@@ -1508,7 +1517,24 @@ if analyze_start_clicked:
                 st.rerun() # リロードして画面を更新
 
         # --- エラーメッセージ一括表示 ---
-        # ... (後略) ...
+        if st.session_state.error_messages:
+            processed_count = len(new_analyzed_data)
+            skipped_count = len(raw_tickers) - processed_count
+            if skipped_count < 0: skipped_count = len(raw_tickers) 
+            
+            st.error(f"❌ 警告: 以下のエラーにより{skipped_count}銘柄の処理がスキップされました。")
+            with st.expander("詳細エラーメッセージ"):
+                for msg in st.session_state.error_messages:
+                    st.markdown(f'<p style="color: red; margin-left: 20px;">- {msg}</p>', unsafe_allow_html=True)
+        elif not st.session_state.analyzed_data and raw_tickers:
+            st.warning("⚠️ 全ての銘柄コードについて、データ取得またはAI分析に失敗しました。APIキーまたは入力コードをご確認ください。")
+        
+        if new_analyzed_data and end_index >= total_tickers: # 最後の分析結果が出た場合のみ表示
+             st.success(f"✅ 全{total_tickers}銘柄の診断が完了しました。（既存銘柄は上書き更新）")
+        elif new_analyzed_data and end_index < total_tickers:
+             st.success(f"✅ 第{start_index // MAX_TICKERS + 1}回、{len(new_analyzed_data)}銘柄の診断が完了しました。（次回分析へ進むには、再度【🚀 分析開始】を押してください）")
+             
+
         
 # --- 表示 ---
 if st.session_state.analyzed_data:
