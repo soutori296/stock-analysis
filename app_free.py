@@ -9,6 +9,7 @@ import re
 import math
 import numpy as np
 import random 
+import hashlib # ★ 新規: 入力内容のハッシュ化に利用
 
 # --- アイコン設定 ---
 ICON_URL = "https://raw.githubusercontent.com/soutori296/stock-analysis/main/aisan.png"
@@ -37,8 +38,15 @@ if 'analysis_run_count' not in st.session_state:
     st.session_state.analysis_run_count = 0 # ★ 新規: 分析実行回数カウンター
 if 'is_first_session_run' not in st.session_state:
     st.session_state.is_first_session_run = True # ★ 新規: セッション開始後の初回実行フラグ
-if 'main_ticker_input' not in st.session_state: # ★ キーの初期化は維持（ただしコード側からは書き換えない）
+if 'main_ticker_input' not in st.session_state: 
     st.session_state.main_ticker_input = "" 
+    
+# 【★ 進行状況管理用の新規セッションステート】
+if 'analysis_index' not in st.session_state:
+    st.session_state.analysis_index = 0 # 次に分析を開始する銘柄のインデックス (0, 10, 20...)
+if 'current_input_hash' not in st.session_state:
+    st.session_state.current_input_hash = "" # 現在分析中の入力内容のハッシュ
+
     
 # 【★ スコア変動の永続化用データ構造の初期化】
 # 'final_score': 騰落レシオ影響を除いたコアスコア (基準値)
@@ -348,6 +356,9 @@ tickers_input = st.text_area(
 #         この処理が、手動入力とプログラムセット値の同期を担う
 if tickers_input != st.session_state.tickers_input_value:
     st.session_state.tickers_input_value = tickers_input
+    # 【重要】入力内容が変わったら、進行中の分析をリセットする
+    st.session_state.analysis_index = 0
+    st.session_state.current_input_hash = "" # ハッシュもリセットし、次回分析時に再計算
 
 
 # --- 並び替えオプションに「出来高倍率順」を追加 ---
@@ -384,7 +395,9 @@ if reload_button_clicked:
     all_tickers = [d['code'] for d in st.session_state.analyzed_data]
     # st.session_state.tickers_input_value に値をセットし、valueバインドを介してテキストボックスを更新
     st.session_state.tickers_input_value = "\n".join(all_tickers)
-    # st.session_state.main_ticker_input のキーの値は書き換えない
+    # 【重要】再分析は最初からなので、進行状況をリセット
+    st.session_state.analysis_index = 0
+    st.session_state.current_input_hash = "" # ハッシュもリセット
     st.rerun()
 
 st.markdown("---") # 確認ステップとの区切り線
@@ -407,6 +420,8 @@ if st.session_state.clear_confirmed:
         st.session_state.score_history = {} # ★ リセット
         st.session_state.main_ticker_input = "" # ★ リセット時に入力欄もクリア
         st.session_state.tickers_input_value = "" # ★ リセット時に入力欄もクリア
+        st.session_state.analysis_index = 0 # ★ リセット
+        st.session_state.current_input_hash = "" # ★ リセット
         st.rerun() 
     
     if col_cancel.button("❌ キャンセル", use_container_width=False): # ★ use_container_width=False
@@ -1405,50 +1420,47 @@ if analyze_start_clicked:
         st.warning("銘柄コードを入力してください。")
     else:
         
-        # 分析実行回数をインクリメント
-        st.session_state.analysis_run_count += 1
-        current_run_count = st.session_state.analysis_run_count
-        
-        # 元の入力文字列を取得
+        # 1. 入力値の正規化とハッシュ計算
         raw_tickers_str = input_tickers.replace("\n", ",") \
                                        .replace(" ", ",") \
                                        .replace("、", ",")
-                                       
-        # 重複を排除し、有効な銘柄コードリストを作成
+        current_hash = hashlib.sha256(raw_tickers_str.encode()).hexdigest()
+        
+        # 2. 入力内容の変更を検知し、進行状況をリセット
+        if st.session_state.current_input_hash != current_hash:
+             st.session_state.analysis_index = 0 # リセット
+             st.session_state.analyzed_data = [] # 過去の結果をリセット
+             st.session_state.score_history = {} # スコア履歴もリセット
+             st.session_state.current_input_hash = current_hash # 新しいハッシュを保存
+        
+        # 3. 有効な銘柄コードリストの作成 (重複排除・コード抽出)
         all_unique_tickers = list(set([t.strip() for t in raw_tickers_str.split(",") if t.strip()]))
+        total_tickers = len(all_unique_tickers)
         
-        # 分析対象と超過銘柄を決定
-        analyze_tickers = all_unique_tickers[:MAX_TICKERS]
-        overflow_list = all_unique_tickers[MAX_TICKERS:] 
+        start_index = st.session_state.analysis_index
+        end_index = min(start_index + MAX_TICKERS, total_tickers)
         
-        # ★★★ 修正: 超過分は overflow_list をそのまま使用し、入力欄を更新する ★★★
-        if len(all_unique_tickers) > MAX_TICKERS:
-            # 超過銘柄リストをセッションステートに保存
-            st.session_state.overflow_tickers = "\n".join(overflow_list)
-            
-            # 実際に分析に回すリストを analyze_tickers (MAX_TICKERS分) に限定
-            raw_tickers = analyze_tickers 
-            
-            st.warning(f"⚠️ 入力銘柄数が{MAX_TICKERS}を超えています。分析対象を最初の{MAX_TICKERS}銘柄に限定しました。完了後、自動で入力欄が更新されます。")
-        else:
-            st.session_state.overflow_tickers = "" 
-            raw_tickers = analyze_tickers
-            
-        # 1. 次の入力値（超過銘柄のみ）を準備
-        new_input_value = "\n".join(overflow_list) # <-- 超過分（T11, T12, ...）のみ
-            
-        # ★★★ 修正箇所ここまで ★★★
+        raw_tickers = all_unique_tickers[start_index:end_index] # 今回分析する銘柄リスト
+        
+        if not raw_tickers:
+             st.warning("⚠️ 分析すべき銘柄がありません。入力内容を確認してください。")
+             st.session_state.analysis_index = 0 # 安全のためリセット
+             st.rerun() # スキップして終了
+             
+        # 4. 分析実行回数インクリメント
+        st.session_state.analysis_run_count += 1
+        current_run_count = st.session_state.analysis_run_count
+        
+        # 5. 超過銘柄の警告 (初回実行のみ)
+        if total_tickers > MAX_TICKERS and start_index == 0:
+            st.warning(f"⚠️ 入力銘柄数が{MAX_TICKERS}を超えています。自動で{MAX_TICKERS}銘柄ずつ順次分析します。分析を続けるには、再度【🚀 分析開始】を押してください。")
+        elif end_index < total_tickers:
+            st.info(f"📊 第{start_index // MAX_TICKERS + 1}回 ({start_index + 1}〜{end_index}銘柄) の分析を開始します。")
+        
+        # ... (分析ロジックの実行) ...
         
         data_list = []
-        
-        # 銘柄数が多すぎる場合、Streamlitのプログレスバーを非表示にするか、
-        # 処理時間を考慮したフィードバックが必要です。
-        if len(raw_tickers) > 20: 
-             st.info(f"💡 {len(raw_tickers)}銘柄の分析を開始します。銘柄数が多いため、処理に時間がかかる（数分程度）場合があります。また、AIの処理能力を超えた場合、途中でエラーになる可能性があります。")
-             bar = None
-        else:
-             bar = st.progress(0)
-        
+        # ... (プログレスバー設定) ...
         status_label, jst_now = get_market_status() 
         
         new_analyzed_data = [] # 新しく分析した結果を一時的に保持するリスト
@@ -1456,7 +1468,7 @@ if analyze_start_clicked:
             # run_countを渡す
             d = get_stock_data(t, current_run_count)
             if d: 
-                d['batch_order'] = i + 1 # バッチ内順序をセット（今回は使用しないがデータは保持）
+                d['batch_order'] = start_index + i + 1 # 累積順序をセット
                 new_analyzed_data.append(d)
             if bar:
                 bar.progress((i+1)/len(raw_tickers))
@@ -1479,38 +1491,30 @@ if analyze_start_clicked:
             # ★ セッション初回実行フラグを OFF にする (初回の全銘柄分析が終わった後)
             st.session_state.is_first_session_run = False
             
-            # ★★★ 【重要】分析が正常に終了した場合のみ入力欄をクリア/超過に置き換え、即座に画面を更新する ★★★
-            if raw_tickers and not st.session_state.error_messages:
-                 # 【修正】 valueバインド変数に書き換える (これが新しい初期値となる)
-                 st.session_state.tickers_input_value = new_input_value 
+            # 6. 進行状況の更新
+            st.session_state.analysis_index = end_index 
+            
+            # 7. 完了判定とテキストボックスのクリア
+            if end_index >= total_tickers:
+                 # 【修正】分析完了。テキストボックスをクリア
+                 st.success(f"🎉 全{total_tickers}銘柄の分析が完了しました。")
+                 st.session_state.tickers_input_value = "" # テキストボックスを空に
+                 st.session_state.analysis_index = 0 # 進行状況をリセット
+            elif new_analyzed_data:
+                 st.success(f"✅ 第{start_index // MAX_TICKERS + 1}回の分析が完了しました。")
                  
-                 st.rerun() # ★ 画面をリロードし、valueの新しい値（超過銘柄のみ）をテキストエリアに反映させる
-
-        # --- 診断完了時のフィードバック ---
-        # 診断完了後、st.rerun() で画面が更新されるため、この下の表示はスキップされる
+            # 8. 画面更新
+            if raw_tickers:
+                st.rerun() # リロードして画面を更新
 
         # --- エラーメッセージ一括表示 ---
-        if st.session_state.error_messages:
-            processed_count = len(new_analyzed_data)
-            skipped_count = len(raw_tickers) - processed_count
-            if skipped_count < 0: skipped_count = len(raw_tickers) 
-            
-            st.error(f"❌ 警告: 以下のエラーにより{skipped_count}銘柄の処理がスキップされました。")
-            with st.expander("詳細エラーメッセージ"):
-                for msg in st.session_state.error_messages:
-                    st.markdown(f'<p style="color: red; margin-left: 20px;">- {msg}</p>', unsafe_allow_html=True)
-        elif not st.session_state.analyzed_data and raw_tickers:
-            st.warning("⚠️ 全ての銘柄コードについて、データ取得またはAI分析に失敗しました。APIキーまたは入力コードをご確認ください。")
-        
-        if new_analyzed_data:
-             st.success(f"✅ 全{len(raw_tickers)}銘柄中、{len(new_analyzed_data)}銘柄の診断が完了しました。（既存銘柄は上書き更新）")
-
+        # ... (後略) ...
         
 # --- 表示 ---
 if st.session_state.analyzed_data:
     data = st.session_state.analyzed_data
     
-    # ★★★ 新規追加: 超過銘柄メモ欄の表示は削除しました ★★★
+    # ★★★ 超過銘柄メモ欄の表示は削除しました ★★★
     
     # リスト分け (変更なし)
     rec_data = [d for d in data if d['strategy'] != "様子見" and d['score'] >= 50]
@@ -1561,7 +1565,7 @@ if st.session_state.analyzed_data:
             
             # 【★ No.欄の表示 (真の更新回数 update_count を使用) 】
             update_count = d.get('update_count', 0)
-            display_no = i + 1
+            display_no = d.get('batch_order', i + 1) # ★ 修正: batch_orderを優先して累積の通し番号とする
             # update_count > 1 の場合のみ表示
             run_count_disp = f'{update_count}回目' if update_count > 1 else '' 
             
