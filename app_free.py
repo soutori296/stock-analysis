@@ -175,7 +175,7 @@ def get_volume_weight(current_dt, market_cap):
 
 
 # --- CSSスタイル (干渉回避版) + ツールチップCSS ---
-# (変更なし)
+# (変更なし - 省略)
 st.markdown(f"""
 <style>
     /* Streamlit標準のフォント設定を邪魔しないように限定的に適用 */
@@ -315,6 +315,7 @@ st.markdown(f"""
 </style>
 """, unsafe_allow_html=True)
 
+
 # --- タイトル --- (変更なし)
 st.markdown(f"""
 <div class="custom-title">
@@ -347,26 +348,25 @@ with st.expander("📘 取扱説明書 (データ仕様・判定基準)"):
 
 def clear_input_only_logic():
     """入力欄のみをクリアし、進行状況をリセットする"""
-    # テキストボックスの内容を制御する変数をクリア
+    # ★ 修正: main_ticker_inputへの直接代入を削除
     st.session_state.tickers_input_value = "" 
-    st.session_state.main_ticker_input = "" # Streamlitのkeyバインド変数もクリア
     # 進行状況リセット
     st.session_state.analysis_index = 0
     st.session_state.current_input_hash = ""
-    # st.rerun() # ★ コールバック内からはst.rerun()を呼ばず、ボタン検知後に実行
+    # st.rerun() # コールバック内からはst.rerun()を呼ばず、ボタン検知後に実行
 
 def clear_all_data_confirm():
     """全ての結果と入力をクリアし、確認ダイアログを表示する"""
     st.session_state.clear_confirmed = True
-    # st.rerun() # ★ コールバック内からはst.rerun()を呼ばず、ボタン検知後に実行
+    # st.rerun() # コールバック内からはst.rerun()を呼ばず、ボタン検知後に実行
 
 def reanalyze_all_data_logic():
     """全分析銘柄をテキストボックスに再投入し、再分析の準備をする"""
     all_tickers = [d['code'] for d in st.session_state.analyzed_data]
-    # st.session_state.tickers_input_value に値をセットし、テキストボックスを更新
     new_input_value = "\n".join(all_tickers)
+    
+    # ★ 修正: main_ticker_inputへの直接代入を削除
     st.session_state.tickers_input_value = new_input_value
-    st.session_state.main_ticker_input = new_input_value # keyバインド変数も更新
     
     # ハッシュを強制的にリセット（再投入された全銘柄が新しい分析対象となる）
     new_hash_after_reload = hashlib.sha256(new_input_value.replace("\n", ",").encode()).hexdigest()
@@ -374,7 +374,7 @@ def reanalyze_all_data_logic():
 
     # 進行状況をリセット
     st.session_state.analysis_index = 0
-    # st.rerun() # ★ コールバック内からはst.rerun()を呼ばず、ボタン検知後に実行
+    # st.rerun() # コールバック内からはst.rerun()を呼ばず、ボタン検知後に実行
 # --- コールバック関数定義ここまで ---
 
 
@@ -390,7 +390,7 @@ with st.sidebar:
         api_key = st.text_input("Gemini API Key", type="password")
 
     st.markdown("---") 
-
+    
     # 2. 銘柄コード入力エリア
     # ★ 入力欄の値はセッションステートから取得/更新する (高さ調整)
     tickers_input = st.text_area(
@@ -408,48 +408,40 @@ with st.sidebar:
         st.session_state.analysis_index = 0
         st.session_state.current_input_hash = "" # ハッシュもリセットし、次回分析時に再計算
 
-    # 3. ボタン類
-    st.markdown("---")
-    
-    # ボタンを横に2つ並べる
-    col1, col2 = st.columns(2) 
-
-    # 【2-1. 分析開始ボタン】(最重要)
-    # st.session_state.clear_confirmed が True の間は無効
-    analyze_start_clicked = st.button("🚀 分析開始", use_container_width=True, disabled=st.session_state.clear_confirmed) 
-    
-    # 【2-2. 入力欄をクリア】
-    # on_clickにコールバックを設定
-    clear_input_clicked = col1.button("📝 入力欄をクリア", on_click=clear_input_only_logic, use_container_width=True) 
-
-    # 【2-3. 結果を消去ボタン】
-    # on_clickにコールバックを設定
-    clear_button_clicked = col2.button("🗑️ 結果を消去", on_click=clear_all_data_confirm, use_container_width=True)
-
-    # 【2-4. 再投入ボタン】
-    is_reload_disabled = not st.session_state.analyzed_data
-    # on_clickにコールバックを設定
-    reload_button_clicked = st.button("🔄 結果を再分析", on_click=reanalyze_all_data_logic, use_container_width=True, disabled=is_reload_disabled)
-
-    st.markdown("---")
-
-    # 4. ソート選択ボックス
-    # ソートオプションの選択肢を定義
+    # 3. ソート選択ボックス (★ レイアウト変更: テキストボックスのすぐ下に配置)
     sort_options = [
         "スコア順 (高い順)", "更新回数順", "時価総額順 (高い順)", 
         "RSI順 (低い順)", "RSI順 (高い順)", "出来高倍率順 (高い順)",
         "銘柄コード順"
     ]
     
-    # 選択ボックスの追加 (セッションステートにバインド)
-    # indexには現在値のインデックスを指定
     current_index = sort_options.index(st.session_state.sort_option_key) if st.session_state.sort_option_key in sort_options else 0
     st.session_state.sort_option_key = st.selectbox(
         "📊 結果のソート順", 
         options=sort_options, 
         index=current_index, 
-        key='sort_selectbox_ui_key' # UIコンポーネントのキー
+        key='sort_selectbox_ui_key' 
     )
+
+    st.markdown("---") # ★ 水平ライン
+
+    # 4. ボタン類 (★ レイアウト変更: 上から順に配置)
+    
+    # 【4-1. 分析開始ボタン】(最重要)
+    analyze_start_clicked = st.button("🚀 分析開始", use_container_width=True, disabled=st.session_state.clear_confirmed) 
+    
+    # 横並びのボタン
+    col1, col2 = st.columns(2) 
+
+    # 【4-2. 入力欄をクリア】
+    clear_input_clicked = col1.button("📝 入力欄をクリア", on_click=clear_input_only_logic, use_container_width=True) 
+
+    # 【4-3. 結果を消去ボタン】
+    clear_button_clicked = col2.button("🗑️ 結果を消去", on_click=clear_all_data_confirm, use_container_width=True)
+
+    # 【4-4. 再投入ボタン】
+    is_reload_disabled = not st.session_state.analyzed_data
+    reload_button_clicked = st.button("🔄 結果を再分析", on_click=reanalyze_all_data_logic, use_container_width=True, disabled=is_reload_disabled)
 
 
 # --- ボタンの実行ロジック (メインスコープでの処理) ---
@@ -476,8 +468,8 @@ if st.session_state.clear_confirmed:
         st.session_state.analysis_run_count = 0 # ★ リセット
         st.session_state.is_first_session_run = True # ★ リセット
         st.session_state.score_history = {} # ★ リセット
-        st.session_state.main_ticker_input = "" # ★ リセット時に入力欄もクリア
-        st.session_state.tickers_input_value = "" # ★ リセット時に入力欄もクリア
+        # ★ エラー回避のため、main_ticker_inputへの直接代入を削除
+        st.session_state.tickers_input_value = "" 
         st.session_state.analysis_index = 0 # ★ リセット
         st.session_state.current_input_hash = "" # ★ リセット
         st.rerun() 
@@ -523,13 +515,11 @@ if api_key:
     except Exception as e:
         st.error(f"System Error: Gemini設定時にエラーが発生しました: {e}")
 
-# --- 関数群 (省略されたget_stock_info, get_25day_ratio, get_base_score, get_stock_data, batch_analyze_with_ai, merge_new_dataは元のコードと同じ) ---
-# ... (get_stock_info, get_25day_ratio, get_base_score, get_stock_data, batch_analyze_with_ai, merge_new_data の定義は省略) ...
-
-# ※ 注意: ここに省略されている関数群は、元のコードと同じ内容で配置されているものとします。
+# --- 関数群 (省略されていた関数群を再配置) ---
 
 def fmt_market_cap(val):
     if not val or val == 0: return "-"
+    # ... (元の定義と同じ)
     try:
         val_int = int(round(val))
         if val_int >= 10000:
@@ -547,6 +537,7 @@ def get_stock_info(code):
     """ 
     株情報サイトから情報を取得 (Kabutan)。4本値 (Open, High, Low, Close)、および発行済株式数の取得を含む。
     """
+    # ... (元の定義と同じ)
     url = f"https://kabutan.jp/stock/?code={code}"
     headers = {"User-Agent": "Mozilla/5.0"}
     
@@ -640,6 +631,7 @@ def get_25day_ratio():
     指定されたURLから最新の25日騰落レシオを取得する。
     失敗した場合、安全値（100.0）を返す。
     """
+    # ... (元の定義と同じ)
     url = "https://nikkeiyosoku.com/up_down_ratio/"
     default_ratio = 100.0 # 安全値
     
@@ -680,6 +672,7 @@ def run_backtest(df, market_cap):
     """
     押し目勝敗数（バックテスト）を実行する。MDDを返す。
     """
+    # ... (元の定義と同じ)
     try:
         if len(df) < 80: return "データ不足", 0, 0.0 
         
@@ -751,6 +744,7 @@ def get_base_score(ticker, df_base, info):
     """
     前日終値までの確定データのみを使用し、ベースラインとなるスコアを計算する。
     """
+    # ... (元の定義と同じ)
     if len(df_base) < 80: return 50 # データ不足はベーススコア50を返す
 
     # テクニカル指標の計算 (ベースライン用)
@@ -1293,6 +1287,7 @@ def get_stock_data(ticker, current_run_count):
 
 # 【★ AI分析コメント生成関数】 
 def batch_analyze_with_ai(data_list):
+    # ... (元の定義と同じ - 省略)
     if not model: 
         return {}, "⚠️ AIモデルが設定されていません。APIキーを確認してください。"
         
@@ -1468,6 +1463,7 @@ def merge_new_data(new_data_list):
     既存の分析結果に新しい結果をマージし、重複した銘柄は新しいデータで上書きする。
     真の更新回数 (update_count) を追跡する。
     """
+    # ... (元の定義と同じ)
     existing_map = {d['code']: d for d in st.session_state.analyzed_data}
     
     # 全データに対して、更新フラグをリセット (今回更新されなかったものは False に)
@@ -1612,7 +1608,6 @@ if analyze_start_clicked:
                  st.success(f"🎉 全{total_tickers}銘柄の分析が完了しました。")
                  # テキストボックスを空にする (session_state経由でテキストエリアに反映)
                  st.session_state.tickers_input_value = "" 
-                 st.session_state.main_ticker_input = "" 
                  st.session_state.analysis_index = 0 # 進行状況をリセット
                  
             elif new_analyzed_data:
