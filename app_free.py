@@ -30,14 +30,14 @@ if 'error_messages' not in st.session_state:
 if 'clear_confirmed' not in st.session_state:
     st.session_state.clear_confirmed = False 
 if 'tickers_input_value' not in st.session_state:
-    st.session_state.tickers_input_value = "" 
+    st.session_state.tickers_input_value = "" # ★ valueパラメータにバインドする変数を維持
 if 'overflow_tickers' not in st.session_state:
     st.session_state.overflow_tickers = "" 
 if 'analysis_run_count' not in st.session_state:
     st.session_state.analysis_run_count = 0 # ★ 新規: 分析実行回数カウンター
 if 'is_first_session_run' not in st.session_state:
     st.session_state.is_first_session_run = True # ★ 新規: セッション開始後の初回実行フラグ
-if 'main_ticker_input' not in st.session_state: # ★ 新規追加: キーの初期化
+if 'main_ticker_input' not in st.session_state: # ★ キーの初期化は維持（ただしコード側からは書き換えない）
     st.session_state.main_ticker_input = "" 
     
 # 【★ スコア変動の永続化用データ構造の初期化】
@@ -336,15 +336,14 @@ else:
     api_key = st.sidebar.text_input("Gemini API Key", type="password")
 
 # ★ 入力欄の値はセッションステートから取得/更新する
-# 【修正】 valueパラメータを削除し、キーに一本化
+# 【修正】 valueパラメータをtickers_input_valueに再バインド
 tickers_input = st.text_area(
     f"Analysing Targets (銘柄コードを入力) - 上限{MAX_TICKERS}銘柄/回", 
-    # value=st.session_state.tickers_input_value, # ★ 削除
+    value=st.session_state.tickers_input_value, # ★ valueパラメータを再利用
     placeholder="例:\n7203\n8306\n9984",
     height=150,
     key='main_ticker_input' # Streamlitのkeyを設定
 )
-# st.session_state.tickers_input_value = tickers_input <-- 削除
 
 # --- 並び替えオプションに「出来高倍率順」を追加 ---
 # ★ sort_option をここで定義
@@ -378,10 +377,9 @@ reload_button_clicked = st.button("🔄 結果を再分析", use_container_width
 # 再投入処理ロジック
 if reload_button_clicked:
     all_tickers = [d['code'] for d in st.session_state.analyzed_data]
-    # st.session_state.main_ticker_input の値を更新（テキストボックスの値を上書き）
-    st.session_state.main_ticker_input = "\n".join(all_tickers)
-    # old-style のバインド変数もクリア（念のため）
-    st.session_state.tickers_input_value = "" 
+    # st.session_state.tickers_input_value に値をセットし、valueバインドを介してテキストボックスを更新
+    st.session_state.tickers_input_value = "\n".join(all_tickers)
+    # st.session_state.main_ticker_input のキーの値は書き換えない
     st.rerun()
 
 st.markdown("---") # 確認ステップとの区切り線
@@ -1478,13 +1476,10 @@ if analyze_start_clicked:
             
             # ★★★ 【重要】分析が正常に終了した場合のみ入力欄をクリア/超過に置き換え、即座に画面を更新する ★★★
             if raw_tickers and not st.session_state.error_messages:
-                 # 【修正】ウィジェットのキーを更新（次回の初期値として利用）
-                 st.session_state.main_ticker_input = new_input_value 
+                 # 【修正】 valueバインド変数に書き換える (エラー回避決定版)
+                 st.session_state.tickers_input_value = new_input_value 
                  
-                 # old-style のバインド変数もクリア（念のため）
-                 st.session_state.tickers_input_value = "" 
-                 
-                 st.rerun() # ★ 画面をリロードし、キーの新しい値（超過銘柄のみ）をテキストエリアに反映させる
+                 st.rerun() # ★ 画面をリロードし、valueの新しい値（超過銘柄のみ）をテキストエリアに反映させる
 
         # --- 診断完了時のフィードバック ---
         # 診断完了後、st.rerun() で画面が更新されるため、この下の表示はスキップされる
