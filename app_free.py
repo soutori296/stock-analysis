@@ -57,7 +57,7 @@ if 'score_history' not in st.session_state:
     st.session_state.score_history = {} # {ticker: {'final_score': X, 'market_ratio_score': Y}}
     
 # --- 分析上限定数 ---
-MAX_TICKERS = 10 
+MAX_TICKERS = 3 
 
 
 # --- 時間管理 (JST) ---
@@ -1829,3 +1829,4 @@ if st.session_state.analyzed_data:
              if col in df_raw.columns:
                  df_raw = df_raw.drop(columns=[col]) 
         st.dataframe(df_raw)
+
