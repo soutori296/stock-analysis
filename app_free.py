@@ -366,30 +366,38 @@ with col_input:
         st.session_state.analysis_index = 0
         st.session_state.current_input_hash = "" # ハッシュもリセットし、次回分析時に再計算
 
-with col_clear_btn:
-    st.markdown("<div style='height: 35px;'></div>", unsafe_allow_html=True) # ★ 縦位置調整用のスペーサー
-    clear_input_clicked = st.button("📝 入力欄をクリア", use_container_width=True) # ★ ボタン復活
-
-if clear_input_clicked:
+# --- ボタンクリックコールバック関数定義 ---
+def clear_input_only():
+    """入力欄のみをクリアし、進行状況をリセットする"""
     # テキストボックスの内容を制御する変数だけをクリア
     st.session_state.tickers_input_value = "" 
-    # 進行状況もリセット（新しい入力を行うため）
+    # 進行状況リセット（次の分析で新しい銘柄が入るため）
     st.session_state.analysis_index = 0
     st.session_state.current_input_hash = ""
     st.rerun()
 
+def clear_all_data_confirm():
+    """全ての結果と入力をクリアし、確認ダイアログを表示する (on_click用)"""
+    st.session_state.clear_confirmed = True
+    
+def reanalyze_all_data():
+    """全分析銘柄をテキストボックスに再投入し、再分析の準備をする (on_click用)"""
+    all_tickers = [d['code'] for d in st.session_state.analyzed_data]
+    # st.session_state.tickers_input_value に値をセットし、valueバインドを介してテキストボックスを更新
+    st.session_state.tickers_input_value = "\n".join(all_tickers)
+    
+    # ハッシュを強制的にリセット（再投入された全銘柄が新しい分析対象となる）
+    # ※新しいハッシュは st.session_state.tickers_input_value の値で分析開始時に再計算される
+    st.session_state.current_input_hash = "" 
 
-# --- 並び替えオプションに「出来高倍率順」を追加 ---
-# ★ sort_option をここで定義
-sort_option = st.sidebar.selectbox("並べ替え順", [
-    "AIスコア順 (おすすめ)", 
-    "更新回数順 (おすすめ)", # ★ 新規追加
-    "時価総額順",
-    "RSI順 (低い順)", 
-    "RSI順 (高い順)",
-    "出来高倍率順 (高い順)", 
-    "コード順"
-])
+    # 進行状況をリセット
+    st.session_state.analysis_index = 0
+    st.rerun()
+# --- コールバック関数定義ここまで ---
+
+with col_clear_btn:
+    st.markdown("<div style='height: 35px;'></div>", unsafe_allow_html=True) # ★ 縦位置調整用のスペーサー
+    st.button("📝 入力欄をクリア", use_container_width=True, on_click=clear_input_only) # ★ ボタン復活、コールバック設定
 
 # --- ボタン縦並びと確認ダイアログのロジック ---
 st.markdown("---") # 入力エリアとの区切り線
@@ -397,30 +405,12 @@ st.markdown("---") # 入力エリアとの区切り線
 # 【1. 分析開始ボタン】(最重要)
 analyze_start_clicked = st.button("🚀 分析開始", use_container_width=True, disabled=st.session_state.clear_confirmed) 
 
-# 【2. 結果を消去ボタン】
-clear_button_clicked = st.button("🗑️ 結果を消去", use_container_width=True)
-if clear_button_clicked: 
-    st.session_state.clear_confirmed = True
+# 【2. 結果を消去ボタン (コールバック)】
+st.button("🗑️ 結果を消去", use_container_width=True, on_click=clear_all_data_confirm)
 
-# 【3. 再投入ボタン】(常時表示、データがある時だけ有効化)
-# 銘柄数が0でない場合にのみボタンを有効化
+# 【3. 再投入ボタン (コールバック)】
 is_reload_disabled = not st.session_state.analyzed_data
-# ★ ボタンテキストを調整
-reload_button_clicked = st.button("🔄 結果を再分析", use_container_width=True, disabled=is_reload_disabled)
-
-# 再投入処理ロジック
-if reload_button_clicked:
-    all_tickers = [d['code'] for d in st.session_state.analyzed_data]
-    # st.session_state.tickers_input_value に値をセットし、valueバインドを介してテキストボックスを更新
-    st.session_state.tickers_input_value = "\n".join(all_tickers)
-    
-    # 【最重要修正】ハッシュのブレを吸収するため、再分析開始時にハッシュを強制的にリセットする
-    new_hash_after_reload = hashlib.sha256(st.session_state.tickers_input_value.replace("\n", ",").encode()).hexdigest()
-    st.session_state.current_input_hash = new_hash_after_reload # ★ ハッシュを現在の入力値で強制上書き
-
-    # 【重要】再分析は最初からなので、進行状況をリセット
-    st.session_state.analysis_index = 0
-    st.rerun()
+st.button("🔄 結果を再分析", use_container_width=True, disabled=is_reload_disabled, on_click=reanalyze_all_data)
 
 st.markdown("---") # 確認ステップとの区切り線
 
@@ -1483,7 +1473,7 @@ if analyze_start_clicked:
         is_input_changed = (st.session_state.current_input_hash != current_hash)
         
         # 【重要】確認ダイアログの表示条件
-        if is_input_changed and len(st.session_state.analyzed_data) > 0:
+        if is_input_changed and len(st.session_state.analyzed_data) > 0 and not st.session_state.confirm_reset:
             st.session_state.confirm_reset = True
             st.rerun() # リロードして確認ダイアログを表示
             
@@ -1741,7 +1731,7 @@ if st.session_state.analyzed_data:
                  else:
                       diff_disp = f'<span style="font-size:10px;color:#666">±0</span>'
             else:
-                 # 場中 or 初回実行時は、計算された差分を異表示
+                 # 場中 or 初回実行時は、計算された差分を表示
                  diff_disp = f'<span style="font-size:10px;color:{diff_color}">{score_diff:+.0f}</span>'
             # -------------------------------------------------------------------
                 
@@ -1761,7 +1751,7 @@ if st.session_state.analyzed_data:
             ("点", "35px", "上段: 総合分析点。下段: **本日の市場開始時からの差分**（前日比ではない）。"), 
             ("分析戦略", "75px", "🔥順張り: 上昇トレンド（MA）時の押し目待ちモデル。🌊逆張り: RSI低位や長期MA乖離時の反発待ちモデル。"), 
             ("現在値", "60px", None), 
-            ("想定水準\n(乖離)", "65px", "この分析モデルが買付を「想定」するテクニカル水準。乖離は現在値との差額。売買判断はご自身の責任において行います。"), 
+            ("想定水準\n(乖離)", "65px", "この分析モデルが買付を「想定」するテクニカル水準。乖離は現在値との差額。売売判断はご自身の責任において行います。"), 
             ("R/R比", "40px", "想定水準から利益確定目標までの値幅を、SL MAまでの値幅で割った比率。1.0未満は-25点。"), 
             ("最大DD率\nSL乖離率", "70px", "最大DD率: 過去の同条件トレードでの最大下落率。SL乖離率: SLライン（過去の支持線）までの余地。"), 
             ("利益確定\n目標値", "120px", "時価総額別の分析リターンに基づき、利益確定の「目標値」として算出した水準。青天井時や目標超過時は動的な追従目標を表示。"), 
