@@ -48,7 +48,8 @@ if 'analysis_index' not in st.session_state:
     st.session_state.analysis_index = 0 # 次に分析を開始する銘柄のインデックス (0, 10, 20...)
 if 'current_input_hash' not in st.session_state:
     st.session_state.current_input_hash = "" # 現在分析中の入力内容のハッシュ
-
+if 'sort_option_key' not in st.session_state: # ★ 修正1: sort_option_key の初期化
+    st.session_state.sort_option_key = "スコア順 (高い順)" # デフォルトのソート順
     
 # 【★ スコア変動の永続化用データ構造の初期化】
 # 'final_score': 騰落レシオ影響を除いたコアスコア (基準値)
@@ -1608,9 +1609,23 @@ if analyze_start_clicked:
 # --- 表示 ---
 if st.session_state.analyzed_data:
     data = st.session_state.analyzed_data
-    
-    # ★★★ 超過銘柄メモ欄の表示は削除しました ★★★
-    
+    st.markdown("---") # 区切り線   
+    # ソートオプションの選択肢を定義
+    sort_options = [
+        "スコア順 (高い順)", "更新回数順", "時価総額順 (高い順)", 
+        "RSI順 (低い順)", "RSI順 (高い順)", "出来高倍率順 (高い順)",
+        "銘柄コード順"
+    ]
+    # 選択ボックスの追加 (セッションステートにバインド)
+    # indexには現在値のインデックスを指定
+    current_index = sort_options.index(st.session_state.sort_option_key) if st.session_state.sort_option_key in sort_options else 0
+    st.session_state.sort_option_key = st.selectbox(
+        "📊 結果のソート順", 
+        options=sort_options, 
+        index=current_index, 
+        key='sort_selectbox_ui_key' # UIコンポーネントのキー
+    )
+        
     # リスト分け (変更なし)
     rec_data = [d for d in data if d['strategy'] != "様子見" and d['score'] >= 50]
     watch_data = [d for d in data if d['strategy'] == "様子見" or d['score'] < 50]
@@ -1829,4 +1844,5 @@ if st.session_state.analyzed_data:
              if col in df_raw.columns:
                  df_raw = df_raw.drop(columns=[col]) 
         st.dataframe(df_raw)
+
 
