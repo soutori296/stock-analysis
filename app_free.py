@@ -367,7 +367,7 @@ with col_input:
         st.session_state.current_input_hash = "" # ハッシュもリセットし、次回分析時に再計算
 
 # --- ボタンクリックコールバック関数定義 ---
-def clear_input_only():
+def clear_input_only_logic():
     """入力欄のみをクリアし、進行状況をリセットする"""
     # テキストボックスの内容を制御する変数だけをクリア
     st.session_state.tickers_input_value = "" 
@@ -377,11 +377,11 @@ def clear_input_only():
     st.rerun()
 
 def clear_all_data_confirm():
-    """全ての結果と入力をクリアし、確認ダイアログを表示する (on_click用)"""
+    """全ての結果と入力をクリアし、確認ダイアログを表示する"""
     st.session_state.clear_confirmed = True
     
-def reanalyze_all_data():
-    """全分析銘柄をテキストボックスに再投入し、再分析の準備をする (on_click用)"""
+def reanalyze_all_data_logic():
+    """全分析銘柄をテキストボックスに再投入し、再分析の準備をする"""
     all_tickers = [d['code'] for d in st.session_state.analyzed_data]
     # st.session_state.tickers_input_value に値をセットし、valueバインドを介してテキストボックスを更新
     st.session_state.tickers_input_value = "\n".join(all_tickers)
@@ -397,19 +397,8 @@ def reanalyze_all_data():
 
 with col_clear_btn:
     st.markdown("<div style='height: 35px;'></div>", unsafe_allow_html=True) # ★ 縦位置調整用のスペーサー
-    st.button("📝 入力欄をクリア", use_container_width=True, on_click=clear_input_only) # ★ ボタン復活
-
-# --- 並び替えオプションに「出来高倍率順」を追加 ---
-# ★ sort_option をここで定義
-sort_option = st.sidebar.selectbox("並べ替え順", [
-    "AIスコア順 (おすすめ)", 
-    "更新回数順 (おすすめ)", # ★ 新規追加
-    "時価総額順",
-    "RSI順 (低い順)", 
-    "RSI順 (高い順)",
-    "出来高倍率順 (高い順)", 
-    "コード順"
-], key='sort_option_key') # ★ キーを追加
+    # ★ on_clickを外し、クリックを直接検知する
+    clear_input_clicked = st.button("📝 入力欄をクリア", use_container_width=True) 
 
 # --- ボタン縦並びと確認ダイアログのロジック ---
 st.markdown("---") # 入力エリアとの区切り線
@@ -417,12 +406,24 @@ st.markdown("---") # 入力エリアとの区切り線
 # 【1. 分析開始ボタン】(最重要)
 analyze_start_clicked = st.button("🚀 分析開始", use_container_width=True, disabled=st.session_state.clear_confirmed) 
 
-# 【2. 結果を消去ボタン (コールバック)】
-st.button("🗑️ 結果を消去", use_container_width=True, on_click=clear_all_data_confirm)
+# 【2. 結果を消去ボタン】
+clear_button_clicked = st.button("🗑️ 結果を消去", use_container_width=True)
 
-# 【3. 再投入ボタン (コールバック)】
+# 【3. 再投入ボタン】
 is_reload_disabled = not st.session_state.analyzed_data
-st.button("🔄 結果を再分析", use_container_width=True, disabled=is_reload_disabled, on_click=reanalyze_all_data)
+reload_button_clicked = st.button("🔄 結果を再分析", use_container_width=True, disabled=is_reload_disabled)
+
+# --- ボタンの実行ロジック (メインスコープでの処理) ---
+
+if clear_input_clicked:
+    clear_input_only_logic() # ★ クリアボタンのロジックを実行
+
+if clear_button_clicked: 
+    st.session_state.clear_confirmed = True
+    st.rerun() # ★ 確認ステップへ進む
+
+if reload_button_clicked:
+    reanalyze_all_data_logic() # ★ 再分析ロジックを実行
 
 st.markdown("---") # 確認ステップとの区切り線
 
