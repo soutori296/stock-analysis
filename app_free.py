@@ -37,6 +37,8 @@ if 'analysis_run_count' not in st.session_state:
     st.session_state.analysis_run_count = 0 # ★ 新規: 分析実行回数カウンター
 if 'is_first_session_run' not in st.session_state:
     st.session_state.is_first_session_run = True # ★ 新規: セッション開始後の初回実行フラグ
+if 'main_ticker_input' not in st.session_state: # ★ 新規追加: キーの初期化
+    st.session_state.main_ticker_input = "" 
     
 # 【★ スコア変動の永続化用データ構造の初期化】
 # 'final_score': 騰落レシオ影響を除いたコアスコア (基準値)
@@ -334,16 +336,15 @@ else:
     api_key = st.sidebar.text_input("Gemini API Key", type="password")
 
 # ★ 入力欄の値はセッションステートから取得/更新する
-# 【修正】 value=st.session_state.tickers_input_value のバインドを復活
+# 【修正】 valueパラメータを削除し、キーに一本化
 tickers_input = st.text_area(
     f"Analysing Targets (銘柄コードを入力) - 上限{MAX_TICKERS}銘柄/回", 
-    value=st.session_state.tickers_input_value, # ★ 復活
+    # value=st.session_state.tickers_input_value, # ★ 削除
     placeholder="例:\n7203\n8306\n9984",
     height=150,
     key='main_ticker_input' # Streamlitのkeyを設定
 )
-# ★ 削除: エラー回避のため、ここではウィジェットの返り値をセッションステートにバインド
-# st.session_state.tickers_input_value = tickers_input <-- この行は削除したまま
+# st.session_state.tickers_input_value = tickers_input <-- 削除
 
 # --- 並び替えオプションに「出来高倍率順」を追加 ---
 # ★ sort_option をここで定義
@@ -357,33 +358,33 @@ sort_option = st.sidebar.selectbox("並べ替え順", [
     "コード順"
 ])
 
-# --- ボタン横並びと確認ダイアログのロジック ---
-# ボタンを新しい位置に配置するため、カラム定義を調整
-col_button_left, col_button_right = st.columns([0.5, 0.5]) 
+# --- ボタン縦並びと確認ダイアログのロジック ---
+st.markdown("---") # 入力エリアとの区切り線
 
-# 【左】分析開始ボタン（主目的：上側に配置）とクリアボタン
-with col_button_left:
-    # 内部のカラムを定義
-    col_main, col_reload_spacer = st.columns([0.5, 0.5]) 
-    
-    # ラベルを直接使用
-    with col_main:
-        analyze_start_clicked = st.button("🚀 分析開始", use_container_width=False, disabled=st.session_state.clear_confirmed) 
-    with col_main:
-        clear_button_clicked = st.button("🗑️ 結果を消去", use_container_width=False)
-        if clear_button_clicked: 
-            st.session_state.clear_confirmed = True
+# 【1. 分析開始ボタン】(最重要)
+analyze_start_clicked = st.button("🚀 分析開始", use_container_width=True, disabled=st.session_state.clear_confirmed) 
 
-# 【右】再投入ボタン (新しい機能)
-with col_button_right:
-     st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True) # 上のテキストエリアとの間隔調整
-     # 銘柄数が0でない場合にのみボタンを表示/有効化
-     if st.session_state.analyzed_data:
-        reload_button_clicked = st.button("🔄 全分析銘柄を再投入", use_container_width=False)
-        if reload_button_clicked:
-            all_tickers = [d['code'] for d in st.session_state.analyzed_data]
-            st.session_state.tickers_input_value = "\n".join(all_tickers)
-            st.rerun()
+# 【2. 結果を消去ボタン】
+clear_button_clicked = st.button("🗑️ 結果を消去", use_container_width=True)
+if clear_button_clicked: 
+    st.session_state.clear_confirmed = True
+
+# 【3. 再投入ボタン】(常時表示、データがある時だけ有効化)
+# 銘柄数が0でない場合にのみボタンを有効化
+is_reload_disabled = not st.session_state.analyzed_data
+# ★ ボタンテキストを調整
+reload_button_clicked = st.button("🔄 結果を再分析", use_container_width=True, disabled=is_reload_disabled)
+
+# 再投入処理ロジック
+if reload_button_clicked:
+    all_tickers = [d['code'] for d in st.session_state.analyzed_data]
+    # st.session_state.main_ticker_input の値を更新（テキストボックスの値を上書き）
+    st.session_state.main_ticker_input = "\n".join(all_tickers)
+    # old-style のバインド変数もクリア（念のため）
+    st.session_state.tickers_input_value = "" 
+    st.rerun()
+
+st.markdown("---") # 確認ステップとの区切り線
 
 # 確認ステップの表示 (画面上部に固定)
 if st.session_state.clear_confirmed:
@@ -401,13 +402,14 @@ if st.session_state.clear_confirmed:
         st.session_state.analysis_run_count = 0 # ★ リセット
         st.session_state.is_first_session_run = True # ★ リセット
         st.session_state.score_history = {} # ★ リセット
+        st.session_state.main_ticker_input = "" # ★ リセット時に入力欄もクリア
         st.session_state.tickers_input_value = "" # ★ リセット時に入力欄もクリア
         st.rerun() 
     
     if col_cancel.button("❌ キャンセル", use_container_width=False): # ★ use_container_width=False
         st.session_state.clear_confirmed = False
         st.rerun() 
-# --- ボタン横並びと確認ダイアログのロジックここまで ---
+# --- ボタン縦並びと確認ダイアログのロジックここまで ---
 
 
 model_name = 'gemini-2.5-flash'
@@ -1404,36 +1406,33 @@ if analyze_start_clicked:
         st.session_state.analysis_run_count += 1
         current_run_count = st.session_state.analysis_run_count
         
+        # 元の入力文字列を取得
         raw_tickers_str = input_tickers.replace("\n", ",") \
                                        .replace(" ", ",") \
                                        .replace("、", ",")
                                        
         # 重複を排除し、有効な銘柄コードリストを作成
-        raw_tickers = list(set([t.strip() for t in raw_tickers_str.split(",") if t.strip()]))
+        all_unique_tickers = list(set([t.strip() for t in raw_tickers_str.split(",") if t.strip()]))
         
         # 分析対象と超過銘柄を決定
-        analyze_tickers = raw_tickers[:MAX_TICKERS]
-        overflow_list = raw_tickers[MAX_TICKERS:] 
+        analyze_tickers = all_unique_tickers[:MAX_TICKERS]
+        overflow_list = all_unique_tickers[MAX_TICKERS:] 
         
-        # ★★★ 修正箇所: 入力銘柄数の制限 (MAX_TICKERS) と超過分処理 ★★★
-        if len(raw_tickers) > MAX_TICKERS:
-            # 超過銘柄リストをセッションステートに保存 (次回分析用メモに表示される)
+        # ★★★ 修正: 超過分は overflow_list をそのまま使用し、入力欄を更新する ★★★
+        if len(all_unique_tickers) > MAX_TICKERS:
+            # 超過銘柄リストをセッションステートに保存
             st.session_state.overflow_tickers = "\n".join(overflow_list)
             
             # 実際に分析に回すリストを analyze_tickers (MAX_TICKERS分) に限定
             raw_tickers = analyze_tickers 
             
-            st.warning(f"⚠️ 入力銘柄数が{MAX_TICKERS}を超えています。分析対象を最初の{MAX_TICKERS}銘柄に限定しました。終了後、そのまま【🚀分析開始】を押すと自動で次の銘柄から分析を開始します（超過分は「次回分析用メモ」に表示）")
+            st.warning(f"⚠️ 入力銘柄数が{MAX_TICKERS}を超えています。分析対象を最初の{MAX_TICKERS}銘柄に限定しました。完了後、自動で入力欄が更新されます。")
         else:
             st.session_state.overflow_tickers = "" 
+            raw_tickers = analyze_tickers
             
-        # 1. 残りの超過銘柄リストを新しい入力値として準備
-        if overflow_list:
-            # 超過銘柄リストを新しい入力値として設定 (改行区切り)
-            new_input_value = "\n".join(overflow_list)
-        else:
-            # 超過がなければ、入力はクリア
-            new_input_value = ""
+        # 1. 次の入力値（超過銘柄のみ）を準備
+        new_input_value = "\n".join(overflow_list) # <-- 超過分（T11, T12, ...）のみ
             
         # ★★★ 修正箇所ここまで ★★★
         
@@ -1479,12 +1478,13 @@ if analyze_start_clicked:
             
             # ★★★ 【重要】分析が正常に終了した場合のみ入力欄をクリア/超過に置き換え、即座に画面を更新する ★★★
             if raw_tickers and not st.session_state.error_messages:
-                 # st.session_state.tickers_input_value を更新する (これが value にバインドされているためOK)
-                 st.session_state.tickers_input_value = new_input_value 
+                 # 【修正】ウィジェットのキーを更新（次回の初期値として利用）
+                 st.session_state.main_ticker_input = new_input_value 
                  
-                 # st.session_state.main_ticker_input の直接更新は StreamlitAPIException の原因となるため、削除を維持
+                 # old-style のバインド変数もクリア（念のため）
+                 st.session_state.tickers_input_value = "" 
                  
-                 st.rerun() # ★ 追加: 画面をリロードし、新しい入力値（超過銘柄）をテキストエリアに表示させる
+                 st.rerun() # ★ 画面をリロードし、キーの新しい値（超過銘柄のみ）をテキストエリアに反映させる
 
         # --- 診断完了時のフィードバック ---
         # 診断完了後、st.rerun() で画面が更新されるため、この下の表示はスキップされる
@@ -1510,27 +1510,8 @@ if analyze_start_clicked:
 if st.session_state.analyzed_data:
     data = st.session_state.analyzed_data
     
-    # ★★★ 新規追加: 超過銘柄メモ欄の表示とコピーボタン ★★★
-    if st.session_state.overflow_tickers:
-        st.markdown("---")
-        st.markdown(f"### 📋 次回分析用メモ (分析対象外の超過{len(st.session_state.overflow_tickers.splitlines())}銘柄)")
-        
-        # テキストエリアのみを表示するためのカラム構成に変更
-        col_memo, col_spacer = st.columns([1, 0.01]) # 100%幅の1カラムを使用
-        
-        # テキストエリアに超過銘柄コードを表示
-        with col_memo:
-            st.text_area(
-                "メモの内容を手動でコピーし、入力欄に貼り付けてご使用ください。", # ★ 説明文を修正
-                value=st.session_state.overflow_tickers, 
-                height=150, 
-                key='overflow_memo_area', 
-                label_visibility="collapsed"
-            )
-            # 【★ copy_to_clipboard_js の呼び出し、カスタムHTML、フィードバック表示のコードはすべて削除済み/記載しない】
-            
-        st.markdown("---")
-
+    # ★★★ 新規追加: 超過銘柄メモ欄の表示は削除しました ★★★
+    
     # リスト分け (変更なし)
     rec_data = [d for d in data if d['strategy'] != "様子見" and d['score'] >= 50]
     watch_data = [d for d in data if d['strategy'] == "様子見" or d['score'] < 50]
