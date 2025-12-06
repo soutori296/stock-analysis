@@ -346,8 +346,8 @@ else:
     api_key = st.sidebar.text_input("Gemini API Key", type="password")
 
 # --- 入力エリアの幅調整とクリアボタンの横並び配置 ---
-# 【修正】クリアボタンの横並びを削除し、入力エリアのみにカラムを使用
-col_input_area, col_spacer_area = st.columns([0.45, 0.55]) 
+# カラムを定義: 入力エリア(幅小)、クリアボタン(幅小)、スペーサー(残りのスペース)
+col_input_area, col_clear_btn, col_spacer = st.columns([0.45, 0.25, 0.3]) 
 
 with col_input_area:
     # ★ 入力欄の値はセッションステートから取得/更新する
@@ -359,12 +359,22 @@ with col_input_area:
         key='main_ticker_input' # Streamlitのkeyを設定
     )
 
-# ★ ユーザー入力値の同期ロジック (クリアボタンの削除に伴い、ロジックを簡素化)
-if tickers_input != st.session_state.tickers_input_value:
-    st.session_state.tickers_input_value = tickers_input
-    # 【重要】入力内容が変わったら、進行中の分析をリセットする
-    st.session_state.analysis_index = 0
-    st.session_state.current_input_hash = "" # ハッシュもリセットし、次回分析時に再計算
+    # ★ ユーザー入力値の同期ロジック (クリアボタンの削除に伴い、ロジックを簡素化)
+    if tickers_input != st.session_state.tickers_input_value:
+        st.session_state.tickers_input_value = tickers_input
+        # 【重要】入力内容が変わったら、進行中の分析をリセットする
+        st.session_state.analysis_index = 0
+        st.session_state.current_input_hash = "" # ハッシュもリセットし、次回分析時に再計算
+
+with col_clear_btn:
+    st.markdown("<div style='height: 35px;'></div>", unsafe_allow_html=True) # ★ 縦位置調整用のスペーサー
+    clear_input_clicked = st.button("📝 入力欄をクリア", use_container_width=True) # ★ ボタン復活
+
+if clear_input_clicked:
+    # 【最安定ロジック】: テキストボックスの値をクリアする変数だけを操作し、即座にリロード
+    st.session_state.tickers_input_value = "" 
+    # 進行状況リセットは、クリア後の次の分析開始時に自動で行われるので、ここでは省略（簡素化）
+    st.rerun()
 
 
 # --- 並び替えオプションに「出来高倍率順」を追加 ---
