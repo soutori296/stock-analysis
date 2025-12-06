@@ -336,7 +336,6 @@ else:
     api_key = st.sidebar.text_input("Gemini API Key", type="password")
 
 # ★ 入力欄の値はセッションステートから取得/更新する
-# 【修正】 valueパラメータをtickers_input_valueに再バインド
 tickers_input = st.text_area(
     f"Analysing Targets (銘柄コードを入力) - 上限{MAX_TICKERS}銘柄/回", 
     value=st.session_state.tickers_input_value, # ★ valueパラメータを再利用
@@ -344,6 +343,12 @@ tickers_input = st.text_area(
     height=150,
     key='main_ticker_input' # Streamlitのkeyを設定
 )
+
+# ★ 追加: ユーザーがテキストボックスを編集したとき、その値をtickers_input_valueに一時保存（次のリロード時に備える）
+#         この処理が、手動入力とプログラムセット値の同期を担う
+if tickers_input != st.session_state.tickers_input_value:
+    st.session_state.tickers_input_value = tickers_input
+
 
 # --- 並び替えオプションに「出来高倍率順」を追加 ---
 # ★ sort_option をここで定義
@@ -1391,8 +1396,8 @@ def merge_new_data(new_data_list):
 if analyze_start_clicked:
     st.session_state.error_messages = [] 
     
-    # 【修正】入力値の取得元を、ウィジェットの戻り値である tickers_input に変更
-    input_tickers = tickers_input
+    # 【修正】入力値の取得元を、常に value パラメータのバインド変数から取得するように変更
+    input_tickers = st.session_state.tickers_input_value
     
     if not api_key:
         st.warning("APIキーを入力してください。")
@@ -1476,7 +1481,7 @@ if analyze_start_clicked:
             
             # ★★★ 【重要】分析が正常に終了した場合のみ入力欄をクリア/超過に置き換え、即座に画面を更新する ★★★
             if raw_tickers and not st.session_state.error_messages:
-                 # 【修正】 valueバインド変数に書き換える (エラー回避決定版)
+                 # 【修正】 valueバインド変数に書き換える (これが新しい初期値となる)
                  st.session_state.tickers_input_value = new_input_value 
                  
                  st.rerun() # ★ 画面をリロードし、valueの新しい値（超過銘柄のみ）をテキストエリアに反映させる
