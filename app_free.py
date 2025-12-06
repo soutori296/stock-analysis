@@ -19,6 +19,7 @@ MANUAL_URL = "https://soutori296.stars.ne.jp/SoutoriWebShop/ai2_manual.html"
 
 
 # --- ページ設定 ---
+# layout="wide" は維持
 st.set_page_config(page_title="教えて！AIさん 2", page_icon=ICON_URL, layout="wide") 
 
 # --- セッションステート初期化 ---
@@ -50,6 +51,7 @@ if 'current_input_hash' not in st.session_state:
     st.session_state.current_input_hash = "" # 現在分析中の入力内容のハッシュ
 if 'sort_option_key' not in st.session_state: # ★ 修正1: sort_option_key の初期化
     st.session_state.sort_option_key = "スコア順 (高い順)" # デフォルトのソート順
+
     
 # 【★ スコア変動の永続化用データ構造の初期化】
 # 'final_score': 騰落レシオ影響を除いたコアスコア (基準値)
@@ -339,94 +341,123 @@ with st.expander("📘 取扱説明書 (データ仕様・判定基準)"):
     </p>
     """, unsafe_allow_html=True)
 
-# --- サイドバー --- (変更なし)
-if "GEMINI_API_KEY" in st.secrets:
-    api_key = st.secrets["GEMINI_API_KEY"]
-    st.sidebar.success("🔑 Security Clearance: OK")
-else:
-    api_key = st.sidebar.text_input("Gemini API Key", type="password")
 
-# --- 入力エリアの幅調整とクリアボタンの横並び配置 ---
-# カラムを定義: 入力エリア(幅小)、クリアボタン(幅小)、スペーサー(残りのスペース)
-col_input, col_clear_btn, col_spacer = st.columns([0.45, 0.25, 0.3]) 
+# --- コールバック関数定義 ---
+# ★ コールバック関数を修正・整理
 
-with col_input:
-    # ★ 入力欄の値はセッションステートから取得/更新する
+def clear_input_only_logic():
+    """入力欄のみをクリアし、進行状況をリセットする"""
+    # テキストボックスの内容を制御する変数をクリア
+    st.session_state.tickers_input_value = "" 
+    st.session_state.main_ticker_input = "" # Streamlitのkeyバインド変数もクリア
+    # 進行状況リセット
+    st.session_state.analysis_index = 0
+    st.session_state.current_input_hash = ""
+    # st.rerun() # ★ コールバック内からはst.rerun()を呼ばず、ボタン検知後に実行
+
+def clear_all_data_confirm():
+    """全ての結果と入力をクリアし、確認ダイアログを表示する"""
+    st.session_state.clear_confirmed = True
+    # st.rerun() # ★ コールバック内からはst.rerun()を呼ばず、ボタン検知後に実行
+
+def reanalyze_all_data_logic():
+    """全分析銘柄をテキストボックスに再投入し、再分析の準備をする"""
+    all_tickers = [d['code'] for d in st.session_state.analyzed_data]
+    # st.session_state.tickers_input_value に値をセットし、テキストボックスを更新
+    new_input_value = "\n".join(all_tickers)
+    st.session_state.tickers_input_value = new_input_value
+    st.session_state.main_ticker_input = new_input_value # keyバインド変数も更新
+    
+    # ハッシュを強制的にリセット（再投入された全銘柄が新しい分析対象となる）
+    new_hash_after_reload = hashlib.sha256(new_input_value.replace("\n", ",").encode()).hexdigest()
+    st.session_state.current_input_hash = new_hash_after_reload
+
+    # 進行状況をリセット
+    st.session_state.analysis_index = 0
+    # st.rerun() # ★ コールバック内からはst.rerun()を呼ばず、ボタン検知後に実行
+# --- コールバック関数定義ここまで ---
+
+
+# --- サイドバー (UIのコアを移動) ---
+with st.sidebar:
+    st.title("設定と操作")
+    
+    # 1. API Key
+    if "GEMINI_API_KEY" in st.secrets:
+        api_key = st.secrets["GEMINI_API_KEY"]
+        st.success("🔑 Security Clearance: OK")
+    else:
+        api_key = st.text_input("Gemini API Key", type="password")
+
+    st.markdown("---") 
+
+    # 2. 銘柄コード入力エリア
+    # ★ 入力欄の値はセッションステートから取得/更新する (高さ調整)
     tickers_input = st.text_area(
         f"Analysing Targets (銘柄コードを入力) - 上限{MAX_TICKERS}銘柄/回", 
-        value=st.session_state.tickers_input_value, # ★ valueパラメータを再利用
+        value=st.session_state.tickers_input_value, # ★ valueパラメータをバインド
         placeholder="例:\n7203\n8306\n9984",
         height=150,
         key='main_ticker_input' # Streamlitのkeyを設定
     )
-
-    # ★ ユーザー入力値の同期ロジック (クリアボタンの削除に伴い、ロジックを簡素化)
+    
+    # ★ ユーザー入力値の同期ロジック
     if tickers_input != st.session_state.tickers_input_value:
         st.session_state.tickers_input_value = tickers_input
         # 【重要】入力内容が変わったら、進行中の分析をリセットする
         st.session_state.analysis_index = 0
         st.session_state.current_input_hash = "" # ハッシュもリセットし、次回分析時に再計算
 
-# --- ボタンクリックコールバック関数定義 ---
-def clear_input_only_logic():
-    """入力欄のみをクリアし、進行状況をリセットする"""
-    # テキストボックスの内容を制御する変数だけをクリア
-    st.session_state.tickers_input_value = "" 
-    # 進行状況リセット（次の分析で新しい銘柄が入るため）
-    st.session_state.analysis_index = 0
-    st.session_state.current_input_hash = ""
-    st.rerun()
-
-def clear_all_data_confirm():
-    """全ての結果と入力をクリアし、確認ダイアログを表示する"""
-    st.session_state.clear_confirmed = True
+    # 3. ボタン類
+    st.markdown("---")
     
-def reanalyze_all_data_logic():
-    """全分析銘柄をテキストボックスに再投入し、再分析の準備をする"""
-    all_tickers = [d['code'] for d in st.session_state.analyzed_data]
-    # st.session_state.tickers_input_value に値をセットし、valueバインドを介してテキストボックスを更新
-    st.session_state.tickers_input_value = "\n".join(all_tickers)
+    # ボタンを横に2つ並べる
+    col1, col2 = st.columns(2) 
+
+    # 【2-1. 分析開始ボタン】(最重要)
+    # st.session_state.clear_confirmed が True の間は無効
+    analyze_start_clicked = st.button("🚀 分析開始", use_container_width=True, disabled=st.session_state.clear_confirmed) 
     
-    # ハッシュを強制的にリセット（再投入された全銘柄が新しい分析対象となる）
-    new_hash_after_reload = hashlib.sha256(st.session_state.tickers_input_value.replace("\n", ",").encode()).hexdigest()
-    st.session_state.current_input_hash = new_hash_after_reload
+    # 【2-2. 入力欄をクリア】
+    # on_clickにコールバックを設定
+    clear_input_clicked = col1.button("📝 入力欄をクリア", on_click=clear_input_only_logic, use_container_width=True) 
 
-    # 進行状況をリセット
-    st.session_state.analysis_index = 0
-    st.rerun()
-# --- コールバック関数定義ここまで ---
+    # 【2-3. 結果を消去ボタン】
+    # on_clickにコールバックを設定
+    clear_button_clicked = col2.button("🗑️ 結果を消去", on_click=clear_all_data_confirm, use_container_width=True)
 
-with col_clear_btn:
-    st.markdown("<div style='height: 35px;'></div>", unsafe_allow_html=True) # ★ 縦位置調整用のスペーサー
-    # ★ on_clickを外し、クリックを直接検知する
-    clear_input_clicked = st.button("📝 入力欄をクリア", use_container_width=True) 
+    # 【2-4. 再投入ボタン】
+    is_reload_disabled = not st.session_state.analyzed_data
+    # on_clickにコールバックを設定
+    reload_button_clicked = st.button("🔄 結果を再分析", on_click=reanalyze_all_data_logic, use_container_width=True, disabled=is_reload_disabled)
 
-# --- ボタン縦並びと確認ダイアログのロジック ---
-st.markdown("---") # 入力エリアとの区切り線
+    st.markdown("---")
 
-# 【1. 分析開始ボタン】(最重要)
-analyze_start_clicked = st.button("🚀 分析開始", use_container_width=True, disabled=st.session_state.clear_confirmed) 
+    # 4. ソート選択ボックス
+    # ソートオプションの選択肢を定義
+    sort_options = [
+        "スコア順 (高い順)", "更新回数順", "時価総額順 (高い順)", 
+        "RSI順 (低い順)", "RSI順 (高い順)", "出来高倍率順 (高い順)",
+        "銘柄コード順"
+    ]
+    
+    # 選択ボックスの追加 (セッションステートにバインド)
+    # indexには現在値のインデックスを指定
+    current_index = sort_options.index(st.session_state.sort_option_key) if st.session_state.sort_option_key in sort_options else 0
+    st.session_state.sort_option_key = st.selectbox(
+        "📊 結果のソート順", 
+        options=sort_options, 
+        index=current_index, 
+        key='sort_selectbox_ui_key' # UIコンポーネントのキー
+    )
 
-# 【2. 結果を消去ボタン】
-clear_button_clicked = st.button("🗑️ 結果を消去", use_container_width=True)
-
-# 【3. 再投入ボタン】
-is_reload_disabled = not st.session_state.analyzed_data
-reload_button_clicked = st.button("🔄 結果を再分析", use_container_width=True, disabled=is_reload_disabled)
 
 # --- ボタンの実行ロジック (メインスコープでの処理) ---
 
-if clear_input_clicked:
-    clear_input_only_logic() # ★ クリアボタンのロジックを実行
-
-if clear_button_clicked: 
-    st.session_state.clear_confirmed = True
-    st.rerun() # ★ 確認ステップへ進む
-
-if reload_button_clicked:
-    reanalyze_all_data_logic() # ★ 再分析ロジックを実行
-
-st.markdown("---") # 確認ステップとの区切り線
+# ★ コールバックで更新されたステートを反映するため、ここでst.rerun()を呼ぶ
+if clear_input_clicked or clear_button_clicked or reload_button_clicked:
+    st.rerun() 
+# --- ボタン縦並びと確認ダイアログのロジック ---
 
 # 確認ステップの表示 (画面上部に固定)
 if st.session_state.clear_confirmed:
@@ -492,7 +523,10 @@ if api_key:
     except Exception as e:
         st.error(f"System Error: Gemini設定時にエラーが発生しました: {e}")
 
-# --- 関数群 ---
+# --- 関数群 (省略されたget_stock_info, get_25day_ratio, get_base_score, get_stock_data, batch_analyze_with_ai, merge_new_dataは元のコードと同じ) ---
+# ... (get_stock_info, get_25day_ratio, get_base_score, get_stock_data, batch_analyze_with_ai, merge_new_data の定義は省略) ...
+
+# ※ 注意: ここに省略されている関数群は、元のコードと同じ内容で配置されているものとします。
 
 def fmt_market_cap(val):
     if not val or val == 0: return "-"
@@ -1341,7 +1375,7 @@ def batch_analyze_with_ai(data_list):
         market_alert_info += "市場の過熱感は中立的です。"
     
     # 【★ 投資顧問業回避のため、プロンプトの指示を修正・客観的トーンに徹底】
-    # ★ f-string構文エラー回避のため、プロンプト内の波括弧を二重化 {{}}
+    # ★ f-string構文エラー回避のため、プロンプト内の波括弧を二重に {{}}
     prompt = f"""
     あなたは「アイ」という名前のプロトレーダー（30代女性、冷静・理知的）。
     以下の【市場環境】と【銘柄リスト】に基づき、それぞれの「所感コメント（丁寧語）」を【生成コメントの原則】に従って作成してください。
@@ -1576,7 +1610,9 @@ if analyze_start_clicked:
             if end_index >= total_tickers:
                  # 【修正】分析完了。テキストボックスをクリア
                  st.success(f"🎉 全{total_tickers}銘柄の分析が完了しました。")
-                 st.session_state.tickers_input_value = "" # テキストボックスを空に
+                 # テキストボックスを空にする (session_state経由でテキストエリアに反映)
+                 st.session_state.tickers_input_value = "" 
+                 st.session_state.main_ticker_input = "" 
                  st.session_state.analysis_index = 0 # 進行状況をリセット
                  
             elif new_analyzed_data:
@@ -1609,23 +1645,7 @@ if analyze_start_clicked:
 # --- 表示 ---
 if st.session_state.analyzed_data:
     data = st.session_state.analyzed_data
-    st.markdown("---") # 区切り線   
-    # ソートオプションの選択肢を定義
-    sort_options = [
-        "スコア順 (高い順)", "更新回数順", "時価総額順 (高い順)", 
-        "RSI順 (低い順)", "RSI順 (高い順)", "出来高倍率順 (高い順)",
-        "銘柄コード順"
-    ]
-    # 選択ボックスの追加 (セッションステートにバインド)
-    # indexには現在値のインデックスを指定
-    current_index = sort_options.index(st.session_state.sort_option_key) if st.session_state.sort_option_key in sort_options else 0
-    st.session_state.sort_option_key = st.selectbox(
-        "📊 結果のソート順", 
-        options=sort_options, 
-        index=current_index, 
-        key='sort_selectbox_ui_key' # UIコンポーネントのキー
-    )
-        
+    
     # リスト分け (変更なし)
     rec_data = [d for d in data if d['strategy'] != "様子見" and d['score'] >= 50]
     watch_data = [d for d in data if d['strategy'] == "様子見" or d['score'] < 50]
@@ -1844,5 +1864,3 @@ if st.session_state.analyzed_data:
              if col in df_raw.columns:
                  df_raw = df_raw.drop(columns=[col]) 
         st.dataframe(df_raw)
-
-
