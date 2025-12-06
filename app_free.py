@@ -30,6 +30,8 @@ if 'error_messages' not in st.session_state:
     st.session_state.error_messages = []
 if 'clear_confirmed' not in st.session_state:
     st.session_state.clear_confirmed = False 
+if 'confirm_reset' not in st.session_state: # ★ 新規: 入力変更によるリセット確認用フラグ
+    st.session_state.confirm_reset = False
 if 'tickers_input_value' not in st.session_state:
     st.session_state.tickers_input_value = "" # ★ valueパラメータにバインドする変数を維持
 if 'overflow_tickers' not in st.session_state:
@@ -343,22 +345,37 @@ if "GEMINI_API_KEY" in st.secrets:
 else:
     api_key = st.sidebar.text_input("Gemini API Key", type="password")
 
-# ★ 入力欄の値はセッションステートから取得/更新する
-tickers_input = st.text_area(
-    f"Analysing Targets (銘柄コードを入力) - 上限{MAX_TICKERS}銘柄/回", 
-    value=st.session_state.tickers_input_value, # ★ valueパラメータを再利用
-    placeholder="例:\n7203\n8306\n9984",
-    height=150,
-    key='main_ticker_input' # Streamlitのkeyを設定
-)
+# --- 入力エリアの幅調整とクリアボタンの横並び配置 ---
+# カラムを定義: 入力エリア(幅小)、クリアボタン(幅小)、スペーサー(残りのスペース)
+col_input, col_clear_btn, col_spacer = st.columns([0.25, 0.2, 0.55]) 
 
-# ★ 追加: ユーザーがテキストボックスを編集したとき、その値をtickers_input_valueに一時保存（次のリロード時に備える）
-#         この処理が、手動入力とプログラムセット値の同期を担う
-if tickers_input != st.session_state.tickers_input_value:
-    st.session_state.tickers_input_value = tickers_input
-    # 【重要】入力内容が変わったら、進行中の分析をリセットする
+with col_input:
+    # ★ 入力欄の値はセッションステートから取得/更新する
+    tickers_input = st.text_area(
+        f"Analysing Targets (銘柄コードを入力) - 上限{MAX_TICKERS}銘柄/回", 
+        value=st.session_state.tickers_input_value, # ★ valueパラメータを再利用
+        placeholder="例:\n7203\n8306\n9984",
+        height=150,
+        key='main_ticker_input' # Streamlitのkeyを設定
+    )
+    # ★ ユーザー入力値の同期ロジック
+    if tickers_input != st.session_state.tickers_input_value:
+        st.session_state.tickers_input_value = tickers_input
+        # 【重要】入力内容が変わったら、進行中の分析をリセットする
+        st.session_state.analysis_index = 0
+        st.session_state.current_input_hash = "" # ハッシュもリセットし、次回分析時に再計算
+
+with col_clear_btn:
+    st.markdown("<div style='height: 35px;'></div>", unsafe_allow_html=True) # ★ 縦位置調整用のスペーサー
+    clear_input_clicked = st.button("📝 入力欄をクリア", use_container_width=True) # ★ 新規追加
+
+if clear_input_clicked:
+    # テキストボックスの内容を制御する変数だけをクリア
+    st.session_state.tickers_input_value = "" 
+    # 進行状況もリセット（新しい入力を行うため）
     st.session_state.analysis_index = 0
-    st.session_state.current_input_hash = "" # ハッシュもリセットし、次回分析時に再計算
+    st.session_state.current_input_hash = ""
+    st.rerun()
 
 
 # --- 並び替えオプションに「出来高倍率順」を追加 ---
@@ -404,6 +421,7 @@ st.markdown("---") # 確認ステップとの区切り線
 
 # 確認ステップの表示 (画面上部に固定)
 if st.session_state.clear_confirmed:
+    # 既存の全クリア確認ロジック
     st.warning("⚠️ 本当に分析結果をすべてクリアしますか？この操作は取り消せません。", icon="🚨")
     
     # 確認ボタンも横並びで幅を揃える（空きカラムを設ける）
@@ -426,6 +444,32 @@ if st.session_state.clear_confirmed:
     
     if col_cancel.button("❌ キャンセル", use_container_width=False): # ★ use_container_width=False
         st.session_state.clear_confirmed = False
+        st.rerun() 
+
+# 【追加】分析開始時のリセット確認ダイアログ
+elif st.session_state.confirm_reset:
+    st.warning("⚠️ **警告: 入力内容が変更されました。** 過去の分析結果（分析データと進行状況）をすべてクリアし、新しい銘柄群で分析を最初からやり直しますか？", icon="🚨")
+    
+    col_confirm, col_cancel, col_spacer = st.columns([0.3, 0.2, 0.5])
+    
+    # 【確認ボタン】
+    if col_confirm.button("✅ 新しい分析を始めます", use_container_width=False):
+        # データをリセットし、分析を続行（ハッシュを更新することで、次回の実行でリセットが不要になる）
+        st.session_state.analyzed_data = []
+        st.session_state.score_history = {}
+        st.session_state.analysis_index = 0
+        
+        # 新しいハッシュを確定させ、次回の実行で分析ロジックに進めるようにする
+        new_hash_after_confirm = hashlib.sha256(st.session_state.tickers_input_value.replace("\n", ",").encode()).hexdigest()
+        st.session_state.current_input_hash = new_hash_after_confirm
+        st.session_state.confirm_reset = False
+        st.rerun() 
+    
+    # 【キャンセルボタン】
+    if col_cancel.button("❌ キャンセル", use_container_width=False):
+        # 入力内容を元に戻すか、ユーザーに入力を修正させる
+        st.session_state.confirm_reset = False
+        st.session_state.current_input_hash = "" # ハッシュをクリアし、次回分析は強制的に最初から
         st.rerun() 
 # --- ボタン縦並びと確認ダイアログのロジックここまで ---
 
@@ -679,7 +723,7 @@ def get_base_score(ticker, df_base, info):
     df_base['TR'] = df_base[['High_Low', 'High_PrevClose', 'Low_PrevClose']].max(axis=1)
     df_base['ATR'] = df_base['TR'].rolling(14).mean()
 
-    # RSI (ベースライン用)
+    # RSI (बेसライン用)
     delta = df_base['Close'].diff()
     gain = (delta.where(delta > 0, 0)).rolling(14).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
@@ -1427,14 +1471,26 @@ if analyze_start_clicked:
                                        .replace("、", ",")
         current_hash = hashlib.sha256(raw_tickers_str.encode()).hexdigest()
         
-        # 2. 入力内容の変更を検知し、進行状況をリセット
-        if st.session_state.current_input_hash != current_hash:
-             st.session_state.analysis_index = 0 # リセット
+        # 2. 入力内容の変更を検知し、進行状況をリセット **(確認ロジック)**
+        is_input_changed = (st.session_state.current_input_hash != current_hash)
+        
+        # 【重要】確認ダイアログの表示条件
+        if is_input_changed and len(st.session_state.analyzed_data) > 0 and not st.session_state.confirm_reset:
+            st.session_state.confirm_reset = True
+            # ここで処理を中断し、確認ダイアログの表示へ進む (st.rerun()の直前に処理をスキップさせる)
+        
+        # 3. 実行前のリセット処理
+        if st.session_state.confirm_reset:
+             # 確認ダイアログ表示中は、分析をスキップ
+             st.stop()
+        elif is_input_changed:
+             # 【修正】確認が不要な場合（analyzed_dataが空）は、ここでリセットを実行
+             st.session_state.analysis_index = 0
              st.session_state.analyzed_data = [] # 過去の結果をリセット
              st.session_state.score_history = {} # スコア履歴もリセット
              st.session_state.current_input_hash = current_hash # 新しいハッシュを保存
         
-        # 3. 有効な銘柄コードリストの作成 (重複排除・コード抽出)
+        # 4. 有効な銘柄コードリストの作成 (重複排除・コード抽出)
         all_unique_tickers = list(set([t.strip() for t in raw_tickers_str.split(",") if t.strip()]))
         total_tickers = len(all_unique_tickers)
         
@@ -1448,11 +1504,11 @@ if analyze_start_clicked:
              st.session_state.analysis_index = 0 # 安全のためリセット
              # 処理をスキップ
              
-        # 4. 分析実行回数インクリメント
+        # 5. 分析実行回数インクリメント
         st.session_state.analysis_run_count += 1
         current_run_count = st.session_state.analysis_run_count
         
-        # 5. 超過銘柄の警告 (初回実行のみ)
+        # 6. 超過銘柄の警告と進行メッセージ (初回実行のみ)
         if total_tickers > MAX_TICKERS and start_index == 0:
             st.warning(f"⚠️ 入力銘柄数が{MAX_TICKERS}を超えています。自動で{MAX_TICKERS}銘柄ずつ順次分析します。分析を続けるには、再度【🚀 分析開始】を押してください。")
         elif end_index < total_tickers:
@@ -1500,19 +1556,20 @@ if analyze_start_clicked:
             # ★ セッション初回実行フラグを OFF にする (初回の全銘柄分析が終わった後)
             st.session_state.is_first_session_run = False
             
-            # 6. 進行状況の更新
+            # 7. 進行状況の更新
             st.session_state.analysis_index = end_index 
             
-            # 7. 完了判定とテキストボックスのクリア
+            # 8. 完了判定とテキストボックスのクリア
             if end_index >= total_tickers:
                  # 【修正】分析完了。テキストボックスをクリア
                  st.success(f"🎉 全{total_tickers}銘柄の分析が完了しました。")
                  st.session_state.tickers_input_value = "" # テキストボックスを空に
                  st.session_state.analysis_index = 0 # 進行状況をリセット
+                 
             elif new_analyzed_data:
                  st.success(f"✅ 第{start_index // MAX_TICKERS + 1}回の分析が完了しました。")
                  
-            # 8. 画面更新
+            # 9. 画面更新
             if raw_tickers:
                 st.rerun() # リロードして画面を更新
 
@@ -1589,9 +1646,9 @@ if st.session_state.analyzed_data:
             p_half = d.get('p_half', 0)
             p_full = d.get('p_full', 0)
             
-            # 【★ No.欄の表示 (真の更新回数 update_count を使用) 】
+            # 【★ No.欄の表示を修正】: ソート後の表示順位 (i+1) を使用
             update_count = d.get('update_count', 0)
-            display_no = d.get('batch_order', i + 1) # ★ 修正: batch_orderを優先して累積の通し番号とする
+            display_no = i + 1 # ★ 修正: ソート後のインデックスを使用
             # update_count > 1 の場合のみ表示
             run_count_disp = f'{update_count}回目' if update_count > 1 else '' 
             
