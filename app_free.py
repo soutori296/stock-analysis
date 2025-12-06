@@ -38,6 +38,12 @@ if 'analysis_run_count' not in st.session_state:
 if 'is_first_session_run' not in st.session_state:
     st.session_state.is_first_session_run = True # ★ 新規: セッション開始後の初回実行フラグ
     
+# 【★ スコア変動の永続化用データ構造の初期化】
+# 'final_score': 騰落レシオ影響を除いたコアスコア (基準値)
+# 'market_ratio_score': 騰落レシオ影響分
+if 'score_history' not in st.session_state:
+    st.session_state.score_history = {} # {ticker: {'final_score': X, 'market_ratio_score': Y}}
+    
 # --- 分析上限定数 ---
 MAX_TICKERS = 10 
 
@@ -45,17 +51,27 @@ MAX_TICKERS = 10
 # --- 時間管理 (JST) ---
 def get_market_status():
     """
-    市場状態を返す（文字列と現在時刻のtuple）。15:50以降を引け後（当日確定値）とする。
+    市場状態を返す（文字列と現在時刻のtuple）。
+    場前: 15:50:01 から 9:00:00 まで (この間は前日終値データで計算)
+    場中: 9:00:01 から 15:50:00 まで (この間はリアルタイムデータを使用)
     """
-    # DeprecationWarning回避のため、datetime.datetime.now(datetime.UTC)に修正
     jst_now = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=9)
     current_time = jst_now.time()
-    if jst_now.weekday() >= 5: return "休日(確定値)", jst_now
-    # 9:00 から 15:50 (未満) をザラ場(進行中)とする
-    if datetime.time(9, 0) <= current_time < datetime.time(15, 50):
-        return "ザラ場(進行中)", jst_now
-    # 15:50 以降は引け後(確定値)
-    return "引け後(確定値)", jst_now
+    
+    # 休日判定
+    if jst_now.weekday() >= 5: return "休日(固定)", jst_now
+    
+    # 場前（固定）: 15:50:01 から 9:00:00 まで
+    # 15:50:01 以降 または 9:00:00 以前
+    if datetime.time(15, 50, 1) <= current_time or current_time < datetime.time(9, 0, 1):
+         return "場前(固定)", jst_now
+    
+    # 場中（進行中）: 9:00:01 から 15:50:00 まで
+    if datetime.time(9, 0, 1) <= current_time <= datetime.time(15, 50, 0):
+        return "場中(進行中)", jst_now
+        
+    return "引け後(確定値)", jst_now # 15:50:00 ちょうどは引け後確定値とする
+
 
 status_label, jst_now = get_market_status()
 status_color = "#d32f2f" if "進行中" in status_label else "#1976d2"
@@ -144,7 +160,7 @@ def get_volume_weight(current_dt, market_cap):
 
 
 # --- CSSスタイル (干渉回避版) + ツールチップCSS ---
-# ★ CSSを追加して、特定のボタンの最小幅を指定
+# (CSSは変更なし)
 st.markdown(f"""
 <style>
     /* Streamlit標準のフォント設定を邪魔しないように限定的に適用 */
@@ -386,6 +402,7 @@ if st.session_state.clear_confirmed:
         st.session_state.overflow_tickers = "" 
         st.session_state.analysis_run_count = 0 # ★ リセット
         st.session_state.is_first_session_run = True # ★ リセット
+        st.session_state.score_history = {} # ★ リセット
         st.rerun() 
     
     if col_cancel.button("❌ キャンセル", use_container_width=False): # ★ use_container_width=False
@@ -727,6 +744,13 @@ def get_base_score(ticker, df_base, info):
     return score_b
 
 
+# 【★ スコア変動の永続化用データ構造の初期化】
+# 'final_score': 騰落レシオ影響を除いたコアスコア (基準値)
+# 'market_ratio_score': 騰落レシオ影響分
+if 'score_history' not in st.session_state:
+    st.session_state.score_history = {} # {ticker: {'final_score': X, 'market_ratio_score': Y}}
+
+
 @st.cache_data(ttl=300) # キャッシュのTTLを5分 (300秒) に設定
 def get_stock_data(ticker, current_run_count):
     
@@ -738,6 +762,36 @@ def get_stock_data(ticker, current_run_count):
     
     info = get_stock_info(ticker) 
     
+    # 【★★★ 最終初期化ブロック：全てのローカル変数をカバー ★★★】
+    issued_shares = info.get("issued_shares", 0.0)
+    
+    # テクニカル指標と計算結果
+    ma5, ma25, ma75, atr_val, rsi_val = 0, 0, 0, 0, 0
+    risk_reward_ratio = 0.0
+    risk_value = 0.0
+    avg_vol_5d = 0
+    sl_pct = 0; atr_sl_price = 0
+    vol_ratio = 0.0 
+    liquidity_ratio_pct = 0.0 # ★★★ 初期化追加 ★★★
+    
+    # ロジック制御と表示
+    strategy = "様子見"; is_gc, is_dc, is_aoteng = False, False, False
+    rsi_mark = "⚪" 
+    momentum_str = "0%" 
+    p_half = 0 
+    p_full = 0
+    buy_target = 0
+    bt_str = "計算エラー"
+    max_dd_pct = 0.0
+    win_rate_pct = 0 
+    sl_ma = 0 # ★★★ 初期化追加 ★★★
+    
+    # スコアと差分 (最終戻り値)
+    current_calculated_score = 0
+    score_diff = 0
+    score_to_return = 50 # ベーススコア
+    # ----------------------------------------------------------------------
+    
     # --- 【★ 低位株フィルタ (価格100円未満をスキップ) 】 ---
     curr_price_for_check = info.get("price")
     if curr_price_for_check is not None and curr_price_for_check < 100:
@@ -745,8 +799,8 @@ def get_stock_data(ticker, current_run_count):
          return None
     # --------------------------------------------------------
     
+    # --- 1) Stooq データ取得 (CSV直リンク) ---
     try:
-        # --- 1) Stooq データ取得 (CSV直リンク) ---
         csv_url = f"https://stooq.com/q/d/l/?s={stock_code}&i=d"
         # タイムアウトを8秒に設定
         res = requests.get(csv_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
@@ -777,38 +831,91 @@ def get_stock_data(ticker, current_run_count):
         df_base_score = df_raw.copy()
         
         # 最終行が本日分の場合（引け後データ確定前など）、前日終値まででカット
-        if df_base_score.index[-1].date() == (jst_now_local.date() - datetime.timedelta(days=0)) and status != "引け後(確定値)":
+        if df_base_score.index[-1].date() == (jst_now_local.date() - datetime.timedelta(days=0)) and status != "場前(固定)":
              df_base_score = df_base_score.iloc[:-1] # 当日行を削除
 
         base_score = get_base_score(ticker, df_base_score, info) 
         # -----------------------------------------------------------
         
-        # --- 2) 当日分のデータ結合（分析用データフレーム df の準備） ---
+        # --- 2) 分析用データフレーム df の準備 (ロジックI, IIの分離) ---
         df = df_raw.copy()
-        curr_price = info.get("close")
-        if curr_price is None: curr_price = info.get("price")
-        if curr_price is None: curr_price = df.iloc[-1].get('Close', None)
         
-        if status == "引け後(確定値)" and info.get("open") and info.get("high") and info.get("low") and info.get("volume") and curr_price:
-            today_date_dt = pd.to_datetime(jst_now_local.strftime("%Y-%m-%d"))
+        # 【★ ロジックII: 引け後〜場前 (固定) - スコア再利用ロジック ★】
+        if status != "場中(進行中)":
             
-            # 最終日が本日であれば上書き、そうでなければ新しい行を追加 
-            if df.index[-1].date() == today_date_dt.date():
-                 df.loc[df.index[-1], 'Close'] = curr_price
-                 df.loc[df.index[-1], 'High'] = max(df.loc[df.index[-1], 'High'], info['high']) if info['high'] else df.loc[df.index[-1], 'High']
-                 df.loc[df.index[-1], 'Low'] = min(df.loc[df.index[-1], 'Low'], info['low']) if info['low'] else df.loc[df.index[-1], 'Low']
-                 df.loc[df.index[-1], 'Volume'] = info['volume']
-            elif today_date_dt.date() > df.index[-1].date():
-                 new_row = pd.Series({
-                     'Open': info['open'],
-                     'High': info['high'],
-                     'Low': info['low'],
-                     'Close': curr_price,
-                     'Volume': info['volume']
-                 }, name=today_date_dt) 
-                 df = pd.concat([df, new_row.to_frame().T])
+            # 永続化されていない場合、計算し、固定化する。
+            if ticker not in st.session_state.score_history or st.session_state.score_history[ticker].get('final_score') is None:
+                 
+                 # 確定値ベースの分析（当日確定値を結合）
+                 curr_price = info.get("close")
+                 if curr_price is None: curr_price = info.get("price")
+                 if curr_price is None: curr_price = df.iloc[-1].get('Close', None)
+                 
+                 # ★★★ データ結合のロジック: 株探の前日確定4本値をStooqに結合 ★★★
+                 if info.get("open") and info.get("high") and info.get("low") and info.get("volume") and curr_price:
+                      today_date_dt = pd.to_datetime(jst_now_local.strftime("%Y-%m-%d"))
+                      
+                      # 最終行がStooqの前日以前であることを確認
+                      if df.index[-1].date() < (jst_now_local.date() - datetime.timedelta(days=0)):
+                           # 新しい行として追加（前日分）
+                           new_row = pd.Series({'Open': info['open'], 'High': info['high'], 'Low': info['low'], 'Close': curr_price, 'Volume': info['volume']}, name=today_date_dt) 
+                           df = pd.concat([df, new_row.to_frame().T])
+                      elif df.index[-1].date() == (jst_now_local.date() - datetime.timedelta(days=0)):
+                           # 当日行がStooqに既に含まれている場合は上書き（安全策）
+                           df.loc[df.index[-1], 'Close'] = curr_price
+                           df.loc[df.index[-1], 'High'] = max(df.loc[df.index[-1], 'High'], info['high'])
+                           df.loc[df.index[-1], 'Low'] = min(df.loc[df.index[-1], 'Low'], info['low'])
+                           df.loc[df.index[-1], 'Volume'] = info['volume']
 
-        # --- 3) 現在値の最終決定 ---
+                 # **********************************************
+                 # ** 固定スコアの計算ロジックへ移行（後述） **
+                 # **********************************************
+                 pass 
+                 
+            # 永続化済みの場合、計算をスキップし、固定値を使用
+            else:
+                 # 既にスコアが確定・永続化されている場合、それを再利用する
+                 fixed_score = st.session_state.score_history[ticker]['final_score']
+                 fixed_market_ratio_score = st.session_state.score_history[ticker]['market_ratio_score']
+                 
+                 # 騰落レシオの変化による変動分を計算
+                 is_market_alert = market_25d_ratio >= 125.0
+                 current_market_deduct = -20 if is_market_alert else 0
+                 
+                 # スコアを固定値に戻し、騰落レシオの影響分だけ差分を計算
+                 score_diff = current_market_deduct - fixed_market_ratio_score 
+                 current_calculated_score = fixed_score + score_diff
+                 
+                 # 銘柄情報の初期化（表示のため）
+                 curr_price = info.get("close")
+                 if curr_price is None: curr_price = info.get("price")
+                 
+                 # ロジックを抜けるために、最低限の表示変数をセット（テクニカル計算はスキップ）
+                 if df.shape[0] >= 1:
+                     # MA5を計算して buy_target にセット
+                     df_temp_ma = df_raw.copy()
+                     df_temp_ma['SMA5'] = df_temp_ma['Close'].rolling(5).mean()
+                     ma5_val = df_temp_ma['SMA5'].iloc[-1]
+                     buy_target = int(ma5_val) if not pd.isna(ma5_val) else 0
+                     bt_str = "固定データ" 
+                     
+                 pass 
+                 
+        # 【★ ロジックI: 場中 (ザラ場) - テクニカルはStooq固定 ★】
+        else:
+             # 当日行を削除し、前日までのデータでテクニカル指標を計算
+             if df.index[-1].date() == (jst_now_local.date() - datetime.timedelta(days=0)):
+                  df = df.iloc[:-1]
+             # 株探からの現在値のみを最終行にセット（テクニカル指標の計算には使用しない）
+             curr_price = info.get("price")
+             if curr_price is None: curr_price = df.iloc[-1].get('Close', None)
+             
+             # **********************************************
+             # ** 動的スコアの計算ロジックへ移行（後述） **
+             # **********************************************
+             pass 
+             
+        # --- 3) 現在値の最終決定 (共通) ---
         if curr_price is None or math.isnan(curr_price):
              curr_price = df.iloc[-1].get('Close', None)
         
@@ -816,337 +923,285 @@ def get_stock_data(ticker, current_run_count):
              st.session_state.error_messages.append(f"価格データ取得エラー (コード:{ticker}): 価格情報が見つかりませんでした。")
              return None
 
-        # テクニカル指標の計算
-        df['SMA5'] = df['Close'].rolling(5).mean()
-        df['SMA25'] = df['Close'].rolling(25).mean()
-        df['SMA75'] = df['Close'].rolling(75).mean()
-        df['Vol_SMA5'] = df['Volume'].rolling(5).mean() 
         
-        # --- 2. ボラティリティ指標の追加 (ATR) ---
-        df['High_Low'] = df['High'] - df['Low']
-        df['High_PrevClose'] = abs(df['High'] - df['Close'].shift(1))
-        df['Low_PrevClose'] = abs(df['Low'] - df['Close'].shift(1))
-        df['TR'] = df[['High_Low', 'High_PrevClose', 'Low_PrevClose']].max(axis=1)
-        df['ATR'] = df['TR'].rolling(14).mean()
+        # --- 【★★★ ここからがスコア計算のメインブロック ★★★】 ---
         
-        delta = df['Close'].diff()
-        gain = (delta.where(delta > 0, 0)).rolling(14).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
-        rs = gain / loss
-        df['RSI'] = 100 - (100 / (1 + rs))
+        # ロジックII (スコア固定) の再利用の場合、計算をスキップする
+        if status != "場中(進行中)" and ticker in st.session_state.score_history and st.session_state.score_history[ticker].get('final_score') is not None:
+             pass 
         
-        recent = df['Close'].diff().tail(5)
-        up_days = (recent > 0).sum()
-        win_rate_pct = (up_days / 5) * 100
-        momentum_str = f"{win_rate_pct:.0f}%"
-
-        last = df.iloc[-1]
-        prev = df.iloc[-2] if len(df) >= 2 else last
-        
-        # --- 【★ 修正: MA変数の集中定義】 ---
-        ma5 = last['SMA5'] if not pd.isna(last['SMA5']) else 0
-        ma25 = last['SMA25'] if not pd.isna(last['SMA25']) else 0
-        ma75 = last['SMA75'] if not pd.isna(last['SMA75']) else 0 
-        prev_ma5 = prev['SMA5'] if not pd.isna(prev['SMA5']) else ma5
-        prev_ma25 = prev['SMA25'] if not pd.isna(prev['SMA25']) else ma25
-        # ------------------------------------
-        
-        # --- 【★ 青天井判定に必要な過去最高値の計算 (過去250日) 】 ---
-        high_250d = df['High'].tail(250).max() if len(df) >= 250 else 0
-        # -----------------------------------------------------------------
-
-        # --- 【★ ゴールデンクロス/デッドクロスの判定】 ---
-        is_gc = (ma5 > ma25) and (prev_ma5 <= prev_ma25)
-        is_dc = (ma5 < ma25) and (prev_ma5 >= prev_ma25)
-        # ----------------------------------------------------
-
-        # ATR値を取得 (NaNチェック)
-        atr_val = last['ATR'] if not pd.isna(last['ATR']) else 0
-        
-        # --- 【★ 修正: ATRベースの推奨SL価格計算 - 1.5倍に変更】 ---
-        atr_sl_price = 0
-        if curr_price > 0 and atr_val > 0:
-             # ★ 3倍から1.5倍に変更
-             atr_sl_price = curr_price - (atr_val * 1.5) 
-             atr_sl_price = max(0, atr_sl_price)
-        # -----------------------------------------------------
-
-        # バックテスト実行
-        bt_str, bt_cnt, max_dd_pct = run_backtest(df, info["cap"]) 
-        
-        # 出来高倍率の計算
-        vol_ratio = 0
-        volume_weight = get_volume_weight(jst_now_local, info["cap"]) 
-        
-        # Kabutanからの出来高(info.get("volume"))を使用
-        if info.get("volume") and not pd.isna(last['Vol_SMA5']) and volume_weight > 0.0001: 
-            adjusted_vol_avg = last['Vol_SMA5'] * volume_weight
-            if adjusted_vol_avg > 0:
-                 vol_ratio = info["volume"] / adjusted_vol_avg
-        
-        # RSIマーク付け
-        rsi_val = last['RSI'] if not pd.isna(last['RSI']) else 50
-        if rsi_val <= 30: rsi_mark = "🔵"
-        elif 55 <= rsi_val <= 65: rsi_mark = "🟢"
-        elif rsi_val >= 70: rsi_mark = "🔴"
-        else: rsi_mark = "⚪"
-        
-        strategy = "様子見"
-        buy_target = int(ma5) 
-        p_half = 0; p_full = 0
-        is_aoteng = False # 青天井フラグ
-        
-        # 時価総額別の目標リターン率
-        target_pct = get_target_pct(info["cap"])
-
-        # 順張り/逆張りロジック 
-        # 順張り
-        if ma5 > ma25 > ma75 and ma5 > prev_ma5:
-            strategy = "🔥順張り"
-            buy_target = int(ma5) 
-            
-            # P_HALF: 推奨買値基準でT_pctの50%
-            target_half_raw = buy_target * (1 + target_pct / 2) 
-            p_half_candidate = int(np.floor(target_half_raw)) 
-            
-            # P_FULL: 推奨買値基準でT_pctの100%
-            target_full_raw = buy_target * (1 + target_pct) 
-            p_full_candidate = int(np.floor(target_full_raw))
-            
-            
-            # 【A. 青天井ロジック】
-            if high_250d > 0 and curr_price > high_250d and p_half_candidate <= curr_price:
-                 is_aoteng = True
-                 
-                 # ATRトレーリング・ストップ価格の計算
-                 max_high_today = df['High'].iloc[-1]
-                 atr_trailing_price = max_high_today - (atr_val * 2.5)
-                 atr_trailing_price = max(0, atr_trailing_price)
-                 
-                 p_half = 0
-                 p_full = int(np.floor(atr_trailing_price))
-                 
-            # 【B. 通常の目標設定ロジック】
-            else: 
-                 # P_half が現在値を上回っている（通常の新規エントリー目標）
-                 if p_half_candidate > curr_price:
-                      p_half = p_half_candidate
-                      p_full = p_full_candidate if p_full_candidate > p_half else p_half + 1 
- 
-                 # P_half は現在値以下だが、P_full は現在値を上回っている（半益は達成、全益は未達）
-                 # ★ 修正: P_half <= curr_price で P_full > curr_price なら P_full のみを提示
-                 elif p_half_candidate <= curr_price and p_full_candidate > curr_price:
-                      p_half = 0 # 半益は無効（達成済み）
-                      p_full = p_full_candidate # 全益目標は提示 (現在値より高い)
-
-                 # P_full も現在値以下（全て達成済み/無効）の場合 -> フォールバック目標設定
-                 elif p_full_candidate <= curr_price:
-                      # P_full を現在値基準のフォールバック目標に再設定（既保有の売り指値目標）
-                      p_full_fallback_raw = curr_price * (1 + target_pct)
-                      p_full_fallback = int(np.floor(p_full_fallback_raw))
-                      
-                      if p_full_fallback > curr_price:
-                           p_full = p_full_fallback
-                           p_half = 0
-                      else:
-                           p_full = 0 # フォールバックもできず、完全に目標が無効
-                           p_half = 0
-                 
-        # 逆張り 
-        elif rsi_val <= 30 or (curr_price < ma25 * 0.9 if ma25 else False):
-            strategy = "🌊逆張り"
-            buy_target = int(curr_price) 
-            
-            # P_HALF: 5日移動平均線 - 1円
-            p_half_candidate = int(np.floor(ma5 - 1)) if ma5 else 0 
-            # P_FULL: 25日移動平均線 - 1円
-            p_full_candidate = int(np.floor(ma25 - 1)) if ma25 else 0 
-            
-            p_half = p_half_candidate if p_half_candidate > curr_price else 0
-            p_full = p_full_candidate if p_full_candidate > curr_price else 0
-            
-            if p_half > 0 and p_full > 0 and p_half > p_full:
-                 p_half = p_full - 1 
-
-        # --- 【★ 損切りMAの決定と「不明」の解消】 ---
-        sl_pct = 0.0 
-        sl_ma = 0
-        if strategy == "🔥順張り":
-            sl_ma = ma25 if ma25 > 0 else (ma75 if ma75 > 0 else 0) # MA25がなければMA75
-        elif strategy == "🌊逆張り":
-            sl_ma = ma75 if ma75 > 0 else (ma25 if ma25 > 0 else 0) # MA75がなければMA25
-        # 「様子見」の場合、MA25をSL目安とする (最低限の支持線提示)
-        elif ma25 > 0:
-            sl_ma = ma25
+        # ロジックI (場中) または ロジックIIの初回計算の場合
         else:
-             sl_ma = 0 # データ不足やMA計算不能の場合
-        
-        if curr_price > 0 and sl_ma > 0:
-            sl_pct = ((curr_price / sl_ma) - 1) * 100 
-        # ---------------------------------------------
             
-        # 【★ R/R比の計算】
-        risk_reward_ratio = 0.0
-        risk_value = 0.0
-        
-        # P_half/P_fullが0でない場合にR/R比を計算
-        if buy_target > 0 and sl_ma > 0 and (p_half > 0 or is_aoteng or p_full > 0): 
+            # テクニカル指標の計算
+            df['SMA5'] = df['Close'].rolling(5).mean()
+            df['SMA25'] = df['Close'].rolling(25).mean()
+            df['SMA75'] = df['Close'].rolling(75).mean()
+            df['Vol_SMA5'] = df['Volume'].rolling(5).mean() 
             
-            # --- マニュアル準拠: 利益幅は「半益と全益の目標値の平均」を基準とする ---
+            df['High_Low'] = df['High'] - df['Low']
+            df['High_PrevClose'] = abs(df['High'] - df['Close'].shift(1))
+            df['Low_PrevClose'] = abs(df['Low'] - df['Close'].shift(1))
+            df['TR'] = df[['High_Low', 'High_PrevClose', 'Low_PrevClose']].max(axis=1)
+            df['ATR'] = df['TR'].rolling(14).mean()
             
-            if p_half > 0 and p_full > 0:
-                 avg_target = (p_half + p_full) / 2
-            elif p_full > 0 and p_half == 0:
-                 # P_fullのみ設定されている場合（青天井 or フォールバック）
-                 avg_target = p_full
-            else:
-                 avg_target = 0 # 利益目標なし
-                 
-            reward_value = avg_target - buy_target
-            risk_value = buy_target - sl_ma 
+            delta = df['Close'].diff()
+            gain = (delta.where(delta > 0, 0)).rolling(14).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
+            rs = gain / loss
+            df['RSI'] = 100 - (100 / (1 + rs))
             
-            if risk_value > 0 and reward_value > 0:
-                 risk_reward_ratio = reward_value / risk_value
-                 # 【★ 異常値対策: R/R比の上限を50.0に設定】
-                 risk_reward_ratio = min(risk_reward_ratio, 50.0)
-            
-        # 【★ スコア計算ロジック - リスクウェイト強化版 + R/Rボーナス修正】
-        score = 50 # ベーススコア
-        
-        # --- 1. 構造的リスク減点 (最大-80点) ---
-        total_structural_deduction = 0
-        avg_vol_5d = last['Vol_SMA5'] if not pd.isna(last['Vol_SMA5']) else 0
-        
-        # 1-A. R/R比 不利
-        if risk_reward_ratio < 1.0: 
-             total_structural_deduction -= 25 # -25点に強化
-             
-        # 1-B. RSI極端 (戦略との整合性あり・時価総額別ウェイト適用)
-        if "🔥順張り" in strategy:
-            if info["cap"] >= 3000: # 大型株グループ: RSI >= 85を基準 (-15点)
-                if rsi_val >= 85:
-                    total_structural_deduction -= 15 
-            else: # 小型株グループ: RSI >= 80を基準 (-25点)
-                if rsi_val >= 80:
-                    total_structural_deduction -= 25 
-                    
-        elif "🌊逆張り" in strategy:
-            if rsi_val <= 20: # 逆張りはRSI <= 20で統一
-                if info["cap"] >= 3000:
-                    total_structural_deduction -= 15
-                else:
-                    total_structural_deduction -= 25
-             
-        # 1-C. 流動性不足（致命的リスク）
-        if avg_vol_5d < 1000:
-             total_structural_deduction -= 30 # -30点に強化
-             
-        # --- 4. 需給分析（発行済株式数）による追加流動性リスク減点 ---
-        liquidity_ratio_pct = 0.0
-        issued_shares = info.get("issued_shares", 0.0)
-        
-        if issued_shares > 0 and avg_vol_5d > 0:
-             liquidity_ratio_pct = (avg_vol_5d / issued_shares) * 100
-             # 流動性比率が0.05%未満（発行株の1/2000以下）を極めて低い流動性とする
-             if liquidity_ratio_pct < 0.05:
-                  total_structural_deduction -= 10 # 追加減点
-                  
-        score += total_structural_deduction
-        
-        # --- 2. 戦略/トレンド加点 (最大+45点) ---
-        # 2-A. 戦略加点 (順張りは+15に減額)
-        if "順張り" in strategy: score += 15 # +15点に減額
-        if "逆張り" in strategy: score += 10
-        
-        # 2-B. RSI適正
-        if 55 <= rsi_val <= 65: score += 10
-        
-        # 2-C. 出来高加点 (究極の出来高ロジック追加)
-        is_ultimate_volume = False
-        if vol_ratio > 1.5: 
-             score += 10 # 通常加点
-             if vol_ratio > 3.0: # 究極の出来高
-                 score += 5 # +5点追加で満点到達を可能に
-                 is_ultimate_volume = True
-        
-        # 2-D. 直近勝率
-        if up_days >= 4: score += 5
+            recent = df['Close'].diff().tail(5)
+            up_days = (recent > 0).sum()
+            win_rate_pct = (up_days / 5) * 100
+            momentum_str = f"{win_rate_pct:.0f}%"
 
-        # 【★ 2-E. R/R比ボーナス (新規追加) - 异常値抑制ロジック追加・点数強化】
-        rr_bonus = 0
-        # 想定リスクが買付水準の1%未満（分母が小さすぎ）ならボーナス無効
-        min_risk_threshold = buy_target * 0.01 
-        
-        if risk_value >= min_risk_threshold:
-            if risk_reward_ratio >= 2.0:
-                rr_bonus = 15     # ★ R/R >= 2.0 で +15点に強化
-            elif risk_reward_ratio >= 1.5:
-                rr_bonus = 5      # R/R >= 1.5 で +5点 (推奨水準)
-        
-        score += rr_bonus
-        
-        # --- 【★ 青天井モメンタムボーナス (新規追加) 】 ---
-        aoteng_bonus = 0
-        if is_aoteng and rsi_val < 80 and vol_ratio > 1.5:
-             # 条件: 青天井 AND RSIが過熱圏未満 AND 出来高活発
-             aoteng_bonus = 15 
-        score += aoteng_bonus
-        # ----------------------------------------------------
-        
-        # --- 【★ 修正: GC/DCボーナス/減点の適用 - 引け後確定を条件とする】 ---
-        # 判定条件：市場ステータスが「引け後(確定値)」である場合のみ加減点
-        is_final_cross = (status == "引け後(確定値)")
-        
-        if is_final_cross:
-            if is_gc:
-                 score += 15 # GC発生で強めのボーナス
-            elif is_dc:
-                 score -= 10 # DC発生で減点（下落トレンド転換の警戒）
-        # ----------------------------------------
-        
-        # --- 3. 個別リスク加点・減点 (DD率の連続評価とSL乖離率の強化) ---
-        is_market_alert = market_25d_ratio >= 125.0 # 市場警戒モード判定
-        
-        # 3-A. 最大DD率の評価 (連続評価導入)
-        dd_abs = abs(max_dd_pct) # DD率を絶対値で取得
-        dd_score = 0
-        
-        if dd_abs < 1.0:
-            dd_score = 5       # DD < 1.0% で +5点 (優秀)
-        elif 1.0 <= dd_abs <= 2.0:
-            dd_score = 0       # 1.0% ～ 2.0% で 0点 (許容リスク)
-        elif 2.0 < dd_abs <= 10.0:
-            # 2.0%超～10.0%まで、1%ごとに-2点 (減点強化)
-            dd_score = -int(np.floor(dd_abs - 2.0)) * 2 
-        elif dd_abs > 10.0:
-            dd_score = -20     # 10.0%超で -20点 (減点強化)
-        
-        score += dd_score
-        
-        # 3-B. SL乖離率の評価 (減点強化)
-        sl_risk_deduct = 0
-        # 青天井時はSL乖離率の評価をスキップ（動的目標が優先されるため）
-        if not is_aoteng: 
-             if sl_ma > 0 and abs(sl_pct) < 3.0: 
-                 if "順張り" in strategy: 
-                     if is_market_alert:
-                         sl_risk_deduct = -20 # 市場警戒時は-20点に強化
+            last = df.iloc[-1]
+            prev = df.iloc[-2] if len(df) >= 2 else last
+            
+            ma5 = last['SMA5'] if not pd.isna(last['SMA5']) else 0
+            ma25 = last['SMA25'] if not pd.isna(last['SMA25']) else 0
+            ma75 = last['SMA75'] if not pd.isna(last['SMA75']) else 0 
+            prev_ma5 = prev['SMA5'] if not pd.isna(prev['SMA5']) else ma5
+            prev_ma25 = prev['SMA25'] if not pd.isna(prev['SMA25']) else ma25
+            
+            high_250d = df['High'].tail(250).max() if len(df) >= 250 else 0
+
+            is_gc_raw = (ma5 > ma25) and (prev_ma5 <= prev_ma25)
+            is_dc_raw = (ma5 < ma25) and (prev_ma5 >= prev_ma25)
+            
+            # ★★★ C. GC/DCクロスの鈍感化ロジック適用 ★★★
+            ma_diff_pct = abs((ma5 - ma25) / ma25) * 100 if ma25 > 0 else 100
+            is_gc = is_gc_raw
+            is_dc = is_dc_raw
+            if ma_diff_pct < 0.1:
+                 is_gc = False
+                 is_dc = False
+            # ----------------------------------------------------
+
+            atr_val = last['ATR'] if not pd.isna(last['ATR']) else 0
+            
+            # --- 【★ 修正: ATRベースの推奨SL価格計算 - 1.5倍に変更】 ---
+            atr_sl_price = 0
+            if curr_price > 0 and atr_val > 0:
+                 atr_sl_price = curr_price - (atr_val * 1.5) 
+                 atr_sl_price = max(0, atr_sl_price)
+            # -----------------------------------------------------
+
+            # バックテスト実行
+            bt_str, bt_cnt, max_dd_pct = run_backtest(df, info["cap"]) 
+            
+            # 出来高倍率の計算
+            vol_ratio = 0
+            volume_weight = get_volume_weight(jst_now_local, info["cap"]) 
+            
+            if info.get("volume") and not pd.isna(last['Vol_SMA5']) and volume_weight > 0.0001: 
+                adjusted_vol_avg = last['Vol_SMA5'] * volume_weight
+                if adjusted_vol_avg > 0:
+                     vol_ratio = info["volume"] / adjusted_vol_avg
+            
+            rsi_val = last['RSI'] if not pd.isna(last['RSI']) else 50
+            if rsi_val <= 30: rsi_mark = "🔵"
+            elif 55 <= rsi_val <= 65: rsi_mark = "🟢"
+            elif rsi_val >= 70: rsi_mark = "🔴"
+            else: rsi_mark = "⚪"
+            
+            strategy = "様子見"; buy_target = int(ma5); p_half = 0; p_full = 0
+            is_aoteng = False; target_pct = get_target_pct(info["cap"])
+
+            # 順張り/逆張りロジック (中略)
+            if ma5 > ma25 > ma75 and ma5 > prev_ma5:
+                strategy = "🔥順張り"; buy_target = int(ma5); target_half_raw = buy_target * (1 + target_pct / 2); p_half_candidate = int(np.floor(target_half_raw)) 
+                target_full_raw = buy_target * (1 + target_pct); p_full_candidate = int(np.floor(target_full_raw))
+                
+                # ★★★ 青天井時のRR比の撤廃 ★★★
+                if high_250d > 0 and curr_price > high_250d and p_half_candidate <= curr_price:
+                     is_aoteng = True; max_high_today = df['High'].iloc[-1]; atr_trailing_price = max_high_today - (atr_val * 2.5); atr_trailing_price = max(0, atr_trailing_price)
+                     p_half = 0; p_full = int(np.floor(atr_trailing_price))
+                else: 
+                     if p_half_candidate > curr_price: p_half = p_half_candidate; p_full = p_full_candidate if p_full_candidate > p_half else p_half + 1 
+                     elif p_half_candidate <= curr_price and p_full_candidate > curr_price: p_half = 0; p_full = p_full_candidate
+                     elif p_full_candidate <= curr_price:
+                          p_full_fallback_raw = curr_price * (1 + target_pct); p_full_fallback = int(np.floor(p_full_fallback_raw))
+                          if p_full_fallback > curr_price: p_full = p_full_fallback; p_half = 0
+                          else: p_full = 0; p_half = 0
+            elif rsi_val <= 30 or (curr_price < ma25 * 0.9 if ma25 else False):
+                strategy = "🌊逆張り"; buy_target = int(curr_price); p_half_candidate = int(np.floor(ma5 - 1)) if ma5 else 0 
+                p_full_candidate = int(np.floor(ma25 - 1)) if ma25 else 0 
+                p_half = p_half_candidate if p_half_candidate > curr_price else 0; p_full = p_full_candidate if p_full_candidate > curr_price else 0
+                if p_half > 0 and p_full > 0 and p_half > p_full: p_half = p_full - 1 
+            
+            sl_pct = 0.0; sl_ma = 0
+            if strategy == "🔥順張り": sl_ma = ma25 if ma25 > 0 else (ma75 if ma75 > 0 else 0)
+            elif strategy == "🌊逆張り": sl_ma = ma75 if ma75 > 0 else (ma25 if ma25 > 0 else 0)
+            elif ma25 > 0: sl_ma = ma25
+            else: sl_ma = 0
+            if curr_price > 0 and sl_ma > 0: sl_pct = ((curr_price / sl_ma) - 1) * 100 
+            
+            risk_reward_ratio = 0.0; risk_value = 0.0
+            
+            # --- R/R比の計算修正 (目標追従時のリワード基準変更) ---
+            if buy_target > 0 and sl_ma > 0 and (p_half > 0 or is_aoteng or p_full > 0): 
+                
+                # ★★★ R/R比の計算（青天井時と目標追従時） ★★★
+                if is_aoteng:
+                     # 青天井時はR/R比を計算しない（減点・加点対象外）
+                     reward_value = 0
+                     risk_value = 1 # リスクが0でないことを保証するダミー値
+                     risk_reward_ratio = 50.0 # 減点されないように上限値をセット
                      
-        score += sl_risk_deduct
-        
-        # 【★ ATRに基づく追加リスク減点（ATR < 0.5%を低ボラとして -10点）】
-        if curr_price > 0 and atr_val > 0:
-             # ATRを終値で割ってボラティリティ比率を計算
-             atr_pct = (atr_val / curr_price) * 100
-             if atr_pct < 0.5:
-                 score -= 10 # 終値に対して0.5%未満のボラティリティを低すぎると判断し、流動性リスクとは別の減点
+                else:
+                     if p_half > 0 and p_full > 0:
+                          avg_target = (p_half + p_full) / 2
+                     elif p_full > 0 and p_half == 0:
+                          # 【修正】半益達成済み（目標追従）の場合はP_fullをリワード基準とする
+                          avg_target = p_full 
+                     else:
+                          avg_target = 0
+                          
+                     reward_value = avg_target - buy_target
+                     risk_value = buy_target - sl_ma 
+                     
+                     if risk_value > 0 and reward_value > 0:
+                          risk_reward_ratio = min(reward_value / risk_value, 50.0)
 
-        # 【★ AIスコアを点に名称変更】
-        score = max(0, min(100, score)) # 0～100点に丸める
+            # --- スコア計算の開始 ---
+            score = 50 # ベーススコア
+            
+            # --- 1. 構造的リスク減点 (最大-80点) ---
+            total_structural_deduction = 0
+            avg_vol_5d = last['Vol_SMA5'] if not pd.isna(last['Vol_SMA5']) else 0
+            
+            # 1-A. R/R比 不利
+            # ★★★ R/R比の鈍感化ロジック適用 (青天井時は減点されない) ★★★
+            if not is_aoteng:
+                 is_rr_buffer_zone = (0.95 <= risk_reward_ratio <= 1.05)
+                 if risk_reward_ratio < 1.0 and not is_rr_buffer_zone: total_structural_deduction -= 25 
+                 
+            # 1-B. RSI極端 (中略)
+            if "🔥順張り" in strategy:
+                if info["cap"] >= 3000:
+                    if rsi_val >= 85: total_structural_deduction -= 15 
+                else:
+                    if rsi_val >= 80: total_structural_deduction -= 25 
+            elif "🌊逆張り" in strategy:
+                if rsi_val <= 20: 
+                    if info["cap"] >= 3000: total_structural_deduction -= 15
+                    else: total_structural_deduction -= 25
+                 
+            # 1-C. 流動性不足（致命的リスク）(中略)
+            if avg_vol_5d < 1000: total_structural_deduction -= 30 
+            liquidity_ratio_pct = (avg_vol_5d / issued_shares) * 100 if issued_shares > 0 else 0.0
+            if liquidity_ratio_pct < 0.05: total_structural_deduction -= 10
+                  
+            score += total_structural_deduction
+            
+            # --- 2. 戦略/トレンド加点 (最大+45点) ---
+            if "順張り" in strategy: score += 15 
+            if "逆張り" in strategy: score += 10
+            if 55 <= rsi_val <= 65: score += 10
+            is_ultimate_volume = False
+            if vol_ratio > 1.5: 
+                 score += 10
+                 if vol_ratio > 3.0: score += 5; is_ultimate_volume = True
+            if up_days >= 4: score += 5
 
-        # ★★★ 修正: スコア差分を計算 (現在スコア - ベーススコア) ★★★
-        score_diff = score - base_score 
-        # ★★★ 修正ここまで ★★★
+            # 【★ 2-E. R/R比ボーナス (鈍感化ロジック適用) 】
+            rr_bonus = 0
+            min_risk_threshold = buy_target * 0.01 
+            
+            if not is_aoteng and not is_rr_buffer_zone and risk_value >= min_risk_threshold:
+                if risk_reward_ratio >= 2.0: rr_bonus = 15
+                elif risk_reward_ratio >= 1.5: rr_bonus = 5
+            score += rr_bonus
+            
+            # --- 【★ 青天井モメンタムボーナス (新規追加) 】 ---
+            aoteng_bonus = 0
+            if is_aoteng and rsi_val < 80 and vol_ratio > 1.5: aoteng_bonus = 15 
+            score += aoteng_bonus
+            
+            # --- 【★ 修正: GC/DCボーナス/減点の適用 - 引け後確定を条件とする】 ---
+            is_final_cross = (status != "場中(進行中)") # 場前(固定)と引け後(確定待ち)は確定とみなす
+            
+            if is_final_cross:
+                if is_gc: score += 15 
+                elif is_dc: score -= 10
+            
+            # --- 3. 個別リスク加点・減点 (中略) ---
+            is_market_alert = market_25d_ratio >= 125.0
+            dd_abs = abs(max_dd_pct); dd_score = 0
+            if dd_abs < 1.0: dd_score = 5
+            elif 1.0 <= dd_abs <= 2.0: dd_score = 0
+            elif 2.0 < dd_abs <= 10.0: dd_score = -int(np.floor(dd_abs - 2.0)) * 2 
+            elif dd_abs > 10.0: dd_score = -20
+            score += dd_score
+            
+            sl_risk_deduct = 0
+            if not is_aoteng: 
+                 if sl_ma > 0 and abs(sl_pct) < 3.0: 
+                     if "順張り" in strategy: 
+                         if is_market_alert: sl_risk_deduct = -20 
+            score += sl_risk_deduct
+            
+            # 【★ ATRに基づく追加リスク減点（低ボラ安定化適用）】
+            atr_pct = (atr_val / curr_price) * 100 if curr_price > 0 and atr_val > 0 else 0
+            is_low_vol_buffer_zone = (0.45 <= atr_pct <= 0.55)
+            
+            if atr_pct < 0.5 and not is_low_vol_buffer_zone: score -= 10 
+
+            current_calculated_score = max(0, min(100, score)) # 今回算出された最終スコア
+            
+            # --- 【★★★ スコア固定と差分計算のロジック (統合) ★★★】 ---
+            
+            # 1. 永続化スコアの取得
+            history = st.session_state.score_history.get(ticker, {})
+            fixed_score = history.get('final_score')
+            fixed_market_ratio_score = history.get('market_ratio_score', 0)
+            
+            score_to_return = current_calculated_score
+            score_diff = 0
+            
+            # 2. 騰落レシオの影響を分離 (この時点での騰落レシオの影響を算出)
+            is_market_alert = market_25d_ratio >= 125.0
+            current_market_deduct = -20 if is_market_alert else 0
+
+            # ロジックII (引け後〜場前) の処理
+            if status != "場中(進行中)":
+                 
+                 # 初回計算時 (前日引け後 or 今朝一番)
+                 if fixed_score is None:
+                      # 今回の計算結果をコアスコアとして永続化
+                      st.session_state.score_history[ticker] = {
+                           'final_score': current_calculated_score - current_market_deduct, # 騰落レシオ影響を除いたコアスコア
+                           'market_ratio_score': current_market_deduct # 騰落レシオの影響分
+                      }
+                      score_to_return = current_calculated_score
+                      score_diff = 0 # 初回固定時、差分はゼロ
+                 
+                 # 再計算時 (既に固定スコアが存在する場合)
+                 else:
+                      # スコアを固定値に戻し、騰落レシオの変化を差分とする
+                      score_to_return = fixed_score + current_market_deduct # コアスコア + 現在の騰落レシオ影響
+                      score_diff = current_market_deduct - fixed_market_ratio_score # 騰落レシオの変化分
+                 
+            # ロジックI (場中) の処理
+            else:
+                 # 永続化されたスコアが存在しない場合、今回のスコアを場中の基準とする
+                 if fixed_score is None:
+                      st.session_state.score_history[ticker] = {
+                           'final_score': current_calculated_score, # コアスコアを現在のスコアとする
+                           'market_ratio_score': 0 
+                      }
+                      score_to_return = current_calculated_score
+                      score_diff = 0
+                 else:
+                      # 場中の再計算時: 基準スコア (final_score + fixed_market_ratio_score) からの変動分を算出
+                      start_score = fixed_score + fixed_market_ratio_score # 場前スコアを基準とする
+                      score_diff = current_calculated_score - start_score
+                      score_to_return = current_calculated_score
+
+
+        # -----------------------------------------------------
 
         # 【★ 戻り値の追加】
         vol_disp = f"🔥{vol_ratio:.1f}倍" if vol_ratio > 1.5 else f"{vol_ratio:.1f}倍"
@@ -1156,7 +1211,7 @@ def get_stock_data(ticker, current_run_count):
             "code": ticker, "name": info["name"], "price": curr_price, "cap_val": info["cap"],
             "cap_disp": fmt_market_cap(info["cap"]), "per": info["per"], "pbr": info["pbr"],
             "rsi": rsi_val, "rsi_disp": f"{rsi_mark}{rsi_val:.1f}", "vol_ratio": vol_ratio,
-            "vol_disp": vol_disp, "momentum": momentum_str, "strategy": strategy, "score": score,
+            "vol_disp": vol_disp, "momentum": momentum_str, "strategy": strategy, "score": score_to_return,
             "buy": buy_target, "p_half": p_half, 
             "p_full": p_full, # 青天井時: ATR-SL価格
             "backtest": bt_str, 
@@ -1171,11 +1226,11 @@ def get_stock_data(ticker, current_run_count):
             "issued_shares": issued_shares, 
             "liquidity_ratio_pct": liquidity_ratio_pct, 
             "atr_val": atr_val, 
-            "is_gc": is_gc, 
-            "is_dc": is_dc, 
+            "is_gc": is_gc, # ★ 鈍感化ロジック適用済みの値
+            "is_dc": is_dc, # ★ 鈍感化ロジック適用済みの値
             "atr_sl_price": atr_sl_price, 
-            "score_diff": score_diff, # ★ 更新: スコア差分 (現在 - ベース)
-            "base_score": base_score, # ★ 新規追加: 前日終値固定のベーススコア
+            "score_diff": score_diff, # ★ 更新: スコア差分 (本日開始時からの差分)
+            "base_score": base_score, # ★ 前日終値のベーススコア
             "is_aoteng": is_aoteng, # ★ 新規追加: 青天井フラグ
             "run_count": current_run_count # ★ 新規: 分析実行回数 (セッション全体での実行回数)
         }
@@ -1196,10 +1251,18 @@ def batch_analyze_with_ai(data_list):
         
         # リスクリワード比の表示を条件付きに変更 ★ 修正
         rr_val = d.get('risk_reward', 0.0)
-        rr_disp = f"R/R:{rr_val:.1f}" if rr_val >= 0.1 else "" 
-        # R/Rが0.1未満の場合は空文字列にする
+        
+        # ★★★ R/R比の表示ロジック修正 ★★★
+        if d.get('is_aoteng'):
+             rr_disp = "青天" # 青天井時はRR比を表示せず「青天」とする
+        elif rr_val >= 0.1:
+             rr_disp = f"R/R:{rr_val:.1f}"
+        else:
+             rr_disp = "-" # 0.1未満はハイフン
+        
         if rr_disp:
              rr_disp = f" | {rr_disp}" # R/Rが存在する場合のみ区切り文字を追加
+        # ------------------------------------
 
         # 半益目標がない場合（青天井時 p_half=0 の場合）は、p_fullを基準にする
         target_price_for_pct = p_full if d.get('is_aoteng') and p_full > 0 else p_half
@@ -1224,21 +1287,21 @@ def batch_analyze_with_ai(data_list):
         avg_vol = d.get('avg_volume_5d', 0)
         
         # 1000株未満の致命的な流動性リスクをプロンプトに追加
-        low_liquidity_status = "致命的저유동성:경고(1000주 미만)" if avg_vol < 1000 else "유동성:문제 없음"
+        low_liquidity_status = "致命的低流動性:警告(1000株未満)" if avg_vol < 1000 else "流動性:問題なし"
         
         # 【★ SL目安MAの表現を「過去の支持線」に統一】
-        sl_ma_disp = f"過去の支持선MA:{sl_ma:,.0f}" if sl_ma > 0 else "지지선:없음"
+        sl_ma_disp = f"過去の支持線MA:{sl_ma:,.0f}" if sl_ma > 0 else "支持線:なし"
 
         # ★ プロンプトに流動성비율, ATR값 追加
-        liq_disp = f"유동성비율:{d.get('liquidity_ratio_pct', 0.0):.2f}%"
-        atr_disp = f"ATR:{d.get('atr_val', 0.0):.1f}엔"
+        liq_disp = f"流動性比率:{d.get('liquidity_ratio_pct', 0.0):.2f}%"
+        atr_disp = f"ATR:{d.get('atr_val', 0.0):.1f}円"
         
         # ★ GC/DC情報の追加
         gc_dc_status = ""
         if d.get("is_gc"):
-            gc_dc_status = "GC:발생"
+            gc_dc_status = "GC:発生"
         elif d.get("is_dc"):
-            gc_dc_status = "DC:발생"
+            gc_dc_status = "DC:発生"
             
         # ★ ATR SL情報の追加
         atr_sl_price = d.get('atr_sl_price', 0)
@@ -1428,8 +1491,7 @@ if analyze_start_clicked:
             # 超過がなければ、入力はクリア
             new_input_value = ""
             
-        # 2. セッションステートを更新 -> これで入力欄とメモ欄の値が更新される
-        st.session_state.tickers_input_value = new_input_value 
+        # 2. セッションステートを更新 -> この行は分析成功後に移動
 
         # ★★★ 修正箇所ここまで ★★★
         
@@ -1472,6 +1534,11 @@ if analyze_start_clicked:
             
             # ★ セッション初回実行フラグを OFF にする (初回の全銘柄分析が終わった後)
             st.session_state.is_first_session_run = False
+            
+            # ★★★ 【重要】分析が正常に終了した場合のみ入力欄をクリア/超過に置き換える ★★★
+            if raw_tickers and not st.session_state.error_messages:
+                 st.session_state.tickers_input_value = new_input_value
+            # -------------------------------------------------------------------
 
         # --- 診断完了時のフィードバック ---
         if new_analyzed_data:
@@ -1534,7 +1601,7 @@ if st.session_state.analyzed_data:
         elif "時価総額" in option: lst.sort(key=lambda x: x.get('cap_val', 0), reverse=True)
         elif "RSI順 (低い" in option: lst.sort(key=lambda x: x.get('rsi', 50))
         elif "RSI順 (高い" in option: lst.sort(key=lambda x: x.get('rsi', 50), reverse=True)
-        elif "出来高倍率" in option: lst.sort(key=lambda x: x.get('vol_ratio', 0), reverse=True) # 追加
+        elif "出来高倍率順 (高い順)" in option: lst.sort(key=lambda x: x.get('vol_ratio', 0), reverse=True) # 追加
         else: lst.sort(key=lambda x: x.get('code', ''))
     
     # ソートの実行
@@ -1618,21 +1685,42 @@ if st.session_state.analyzed_data:
             
             # R/R比の表示
             rr_ratio = d.get('risk_reward', 0.0)
-            rr_disp = f'{rr_ratio:.1f}' if rr_ratio > 0.1 else "-"
+            
+            # ★★★ R/R比の表示ロジック修正 ★★★
+            if d.get('is_aoteng'):
+                 rr_disp = "青天" 
+            elif rr_ratio >= 0.1:
+                 rr_disp = f'{rr_ratio:.1f}'
+            else:
+                 rr_disp = "-" # 0.1未満はハイフン
+            # ------------------------------------
             
             # 出来高の統合表示
             avg_vol_html = format_volume(d.get('avg_volume_5d', 0))
             
             # スコアの強調表示と差分
             current_score = d.get("score")
-            score_diff = d.get('score_diff', 0) 
+            score_diff = d.get('score_diff', 0) # 本日開始時からの差分
             
             score_disp_main = f'{current_score}'
             if current_score >= 80:
                 score_disp_main = f'<span class="score-high">{score_disp_main}</span>'
 
+            # ★★★ 表示ロジックの変更（本日始業時を±0点とする） ★★★
             diff_color = "red" if score_diff < 0 else ("#1976d2" if score_diff > 0 else "#666")
-            diff_disp = f'<span style="font-size:10px;color:{diff_color}">{score_diff:+.0f}</span>'
+            
+            # 場中以外（引け後〜場前）かつ初回実行時以外は、差分を0とする
+            if status_label != "場中(進行中)" and st.session_state.analysis_run_count > 0:
+                 # 騰落レシオの影響がscore_diffに残っているが、ユーザーに見せるのは0（または騰落レシオの差分のみ）が理想
+                 # ここでは、スコア差分が0でない場合（騰落レシオが変動した場合）のみ差分を表示するロジックを採用
+                 if abs(score_diff) > 0:
+                      diff_disp = f'<span style="font-size:10px;color:{diff_color}">{score_diff:+.0f}</span>'
+                 else:
+                      diff_disp = f'<span style="font-size:10px;color:#666">±0</span>'
+            else:
+                 # 場中 or 初回実行時は、計算された差分を表示
+                 diff_disp = f'<span style="font-size:10px;color:{diff_color}">{score_diff:+.0f}</span>'
+            # -------------------------------------------------------------------
                 
             comment_html = d.get("comment", "")
 
@@ -1647,10 +1735,10 @@ if st.session_state.analyzed_data:
             ("コード\n(更新)", "60px", "上段: 銘柄コード。下段: (更新済)は2回目以降の実行で更新された銘柄。"), 
             ("企業名", "125px", None), 
             ("時価総額", "95px", None), 
-            ("点", "35px", "上段: 総合分析点。下段: 前日終値時点のスコアからの差分。市場の変化に対するモデル整合性の変動を示します。"), 
+            ("点", "35px", "上段: 総合分析点。下段: **本日の市場開始時からの差分**（前日比ではない）。"), 
             ("分析戦略", "75px", "🔥順張り: 上昇トレンド（MA）時の押し目待ちモデル。🌊逆張り: RSI低位や長期MA乖離時の反発待ちモデル。"), 
             ("現在値", "60px", None), 
-            ("想定水準\n(乖離)", "65px", "この分析モデルが買付を「想定」するテクニカル水準。乖離は現在値との差額。売買判断はご自身の責任で行ってください。"), 
+            ("想定水準\n(乖離)", "65px", "この分析モデルが買付を「想定」するテクニカル水準。乖離は現在値との差額。売買判断はご自身の責任において行います。"), 
             ("R/R比", "40px", "想定水準から利益確定目標までの値幅を、SL MAまでの値幅で割った比率。1.0未満は-25点。"), 
             ("最大DD率\nSL乖離率", "70px", "最大DD率: 過去の同条件トレードでの最大下落率。SL乖離率: SLライン（過去の支持線）までの余地。"), 
             ("利益確定\n目標値", "120px", "時価総額別の分析リターンに基づき、利益確定の「目標値」として算出した水準。青天井時や目標超過時は動的な追従目標を表示。"), 
@@ -1659,7 +1747,7 @@ if st.session_state.analyzed_data:
             ("過去実績\n(勝敗)", "70px", "過去75日間で、「想定水準」での買付が「目標値」に到達した実績。将来の勝敗を保証するものではありません。"), 
             ("PER\nPBR", "60px", "株価収益率/株価純資産倍率。株価の相対的な評価指標。"), 
             ("直近\n勝率", "40px", "直近5日間の前日比プラスだった日数の割合。"), 
-            ("アイの所感", "min-width:350px;", None), 
+            ("アイの所感", "min-width:350px;", None),
         ]
 
         # ヘッダーHTMLの生成
