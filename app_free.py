@@ -346,10 +346,10 @@ else:
     api_key = st.sidebar.text_input("Gemini API Key", type="password")
 
 # --- 入力エリアの幅調整とクリアボタンの横並び配置 ---
-# カラムを定義: 入力エリア(幅小)、クリアボタン(幅小)、スペーサー(残りのスペース)
-col_input, col_clear_btn, col_spacer = st.columns([0.25, 0.2, 0.55]) 
+# 【修正】クリアボタンの横並びを削除し、入力エリアのみにカラムを使用
+col_input_area, col_spacer_area = st.columns([0.45, 0.55]) 
 
-with col_input:
+with col_input_area:
     # ★ 入力欄の値はセッションステートから取得/更新する
     tickers_input = st.text_area(
         f"Analysing Targets (銘柄コードを入力) - 上限{MAX_TICKERS}銘柄/回", 
@@ -358,24 +358,13 @@ with col_input:
         height=150,
         key='main_ticker_input' # Streamlitのkeyを設定
     )
-    # ★ ユーザー入力値の同期ロジック
-    if tickers_input != st.session_state.tickers_input_value:
-        st.session_state.tickers_input_value = tickers_input
-        # 【重要】入力内容が変わったら、進行中の分析をリセットする
-        st.session_state.analysis_index = 0
-        st.session_state.current_input_hash = "" # ハッシュもリセットし、次回分析時に再計算
 
-with col_clear_btn:
-    st.markdown("<div style='height: 35px;'></div>", unsafe_allow_html=True) # ★ 縦位置調整用のスペーサー
-    clear_input_clicked = st.button("📝 入力欄をクリア", use_container_width=True) # ★ 新規追加
-
-if clear_input_clicked:
-    # テキストボックスの内容を制御する変数だけをクリア
-    st.session_state.tickers_input_value = "" 
-    # 進行状況もリセット（新しい入力を行うため）
+# ★ ユーザー入力値の同期ロジック (クリアボタンの削除に伴い、ロジックを簡素化)
+if tickers_input != st.session_state.tickers_input_value:
+    st.session_state.tickers_input_value = tickers_input
+    # 【重要】入力内容が変わったら、進行中の分析をリセットする
     st.session_state.analysis_index = 0
-    st.session_state.current_input_hash = ""
-    st.rerun()
+    st.session_state.current_input_hash = "" # ハッシュもリセットし、次回分析時に再計算
 
 
 # --- 並び替えオプションに「出来高倍率順」を追加 ---
@@ -723,7 +712,7 @@ def get_base_score(ticker, df_base, info):
     df_base['TR'] = df_base[['High_Low', 'High_PrevClose', 'Low_PrevClose']].max(axis=1)
     df_base['ATR'] = df_base['TR'].rolling(14).mean()
 
-    # RSI (बेसライン用)
+    # RSI (ベースライン用)
     delta = df_base['Close'].diff()
     gain = (delta.where(delta > 0, 0)).rolling(14).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
@@ -825,7 +814,7 @@ def get_stock_data(ticker, current_run_count):
     
     info = get_stock_info(ticker) 
     
-    # 【★★★ 最終初期化ブロック：全てのローカル変数をカバー ★★★】
+    # 【★★★ 最終初期化ブロック：全てのローカル変数をカバー ★★★★】
     issued_shares = info.get("issued_shares", 0.0)
     
     # テクニカル指標と計算結果
@@ -1463,6 +1452,9 @@ if analyze_start_clicked:
     elif not input_tickers.strip():
         st.warning("銘柄コードを入力してください。")
         # 【重要】分析開始ボタンが押されたが入力がない場合、進行状況をリセットしない
+    elif st.session_state.confirm_reset:
+        # 確認ダイアログ表示中にボタンが押された場合、処理をスキップ (should not happen due to st.stop())
+        st.stop()
     else:
         
         # 1. 入力値の正規化とハッシュ計算
@@ -1475,17 +1467,14 @@ if analyze_start_clicked:
         is_input_changed = (st.session_state.current_input_hash != current_hash)
         
         # 【重要】確認ダイアログの表示条件
-        if is_input_changed and len(st.session_state.analyzed_data) > 0 and not st.session_state.confirm_reset:
+        if is_input_changed and len(st.session_state.analyzed_data) > 0:
             st.session_state.confirm_reset = True
-            # ここで処理を中断し、確認ダイアログの表示へ進む (st.rerun()の直前に処理をスキップさせる)
-        
+            st.rerun() # リロードして確認ダイアログを表示
+            
         # 3. 実行前のリセット処理
-        if st.session_state.confirm_reset:
-             # 確認ダイアログ表示中は、分析をスキップ
-             st.stop()
-        elif is_input_changed:
-             # 【修正】確認が不要な場合（analyzed_dataが空）は、ここでリセットを実行
-             st.session_state.analysis_index = 0
+        if is_input_changed:
+             # 【修正】確認ダイアログは上のブロックで処理されるため、ここでリセットを実行
+             st.session_state.analysis_index = 0 # リセット
              st.session_state.analyzed_data = [] # 過去の結果をリセット
              st.session_state.score_history = {} # スコア履歴もリセット
              st.session_state.current_input_hash = current_hash # 新しいハッシュを保存
@@ -1500,7 +1489,11 @@ if analyze_start_clicked:
         raw_tickers = all_unique_tickers[start_index:end_index] # 今回分析する銘柄リスト
         
         if not raw_tickers:
-             st.warning("⚠️ 分析すべき銘柄がありません。入力内容を確認してください。")
+             # 【追加】分析対象がなくなった場合
+             if start_index > 0:
+                  st.info("✅ すでに全銘柄の分析が完了しています。次の分析を行うには、テキストボックスの内容を変更してください。")
+             else:
+                  st.warning("⚠️ 分析すべき銘柄がありません。入力内容を確認してください。")
              st.session_state.analysis_index = 0 # 安全のためリセット
              # 処理をスキップ
              
@@ -1656,7 +1649,7 @@ if st.session_state.analyzed_data:
             code_status_disp = ''
             # update_count > 1 かつ 今回更新された銘柄のみ表示
             if update_count > 1 and d.get('is_updated_in_this_run', False):
-                 code_status_disp = '<span class="small-font-status">更新済</span>'
+                 code_status_disp = '<span style="font-size:10px; font-weight: bold; color: #ff6347;">更新済</span>'
             else:
                  # 幅を揃えるために、透明な文字をセット
                  code_status_disp = '<span style="font-size:10px; color:transparent;">更新済</span>' 
