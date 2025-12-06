@@ -347,9 +347,9 @@ else:
 
 # --- 入力エリアの幅調整とクリアボタンの横並び配置 ---
 # カラムを定義: 入力エリア(幅小)、クリアボタン(幅小)、スペーサー(残りのスペース)
-col_input_area, col_clear_btn, col_spacer = st.columns([0.45, 0.25, 0.3]) 
+col_input, col_clear_btn, col_spacer = st.columns([0.45, 0.25, 0.3]) 
 
-with col_input_area:
+with col_input:
     # ★ 入力欄の値はセッションステートから取得/更新する
     tickers_input = st.text_area(
         f"Analysing Targets (銘柄コードを入力) - 上限{MAX_TICKERS}銘柄/回", 
@@ -371,9 +371,11 @@ with col_clear_btn:
     clear_input_clicked = st.button("📝 入力欄をクリア", use_container_width=True) # ★ ボタン復活
 
 if clear_input_clicked:
-    # 【最安定ロジック】: テキストボックスの値をクリアする変数だけを操作し、即座にリロード
+    # テキストボックスの内容を制御する変数だけをクリア
     st.session_state.tickers_input_value = "" 
-    # 進行状況リセットは、クリア後の次の分析開始時に自動で行われるので、ここでは省略（簡素化）
+    # 進行状況もリセット（新しい入力を行うため）
+    st.session_state.analysis_index = 0
+    st.session_state.current_input_hash = ""
     st.rerun()
 
 
@@ -411,9 +413,13 @@ if reload_button_clicked:
     all_tickers = [d['code'] for d in st.session_state.analyzed_data]
     # st.session_state.tickers_input_value に値をセットし、valueバインドを介してテキストボックスを更新
     st.session_state.tickers_input_value = "\n".join(all_tickers)
+    
+    # 【最重要修正】ハッシュのブレを吸収するため、再分析開始時にハッシュを強制的にリセットする
+    new_hash_after_reload = hashlib.sha256(st.session_state.tickers_input_value.replace("\n", ",").encode()).hexdigest()
+    st.session_state.current_input_hash = new_hash_after_reload # ★ ハッシュを現在の入力値で強制上書き
+
     # 【重要】再分析は最初からなので、進行状況をリセット
     st.session_state.analysis_index = 0
-    st.session_state.current_input_hash = "" # ハッシュもリセット
     st.rerun()
 
 st.markdown("---") # 確認ステップとの区切り線
@@ -824,7 +830,7 @@ def get_stock_data(ticker, current_run_count):
     
     info = get_stock_info(ticker) 
     
-    # 【★★★ 最終初期化ブロック：全てのローカル変数をカバー ★★★★】
+    # 【★★★ 最終初期化ブロック：全てのローカル変数をカバー ★★★】
     issued_shares = info.get("issued_shares", 0.0)
     
     # テクニカル指標と計算結果
@@ -1735,7 +1741,7 @@ if st.session_state.analyzed_data:
                  else:
                       diff_disp = f'<span style="font-size:10px;color:#666">±0</span>'
             else:
-                 # 場中 or 初回実行時は、計算された差分を表示
+                 # 場中 or 初回実行時は、計算された差分を異表示
                  diff_disp = f'<span style="font-size:10px;color:{diff_color}">{score_diff:+.0f}</span>'
             # -------------------------------------------------------------------
                 
