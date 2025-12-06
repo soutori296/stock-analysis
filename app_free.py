@@ -42,6 +42,7 @@ if 'analysis_run_count' not in st.session_state:
 if 'is_first_session_run' not in st.session_state:
     st.session_state.is_first_session_run = True # ★ 新規: セッション開始後の初回実行フラグ
 if 'main_ticker_input' not in st.session_state: 
+    # main_ticker_input は st.text_area のキーとしてのみ使用し、直接は操作しない
     st.session_state.main_ticker_input = "" 
     
 # 【★ 進行状況管理用の新規セッションステート】
@@ -344,28 +345,24 @@ with st.expander("📘 取扱説明書 (データ仕様・判定基準)"):
 
 
 # --- コールバック関数定義 ---
-# ★ コールバック関数を修正・整理
-
 def clear_input_only_logic():
     """入力欄のみをクリアし、進行状況をリセットする"""
-    # ★ 修正: main_ticker_inputへの直接代入を削除
+    # ★ 修正: tickers_input_value のみをクリア
     st.session_state.tickers_input_value = "" 
     # 進行状況リセット
     st.session_state.analysis_index = 0
     st.session_state.current_input_hash = ""
-    # st.rerun() # コールバック内からはst.rerun()を呼ばず、ボタン検知後に実行
 
 def clear_all_data_confirm():
     """全ての結果と入力をクリアし、確認ダイアログを表示する"""
     st.session_state.clear_confirmed = True
-    # st.rerun() # コールバック内からはst.rerun()を呼ばず、ボタン検知後に実行
 
 def reanalyze_all_data_logic():
     """全分析銘柄をテキストボックスに再投入し、再分析の準備をする"""
     all_tickers = [d['code'] for d in st.session_state.analyzed_data]
     new_input_value = "\n".join(all_tickers)
     
-    # ★ 修正: main_ticker_inputへの直接代入を削除
+    # ★ 修正: tickers_input_value に値をセット
     st.session_state.tickers_input_value = new_input_value
     
     # ハッシュを強制的にリセット（再投入された全銘柄が新しい分析対象となる）
@@ -374,7 +371,6 @@ def reanalyze_all_data_logic():
 
     # 進行状況をリセット
     st.session_state.analysis_index = 0
-    # st.rerun() # コールバック内からはst.rerun()を呼ばず、ボタン検知後に実行
 # --- コールバック関数定義ここまで ---
 
 
@@ -389,7 +385,7 @@ with st.sidebar:
     else:
         api_key = st.text_input("Gemini API Key", type="password")
 
-    st.markdown("---") 
+    st.markdown("---") # ★ 水平線
     
     # 2. 銘柄コード入力エリア
     # ★ 入力欄の値はセッションステートから取得/更新する (高さ調整)
@@ -402,13 +398,13 @@ with st.sidebar:
     )
     
     # ★ ユーザー入力値の同期ロジック
+    # テキストエリアの値が変更されたら、セッションステートを更新し、進行状況をリセット
     if tickers_input != st.session_state.tickers_input_value:
         st.session_state.tickers_input_value = tickers_input
-        # 【重要】入力内容が変わったら、進行中の分析をリセットする
         st.session_state.analysis_index = 0
-        st.session_state.current_input_hash = "" # ハッシュもリセットし、次回分析時に再計算
+        st.session_state.current_input_hash = "" 
 
-    # 3. ソート選択ボックス (★ レイアウト変更: テキストボックスのすぐ下に配置)
+    # 3. ソート選択ボックス (★ レイアウト変更)
     sort_options = [
         "スコア順 (高い順)", "更新回数順", "時価総額順 (高い順)", 
         "RSI順 (低い順)", "RSI順 (高い順)", "出来高倍率順 (高い順)",
@@ -430,23 +426,26 @@ with st.sidebar:
     # 【4-1. 分析開始ボタン】(最重要)
     analyze_start_clicked = st.button("🚀 分析開始", use_container_width=True, disabled=st.session_state.clear_confirmed) 
     
+    # 【4-2. 入力欄をクリア】
+    # ★ on_click でロジックを実行し、次に st.rerun() でクリア後の状態を反映させる
+    clear_input_clicked = st.button("📝 入力欄をクリア", on_click=clear_input_only_logic, use_container_width=True) 
+    
     # 横並びのボタン
     col1, col2 = st.columns(2) 
 
-    # 【4-2. 入力欄をクリア】
-    clear_input_clicked = col1.button("📝 入力欄をクリア", on_click=clear_input_only_logic, use_container_width=True) 
-
     # 【4-3. 結果を消去ボタン】
-    clear_button_clicked = col2.button("🗑️ 結果を消去", on_click=clear_all_data_confirm, use_container_width=True)
+    clear_button_clicked = col1.button("🗑️ 結果を消去", on_click=clear_all_data_confirm, use_container_width=True)
 
     # 【4-4. 再投入ボタン】
     is_reload_disabled = not st.session_state.analyzed_data
-    reload_button_clicked = st.button("🔄 結果を再分析", on_click=reanalyze_all_data_logic, use_container_width=True, disabled=is_reload_disabled)
+    # ★ on_click でロジックを実行し、次に st.rerun() で再投入後の状態を反映させる
+    reload_button_clicked = col2.button("🔄 結果を再分析", on_click=reanalyze_all_data_logic, use_container_width=True, disabled=is_reload_disabled)
 
 
 # --- ボタンの実行ロジック (メインスコープでの処理) ---
 
 # ★ コールバックで更新されたステートを反映するため、ここでst.rerun()を呼ぶ
+# いずれかのボタンがクリックされたら再実行
 if clear_input_clicked or clear_button_clicked or reload_button_clicked:
     st.rerun() 
 # --- ボタン縦並びと確認ダイアログのロジック ---
@@ -468,7 +467,7 @@ if st.session_state.clear_confirmed:
         st.session_state.analysis_run_count = 0 # ★ リセット
         st.session_state.is_first_session_run = True # ★ リセット
         st.session_state.score_history = {} # ★ リセット
-        # ★ エラー回避のため、main_ticker_inputへの直接代入を削除
+        # ★ 修正: tickers_input_value のみをクリア
         st.session_state.tickers_input_value = "" 
         st.session_state.analysis_index = 0 # ★ リセット
         st.session_state.current_input_hash = "" # ★ リセット
@@ -1607,6 +1606,7 @@ if analyze_start_clicked:
                  # 【修正】分析完了。テキストボックスをクリア
                  st.success(f"🎉 全{total_tickers}銘柄の分析が完了しました。")
                  # テキストボックスを空にする (session_state経由でテキストエリアに反映)
+                 # ★ 修正: tickers_input_value のみをクリア
                  st.session_state.tickers_input_value = "" 
                  st.session_state.analysis_index = 0 # 進行状況をリセット
                  
