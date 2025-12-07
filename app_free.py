@@ -406,7 +406,8 @@ def fmt_market_cap(val):
     except:
         return "-"
 
-@st.cache_data(ttl=300) 
+# ★ 修正: ttl を 1秒 に一時的に変更してキャッシュをクリア
+@st.cache_data(ttl=1) 
 def get_stock_info(code):
     url = f"https://kabutan.jp/stock/?code={code}"
     headers = {"User-Agent": "Mozilla/5.0"}
@@ -531,7 +532,8 @@ def run_backtest(df, market_cap):
     except Exception:
         return "計算エラー", 0, 0.0
 
-@st.cache_data(ttl=300) 
+# ★ 修正: ttl を 1秒 に一時的に変更してキャッシュをクリア
+@st.cache_data(ttl=1) 
 def get_base_score(ticker, df_base, info):
     if len(df_base) < 80: return 50 
 
@@ -582,7 +584,8 @@ def get_base_score(ticker, df_base, info):
     return score_b
 
 
-@st.cache_data(ttl=300) 
+# ★ 修正: ttl を 1秒 に一時的に変更してキャッシュをクリア
+@st.cache_data(ttl=1) 
 def get_stock_data(ticker, current_run_count):
     status, jst_now_local = get_market_status() 
     ticker = str(ticker).strip().replace(".T", "").upper()
@@ -851,6 +854,10 @@ def batch_analyze_with_ai(data_list):
         if d.get("is_gc"): gc_dc_status = "GC:発生"
         elif d.get("is_dc"): gc_dc_status = "DC:発生"
 
+        liq_disp = f"流動性比率:{d.get('liquidity_ratio_pct', 0.0):.2f}%" # リスク情報セクションに追加
+        atr_disp = f"ATR:{d.get('atr_val', 0.0):.1f}円" # リスク情報セクションに追加
+
+
         prompt_text += f"ID:{d['code']} | {d['name']} | 現在:{price:,.0f} | 分析戦略:{d['strategy']} | RSI:{d['rsi']:.1f} | 5MA乖離率:{ma_div:+.1f}%{rr_disp} | 出来高倍率:{d['vol_ratio']:.1f}倍 | リスク情報: MDD:{mdd:+.1f}%, SL乖離率:{sl_pct:+.1f}% | {sl_ma_disp} | {low_liquidity_status} | {liq_disp} | {atr_disp} | {gc_dc_status} | {atr_sl_disp} | {target_info} | 総合分析点:{d['score']}\n" 
 
     r25 = market_25d_ratio
@@ -858,12 +865,6 @@ def batch_analyze_with_ai(data_list):
     if r25 >= 125.0: market_alert_info += "市場は【明確な過熱ゾーン】にあり、全体的な調整リスクが非常に高いです。"
     elif r25 <= 80.0: market_alert_info += "市場は【明確な底値ゾーン】にあり、全体的な反発期待が高いです。"
     else: market_alert_info += "市場の過熱感は中立的です。"
-    
-    # ★ 修正: プロンプト内の {sl_ma_disp} と {atr_sl_disp} はプロンプト全体で参照されていないため、
-    # プロンプトのテンプレートを安全なものに戻します（前のバージョンでエスケープされていたため）。
-    # 代わりに、変数sl_ma_disp, atr_sl_dispをプロンプト内では参照しないように修正。
-    # 撤退基準の箇所は、プロンプト内で直接参照されることがないため、プレースホルダを削除し、
-    # 指示文を固定の指示文に置き換えることで、UnboundLocalErrorを回避します。
     
     prompt = f"""あなたは「アイ」という名前のプロトレーダー（30代女性、冷静・理知的）。以下の【市場環境】と【銘柄リスト】に基づき、それぞれの「所感コメント（丁寧語）」を【生成コメントの原則】に従って作成してください。
 【市場環境】{market_alert_info}
