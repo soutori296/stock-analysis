@@ -852,8 +852,8 @@ def batch_analyze_with_ai(data_list):
         if d.get("is_gc"): gc_dc_status = "GC:発生"
         elif d.get("is_dc"): gc_dc_status = "DC:発生"
 
-        liq_disp = f"流動性比率:{d.get('liquidity_ratio_pct', 0.0):.2f}%"
-        atr_disp = f"ATR:{d.get('atr_val', 0.0):.1f}円"
+        liq_disp = f"流動性比率:{d.get('liquidity_ratio_pct', 0.0):.2f}%" 
+        atr_disp = f"ATR:{d.get('atr_val', 0.0):.1f}円" 
 
         prompt_text += f"ID:{d['code']} | {d['name']} | 現在:{price:,.0f} | 分析戦略:{d['strategy']} | RSI:{d['rsi']:.1f} | 5MA乖離率:{ma_div:+.1f}%{rr_disp} | 出来高倍率:{d['vol_ratio']:.1f}倍 | リスク情報: MDD:{mdd:+.1f}%, SL乖離率:{sl_pct:+.1f}% | {sl_ma_disp} | {low_liquidity_status} | {liq_disp} | {atr_disp} | {gc_dc_status} | {atr_sl_disp} | {target_info} | 総合分析点:{d['score']}\n" 
 
@@ -1017,16 +1017,29 @@ if analyze_start_clicked:
 
         
 # --- 表示 ---
+# ★★★ デバッグ情報: analyzed_dataの存在を強制的に表示 ★★★
+st.markdown("---")
+st.markdown("### 🔍 デバッグ情報")
+
 if st.session_state.analyzed_data:
-    
-    # ★★★ デバッグ情報: データがセッションに存在することを確認 ★★★
-    st.info(f"✅ デバッグ情報: analyzed_dataに{len(st.session_state.analyzed_data)}件のデータが存在します。")
-    if st.session_state.tickers_input_value:
-         st.warning(f"⚠️ デバッグ情報: tickers_input_value にはまだ値があります: {st.session_state.tickers_input_value}")
-    else:
-         st.success("✅ デバッグ情報: tickers_input_value は空です。")
-    # ★★★ デバッグ情報ここまで ★★★
-    
+    st.success(f"✅ analyzed_dataには {len(st.session_state.analyzed_data)} 件のデータが存在します。テーブルが表示されない場合は、表示CSSの問題の可能性があります。")
+    st.dataframe(pd.DataFrame(st.session_state.analyzed_data)) # データの中身を強制表示
+else:
+    st.warning("⚠️ analyzed_dataは空です。データ取得に失敗したか、分析対象銘柄がありません。")
+
+if st.session_state.error_messages:
+    st.error("❌ エラーメッセージがセッションに存在します。詳細を展開して確認してください。")
+    with st.expander("詳細なエラーメッセージ"):
+        for msg in st.session_state.error_messages:
+             st.markdown(f'<p style="color: red; margin-left: 20px;">- {msg}</p>', unsafe_allow_html=True)
+else:
+     st.info("ℹ️ エラーメッセージは空です。")
+     
+st.markdown("---")
+# ★★★ デバッグ情報ここまで ★★★
+
+
+if st.session_state.analyzed_data:
     data = st.session_state.analyzed_data
     
     rec_data = [d for d in data if d['strategy'] != "様子見" and d['score'] >= 50]
