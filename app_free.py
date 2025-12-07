@@ -825,7 +825,6 @@ def get_stock_data(ticker, current_run_count):
         return None
 
 def batch_analyze_with_ai(data_list):
-    # ★ 修正: コメント生成ロジックの安定化
     if not model: return {}, "⚠️ AIモデルが設定されていません。APIキーを確認してください。"
     prompt_text = ""
     for d in data_list:
@@ -845,7 +844,6 @@ def batch_analyze_with_ai(data_list):
         mdd = d.get('max_dd_pct', 0.0); sl_pct = d.get('sl_pct', 0.0); sl_ma = d.get('sl_ma', 0); avg_vol = d.get('avg_volume_5d', 0)
         low_liquidity_status = "致命的低流動性:警告(1000株未満)" if avg_vol < 1000 else "流動性:問題なし"
         
-        # ★★★ 修正: sl_ma_disp と atr_sl_disp の初期化/計算ロジックを安全化 ★★★
         sl_ma_disp = f"過去の支持線MA:{sl_ma:,.0f}" if sl_ma > 0 else "支持線:不明" 
         atr_sl_price = d.get('atr_sl_price', 0)
         atr_sl_disp = f"ATR_SL:{atr_sl_price:,.0f}" if atr_sl_price > 0 else "ATR_SL:不明"
@@ -854,9 +852,8 @@ def batch_analyze_with_ai(data_list):
         if d.get("is_gc"): gc_dc_status = "GC:発生"
         elif d.get("is_dc"): gc_dc_status = "DC:発生"
 
-        liq_disp = f"流動性比率:{d.get('liquidity_ratio_pct', 0.0):.2f}%" # リスク情報セクションに追加
-        atr_disp = f"ATR:{d.get('atr_val', 0.0):.1f}円" # リスク情報セクションに追加
-
+        liq_disp = f"流動性比率:{d.get('liquidity_ratio_pct', 0.0):.2f}%"
+        atr_disp = f"ATR:{d.get('atr_val', 0.0):.1f}円"
 
         prompt_text += f"ID:{d['code']} | {d['name']} | 現在:{price:,.0f} | 分析戦略:{d['strategy']} | RSI:{d['rsi']:.1f} | 5MA乖離率:{ma_div:+.1f}%{rr_disp} | 出来高倍率:{d['vol_ratio']:.1f}倍 | リスク情報: MDD:{mdd:+.1f}%, SL乖離率:{sl_pct:+.1f}% | {sl_ma_disp} | {low_liquidity_status} | {liq_disp} | {atr_disp} | {gc_dc_status} | {atr_sl_disp} | {target_info} | 総合分析点:{d['score']}\n" 
 
@@ -1021,6 +1018,15 @@ if analyze_start_clicked:
         
 # --- 表示 ---
 if st.session_state.analyzed_data:
+    
+    # ★★★ デバッグ情報: データがセッションに存在することを確認 ★★★
+    st.info(f"✅ デバッグ情報: analyzed_dataに{len(st.session_state.analyzed_data)}件のデータが存在します。")
+    if st.session_state.tickers_input_value:
+         st.warning(f"⚠️ デバッグ情報: tickers_input_value にはまだ値があります: {st.session_state.tickers_input_value}")
+    else:
+         st.success("✅ デバッグ情報: tickers_input_value は空です。")
+    # ★★★ デバッグ情報ここまで ★★★
+    
     data = st.session_state.analyzed_data
     
     rec_data = [d for d in data if d['strategy'] != "様子見" and d['score'] >= 50]
