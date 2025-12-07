@@ -78,7 +78,6 @@ status_label, jst_now = get_market_status()
 status_color = "#d32f2f" if "進行中" in status_label else "#1976d2"
 
 # --- 出来高調整ウェイト（時価総額別ロジック） ---
-# ... (WEIGHT_MODELS と get_volume_weight の定義は省略) ...
 WEIGHT_MODELS = {
     "large": {
         (9 * 60 + 0): 0.00, (9 * 60 + 30): 0.25, (10 * 60 + 0): 0.30, (11 * 60 + 30): 0.50, 
@@ -480,7 +479,6 @@ def get_25day_ratio():
             return ratio_val
         return default_ratio
     except Exception:
-        # エラー発生時もデフォルト値を返し、StreamlitAPIException を回避
         return default_ratio
 
 market_25d_ratio = get_25day_ratio()
@@ -680,7 +678,18 @@ def get_stock_data(ticker, current_run_count):
             adjusted_vol_avg = last['Vol_SMA5'] * volume_weight
             if adjusted_vol_avg > 0: vol_ratio = info["volume"] / adjusted_vol_avg
         rsi_val = last['RSI'] if not pd.isna(last['RSI']) else 50
-        if rsi_val <= 30: rsi_mark = "🔵"; elif 55 <= rsi_val <= 65: rsi_mark = "🟢"; elif rsi_val >= 70: rsi_mark = "🔴"; else: rsi_mark = "⚪"
+        
+        # ★★★ 修正箇所: rsi_mark の割り当てロジックを修正 ★★★
+        if rsi_val <= 30: 
+            rsi_mark = "🔵"
+        elif 55 <= rsi_val <= 65: 
+            rsi_mark = "🟢"
+        elif rsi_val >= 70: 
+            rsi_mark = "🔴"
+        else: 
+            rsi_mark = "⚪"
+        # ★★★ 修正箇所ここまで ★★★
+            
         strategy, buy_target, p_half, p_full = "様子見", int(ma5), 0, 0
         is_aoteng = False; target_pct = get_target_pct(info["cap"])
         if ma5 > ma25 > ma75 and ma5 > prev_ma5:
@@ -848,7 +857,6 @@ def batch_analyze_with_ai(data_list):
     elif r25 <= 80.0: market_alert_info += "市場は【明確な底値ゾーン】にあり、全体的な反発期待が高いです。"
     else: market_alert_info += "市場の過熱感は中立的です。"
     
-    # ★ 修正: プロンプト内の {{}} を適切にエスケープし、改行を削除してプロンプトの長さを制限
     prompt = f"""あなたは「アイ」という名前のプロトレーダー（30代女性、冷静・理知的）。以下の【市場環境】と【銘柄リスト】に基づき、それぞれの「所感コメント（丁寧語）」を【生成コメントの原則】に従って作成してください。
 【市場環境】{market_alert_info}
 【生成コメントの原則（厳守）】1. <b>Markdownの太字（**）は絶対に使用せず、HTMLの太字（<b>）のみをコメント内で使用してください。</b>2. <b>表現の多様性を最重視してください。</b>紋切り型な文章は厳禁です。3. <b>コメントの先頭に、必ず「<b>[銘柄名]</b>｜」というプレフィックスを挿入してください。</b>4. <b>最大文字数の厳守：全てのコメント（プレフィックス含む）は最大でも150文字とします。この150文字制限は、プレフィックスを含めた全体の文字数です。</b>投資助言と誤解される表現、特に「最終的な売買判断は、ご自身の分析とリスク許容度に基づいて行うことが重要です。」という定型文は、<b>全てのコメントから完全に削除してください。</b>具体的な行動（「買い」「売り」など）を促す表現は厳禁です。5. <b>総合分析点に応じた文章量とトーンを厳格に調整してください。</b>（プレフィックスの文字数も考慮し、制限を厳しくします）- 総合分析点 85点以上 (超高評価): 80文字〜145文字程度。客観的な事実と技術的な評価のみに言及し、期待感を示す言葉や断定的な表現は厳禁とする。- 総合分析点 75点 (高評価): 70文字〜110文字程度。分析上の結果と客観的なデータ提示に留める。- 総合分析点 65点以下 (中立/様子見): 50文字〜70文字程度。リスクと慎重な姿勢を強調してください。6. 市場環境が【明確な過熱ゾーン】の場合、全てのコメントのトーンを控えめにし、「市場全体が過熱しているため、この銘柄にも調整が入るリスクがある」といった<b>強い警戒感</b>を盛り込んでください。7. 戦略の根拠、RSIの状態（極端な減点があったか否か）、出来高倍率（1.5倍超）、およびR/R比（1.0未満の不利、2.0超の有利など）を必ず具体的に盛り込んでください。8. <b>GC:発生またはDC:発生の銘柄については、コメント内で必ずその事実に言及し、トレンド転換の可能性を慎重に伝えてください。</b>9. 【リスク情報と撤退基準】- リスク情報（MDD、SL乖離率）を参照し、リスク管理の重要性に言及してください。MDDが-8.0%を超える場合は、「過去の最大下落リスクが高いデータ」がある旨を明確に伝えてください。- 流動性: 致命的低流動性:警告(1000株未満)の銘柄については、コメントの冒頭（プレフィックスの次）で「平均出来高が1,000株未満と極めて低く、希望価格での売買が困難な<b>流動性リスク</b>を伴います。ご自身の資金規模に応じたロット調整をご検討ください。」といった<b>明確な警告</b>を必ず含めてください。- 新規追加: 極端な低流動性 (流動性比率 < 0.05% や ATR < 0.5% の場合) についても、同様に<b>明確な警告</b>を盛り込んでください。- 撤退基準: コメントの末尾で、<b>SL目安MA（構造的崩壊の支持線：{sl_ma_disp}）</b>を終値で明確に割り込む場合と、<b>ATRに基づくボラティリティ水準（急落・ノイズ逸脱の基準：{atr_sl_disp}）</b>を終値で明確に下回る場合を、**両方とも**、具体的な価格を付記して言及してください。（例: 撤退基準はMA支持線（X円）またはATR水準（Y円）です。）- **青天井領域の追記:** ターゲット情報が「青天井追従」または「追従目標」の場合、**「利益目標は固定目標ではなく、動的なATRトレーリング・ストップ（X円）に切り替わっています。この価格を終値で下回った場合は、利益を確保するための撤退を検討します。」**という趣旨を、コメントの適切な位置に含めてください。- 強調表現の制限: 総合分析点85点以上の銘柄コメントに限り、全体の5%の割合（例: 20銘柄中1つ程度）で、特に重要な部分（例：出来高増加の事実、高い整合性）を1箇所（10文字以内）に限り、<b>赤太字のHTMLタグ（<span style="color:red;">...</span>）</b>を使用して強調しても良い。それ以外のコメントでは赤太字を絶対に使用しないでください。
@@ -884,12 +892,10 @@ def batch_analyze_with_ai(data_list):
             elif "|" not in line and line.strip().startswith('総合分析点'): continue
         return comments, monologue
     except Exception as e:
-        # ★ 修正: エラーメッセージに詳細を含めて、デバッグを支援
         st.session_state.error_messages.append(f"AI分析エラー: Geminiモデルからの応答解析に失敗しました。詳細: {e}。プロンプトが長すぎるか、API側の問題の可能性があります。")
         return {}, "コメント生成エラー"
 
 def merge_new_data(new_data_list):
-    # ... (merge_new_data の定義は元のコードと同一) ...
     existing_map = {d['code']: d for d in st.session_state.analyzed_data}
     for d in existing_map.values():
         if 'is_updated_in_this_run' in d: d['is_updated_in_this_run'] = False
@@ -978,7 +984,6 @@ if analyze_start_clicked:
             # 8. 完了判定とテキストボックスのクリア (★ 修正箇所)
             if end_index >= total_tickers:
                  st.success(f"🎉 全{total_tickers}銘柄の分析が完了しました。")
-                 # ★ 完了時に入力欄をクリア
                  st.session_state.tickers_input_value = "" 
                  st.session_state.analysis_index = 0 
             elif new_analyzed_data:
