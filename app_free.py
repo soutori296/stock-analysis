@@ -38,7 +38,7 @@ if 'analysis_run_count' not in st.session_state:
 if 'is_first_session_run' not in st.session_state:
     st.session_state.is_first_session_run = True 
 if 'main_ticker_input' not in st.session_state: 
-    st.session_state.main_ticker_input = "" 
+    st.session_state.main_ticker_input = "" # ★ テキストエリアのkeyとして使われているため、再分析時に更新が必要
     
 # 【★ 進行状況管理用の新規セッションステート】
 if 'analysis_index' not in st.session_state:
@@ -47,6 +47,10 @@ if 'current_input_hash' not in st.session_state:
     st.session_state.current_input_hash = "" 
 if 'sort_option_key' not in st.session_state: 
     st.session_state.sort_option_key = "スコア順 (高い順)" 
+    
+# 【★ モデル選択用の新規セッションステート】
+if 'selected_model_name' not in st.session_state:
+    st.session_state.selected_model_name = "gemini-2.5-flash" # 初期値
 
     
 # 【★ スコア変動の永続化用データ構造の初期化】
@@ -292,6 +296,8 @@ def reanalyze_all_data_logic():
     
     # 1. 入力欄に全銘柄を再投入
     st.session_state.tickers_input_value = new_input_value
+    # ★ 修正: st.text_areaのkeyに設定されているセッションステートも更新
+    st.session_state.main_ticker_input = new_input_value 
     
     # 2. ハッシュと進行状況をリセット（次の分析で新しい分析として走るように）
     new_hash_after_reload = hashlib.sha256(new_input_value.replace("\n", ",").encode()).hexdigest()
@@ -313,6 +319,20 @@ with st.sidebar:
 
     st.markdown("---") 
     
+    # 【新規追加】AIモデル選択ボックス
+    model_options = [
+        "gemini-2.5-flash", 
+        "gemma-3-12b-it",
+        "gemini-1.5-flash"
+    ]
+    st.session_state.selected_model_name = st.selectbox(
+        "🤖 使用AIモデルを選択", 
+        options=model_options, 
+        index=model_options.index(st.session_state.selected_model_name) if st.session_state.selected_model_name in model_options else 0,
+        key='model_select_key' 
+    )
+    st.markdown("---") 
+
     # 2. ソート選択ボックス (★ レイアウト変更: テキストボックスの上に配置)
     sort_options = [
         "スコア順 (高い順)", "更新回数順", "時価総額順 (高い順)", 
@@ -329,18 +349,20 @@ with st.sidebar:
     )
 
     # 3. 銘柄コード入力エリア
+    # key='main_ticker_input' でウィジェットの状態が管理される。
     tickers_input = st.text_area(
         f"Analysing Targets (銘柄コードを入力) - 上限{MAX_TICKERS}銘柄/回", 
-        value=st.session_state.tickers_input_value, 
+        value=st.session_state.tickers_input_value, # 初回描画/Rerun時のデフォルト値
         placeholder="例:\n7203\n8306\n9984",
         height=150,
-        key='main_ticker_input' 
+        key='main_ticker_input' # ウィジェットの状態を管理するキー
     )
     
     # ★ ユーザー入力値の同期ロジック (追記・上書きに最適化)
-    # テキストエリアの値が変更されたら、セッションステートを更新し、進行状況をリセット
+    # ユーザーがUI上のテキストエリアを操作したとき、session_stateの管理用変数を更新
     if tickers_input != st.session_state.tickers_input_value:
         st.session_state.tickers_input_value = tickers_input
+        # 入力内容が変わったので、進行状況をリセット
         st.session_state.analysis_index = 0
         st.session_state.current_input_hash = "" 
 
@@ -382,6 +404,7 @@ if st.session_state.clear_confirmed:
         st.session_state.is_first_session_run = True 
         st.session_state.score_history = {} 
         st.session_state.tickers_input_value = "" 
+        st.session_state.main_ticker_input = "" # ★ main_ticker_inputもクリア
         st.session_state.analysis_index = 0 
         st.session_state.current_input_hash = "" 
         st.rerun() 
@@ -712,7 +735,8 @@ def get_stock_data(ticker, current_run_count):
             target_full_raw = buy_target * (1 + target_pct); p_full_candidate = int(np.floor(target_full_raw))
             if high_250d > 0 and curr_price > high_250d and p_half_candidate <= curr_price:
                  is_aoteng = True; max_high_today = df['High'].iloc[-1]; atr_trailing_price = max_high_today - (atr_val * 2.5); atr_trailing_price = max(0, atr_trailing_price)
-                 p_half, p_full = 0, int(np.floor(atr_trailing_price))
+                 p_full = int(np.floor(atr_trailing_price)) # SLとして使用
+                 p_half = 0 # 青天井領域ではハーフ目標は無効
             else: 
                  if p_half_candidate > curr_price: p_half, p_full = p_half_candidate, p_full_candidate if p_full_candidate > p_half else p_half + 1 
                  elif p_half_candidate <= curr_price and p_full_candidate > curr_price: p_half, p_full = 0, p_full_candidate
@@ -736,7 +760,14 @@ def get_stock_data(ticker, current_run_count):
             
         risk_reward_ratio, risk_value = 0.0, 0.0
         if buy_target > 0 and sl_ma > 0 and (p_half > 0 or is_aoteng or p_full > 0): 
-            if is_aoteng: reward_value, risk_value, risk_reward_ratio = 0, 1, 50.0 
+            if is_aoteng: 
+                risk_value_raw = buy_target - sl_ma # 順張り想定水準とSL MAの差
+                if risk_value_raw > 0: 
+                    risk_reward_ratio = 50.0 # 青天井時は高評価として固定
+                    risk_value = risk_value_raw
+                else:
+                    risk_reward_ratio = 0.0
+                    risk_value = 0.0
             else:
                  avg_target = (p_half + p_full) / 2 if p_half > 0 and p_full > 0 else (p_full if p_full > 0 and p_half == 0 else 0)
                  reward_value = avg_target - buy_target; risk_value = buy_target - sl_ma 
@@ -836,7 +867,10 @@ def get_stock_data(ticker, current_run_count):
         return None
 
 def batch_analyze_with_ai(data_list):
-    if not model: return {}, "⚠️ AIモデルが設定されていません。APIキーを確認してください。"
+    # ★ 選択されたモデルを使用
+    model_name = st.session_state.selected_model_name
+    
+    if not model: return {}, f"⚠️ AIモデル ({model_name}) が設定されていません。APIキーを確認してください。"
     prompt_text = ""
     for d in data_list:
         price = d['price'] if d['price'] is not None else 0
@@ -845,11 +879,11 @@ def batch_analyze_with_ai(data_list):
         elif rr_val >= 0.1: rr_disp = f"R/R:{rr_val:.1f}"
         else: rr_disp = "-" 
         if rr_disp: rr_disp = f" | {rr_disp}" 
-        target_price_for_pct = p_full if d.get('is_aoteng') and p_full > 0 else p_half
+        target_price_for_pct = p_full if d.get('is_aoteng') and p_full > 0 else (p_half if p_half > 0 else p_full)
         target_info = "利確目標:無効"
         if price > 0 and target_price_for_pct > 0: target_info = f"利確目標(半):{((target_price_for_pct / price) - 1) * 100:+.1f}%"
         if d.get('is_aoteng'): target_info = f"利確目標:青天井追従/SL:{p_full:,.0f}円"
-        elif p_half == 0 and d['strategy'] == "🔥順張り" and p_full > 0: target_info = f"利確目標:追従目標/SL:{p_full:,.0f}円" 
+        elif p_half == 0 and d['strategy'] == "🔥順張り" and p_full > 0: target_info = f"利確目標:追従目標/全:{p_full:,.0f}円" 
         elif p_half == 0 and d['strategy'] == "🔥順張り": target_info = "利確目標:目標超過/無効"
         buy_target = d.get('buy', 0); ma_div = (price/buy_target-1)*100 if buy_target > 0 and price > 0 else 0
         mdd = d.get('max_dd_pct', 0.0); sl_pct = d.get('sl_pct', 0.0); sl_ma = d.get('sl_ma', 0); avg_vol = d.get('avg_volume_5d', 0)
@@ -882,6 +916,7 @@ def batch_analyze_with_ai(data_list):
 【最後に】リストの最後に「END_OF_LIST」と書き、その後に続けて「アイの独り言（常体・独白調）」を1行で書いてください。語尾に「ね」や「だわ」などはしないこと。※見出し不要。独り言は、市場25日騰落レシオ({r25:.2f}%)を総括し、規律ある撤退の重要性に言及する。
 """
     try:
+        # ★ 選択されたモデルでコンテンツを生成
         res = model.generate_content(prompt)
         text = res.text
         comments = {}; monologue = ""
@@ -926,9 +961,8 @@ def merge_new_data(new_data_list):
     st.session_state.analyzed_data = list(existing_map.values())
 
 
-#model_name = 'gemini-flash-latest'
-model_name = 'gemma-3-12b-it'
-#model_name = 'gemini-2.5-flash'
+# ★ モデル名をセッションステートから取得するように変更
+model_name = st.session_state.selected_model_name
 
 model = None
 if api_key:
@@ -1005,6 +1039,7 @@ if analyze_start_clicked:
             if end_index >= total_tickers:
                  st.success(f"🎉 全{total_tickers}銘柄の分析が完了しました。")
                  st.session_state.tickers_input_value = "" 
+                 st.session_state.main_ticker_input = "" # ★ main_ticker_inputもクリア
                  st.session_state.analysis_index = 0 
             elif new_analyzed_data:
                  st.success(f"✅ 第{start_index // MAX_TICKERS + 1}回の分析が完了しました。")
@@ -1033,23 +1068,22 @@ if analyze_start_clicked:
 # --- 表示 ---
 # ★★★ デバッグ情報: analyzed_dataの存在を強制的に表示 ★★★
 st.markdown("---")
-st.markdown("### 🔍 デバッグ情報")
-
-if st.session_state.analyzed_data:
-    st.success(f"✅ analyzed_dataには {len(st.session_state.analyzed_data)} 件のデータが存在します。テーブルが表示されない場合は、表示CSSの問題の可能性があります。")
-    st.dataframe(pd.DataFrame(st.session_state.analyzed_data)) # データの中身を強制表示
-else:
-    st.warning("⚠️ analyzed_dataは空です。データ取得に失敗したか、分析対象銘柄がありません。")
-
-if st.session_state.error_messages:
-    st.error("❌ エラーメッセージがセッションに存在します。詳細を展開して確認してください。")
-    with st.expander("詳細なエラーメッセージ"):
-        for msg in st.session_state.error_messages:
-             st.markdown(f'<p style="color: red; margin-left: 20px;">- {msg}</p>', unsafe_allow_html=True)
-else:
-     st.info("ℹ️ エラーメッセージは空です。")
-     
-st.markdown("---")
+# **このデバッグ情報は、ユーザーには見えないようにコメントアウトまたは削除を推奨しますが、
+# ユーザーのコードには存在していたため、一時的に残します。**
+# st.markdown("### 🔍 デバッグ情報")
+# if st.session_state.analyzed_data:
+#     st.success(f"✅ analyzed_dataには {len(st.session_state.analyzed_data)} 件のデータが存在します。テーブルが表示されない場合は、表示CSSの問題の可能性があります。")
+#     st.dataframe(pd.DataFrame(st.session_state.analyzed_data)) # データの中身を強制表示
+# else:
+#     st.warning("⚠️ analyzed_dataは空です。データ取得に失敗したか、分析対象銘柄がありません。")
+# if st.session_state.error_messages:
+#     st.error("❌ エラーメッセージがセッションに存在します。詳細を展開して確認してください。")
+#     with st.expander("詳細なエラーメッセージ"):
+#         for msg in st.session_state.error_messages:
+#              st.markdown(f'<p style="color: red; margin-left: 20px;">- {msg}</p>', unsafe_allow_html=True)
+# else:
+#      st.info("ℹ️ エラーメッセージは空です。")
+# st.markdown("---")
 # ★★★ デバッグ情報ここまで ★★★
 
 
@@ -1095,9 +1129,11 @@ if st.session_state.analyzed_data:
             else: code_status_disp = '<span style="font-size:10px; color:transparent;">更新済</span>' 
             kabu_price = d.get("price"); target_txt = "-"
             if d.get('is_aoteng'):
+                 # 青天井時はp_fullにSLが入っている
                  full_pct = ((p_full / kabu_price) - 1) * 100 if kabu_price > 0 and p_full > 0 else 0
                  target_txt = f'<span style="color:green;font-weight:bold;">青天井追従</span><br>SL:{p_full:,} ({full_pct:+.1f}%)'
-            elif p_half == 0 and p_full > 0:
+            elif p_half == 0 and p_full > 0 and d.get('strategy') == "🔥順張り":
+                 # 順張りでハーフ目標を超えているか、または目標超過
                  full_pct = ((p_full / kabu_price) - 1) * 100 if kabu_price > 0 and p_full > 0 else 0
                  target_txt = f'<span style="color:green;font-weight:bold;">目標追従</span><br>全:{p_full:,} ({full_pct:+.1f}%)'
             elif p_half > 0:
@@ -1105,6 +1141,19 @@ if st.session_state.analyzed_data:
                  full_pct = ((p_full / kabu_price) - 1) * 100 if kabu_price > 0 and p_full > 0 else 0
                  target_txt = f"半:{p_half:,} ({half_pct:+.1f}%)<br>全:{p_full:,} ({full_pct:+.1f}%)" 
             else: target_txt = "目標超過/無効"
+            
+            # 逆張り戦略のターゲット表示を修正
+            if d.get('strategy') == "🌊逆張り":
+                 if p_half > 0 and p_full > 0:
+                     half_pct = ((p_half / kabu_price) - 1) * 100 if kabu_price > 0 and p_half > 0 else 0
+                     full_pct = ((p_full / kabu_price) - 1) * 100 if kabu_price > 0 and p_full > 0 else 0
+                     target_txt = f'<span style="color:#0056b3;font-weight:bold;">MA回帰目標</span><br>半:{p_half:,} ({half_pct:+.1f}%)<br>全:{p_full:,} ({full_pct:+.1f}%)'
+                 elif p_half > 0:
+                      half_pct = ((p_half / kabu_price) - 1) * 100 if kabu_price > 0 and p_half > 0 else 0
+                      target_txt = f'<span style="color:#0056b3;font-weight:bold;">MA回帰目標</span><br>半:{p_half:,} ({half_pct:+.1f}%)'
+                 else:
+                      target_txt = "MA回帰目標:なし"
+
             bt_display = d.get("backtest", "-").replace("<br>", " ") 
             bt_parts = bt_display.split('('); bt_row1 = bt_parts[0].strip()
             bt_row2 = f'({bt_parts[1].strip()}' if len(bt_parts) > 1 else ""
@@ -1179,9 +1228,3 @@ if st.session_state.analyzed_data:
         for col in columns_to_drop:
              if col in df_raw.columns: df_raw = df_raw.drop(columns=[col]) 
         st.dataframe(df_raw)
-
-
-
-
-
-
