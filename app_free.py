@@ -318,7 +318,7 @@ with st.sidebar:
     # 1. API Key
     if "GEMINI_API_KEY" in st.secrets:
         api_key = st.secrets["GEMINI_API_KEY"]
-        st.success("🔑 Security Clearance: OK")
+        st.success("🔑 セキュリティ: OK")
     else:
         api_key = st.text_input("Gemini API Key", type="password")
 
@@ -1238,6 +1238,7 @@ if st.session_state.analyzed_data:
         for col in columns_to_drop:
              if col in df_raw.columns: df_raw = df_raw.drop(columns=[col]) 
         st.dataframe(df_raw)
+
 
 
 
