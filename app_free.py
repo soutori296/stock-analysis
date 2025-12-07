@@ -539,8 +539,18 @@ def get_base_score(ticker, df_base, info):
 
     df_base['SMA5'] = df_base['Close'].rolling(5).mean(); df_base['SMA25'] = df_base['Close'].rolling(25).mean()
     df_base['SMA75'] = df_base['Close'].rolling(75).mean(); df_base['Vol_SMA5'] = df_base['Volume'].rolling(5).mean()
-    df_base['High_PrevClose'] = abs(df_base['High'] - df_base['Close'].shift(1)); df_base['Low_PrevClose'] = abs(df_base['Low'] - df_base['Close'].shift(1))
-    df_base['TR'] = df_base[['High_Low', 'High_PrevClose', 'Low_PrevClose']].max(axis=1); df_base['ATR'] = df_base['TR'].rolling(14).mean()
+    
+    # ★★★ 修正箇所: High_Low の計算を安全化 ★★★
+    if 'High' in df_base.columns and 'Low' in df_base.columns:
+        df_base['High_Low'] = df_base['High'] - df_base['Low']
+    else:
+        df_base['High_Low'] = 0.0
+        
+    df_base['High_PrevClose'] = abs(df_base['High'] - df_base['Close'].shift(1))
+    df_base['Low_PrevClose'] = abs(df_base['Low'] - df_base['Close'].shift(1))
+    df_base['TR'] = df_base[['High_Low', 'High_PrevClose', 'Low_PrevClose']].max(axis=1)
+    df_base['ATR'] = df_base['TR'].rolling(14).mean()
+
     delta = df_base['Close'].diff(); gain = (delta.where(delta > 0, 0)).rolling(14).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(14).mean(); rs = gain / loss
     df_base['RSI'] = 100 - (100 / (1 + rs))
@@ -657,7 +667,14 @@ def get_stock_data(ticker, current_run_count):
 
         df['SMA5'] = df['Close'].rolling(5).mean(); df['SMA25'] = df['Close'].rolling(25).mean()
         df['SMA75'] = df['Close'].rolling(75).mean(); df['Vol_SMA5'] = df['Volume'].rolling(5).mean() 
-        df['High_Low'] = df['High'] - df['Low']; df['High_PrevClose'] = abs(df['High'] - df['Close'].shift(1))
+        
+        # ★★★ 修正箇所: High_Low の計算を安全化（get_base_score と同様） ★★★
+        if 'High' in df.columns and 'Low' in df.columns:
+            df['High_Low'] = df['High'] - df['Low']
+        else:
+            df['High_Low'] = 0.0
+        
+        df['High_PrevClose'] = abs(df['High'] - df['Close'].shift(1))
         df['Low_PrevClose'] = abs(df['Low'] - df['Close'].shift(1)); df['TR'] = df[['High_Low', 'High_PrevClose', 'Low_PrevClose']].max(axis=1)
         df['ATR'] = df['TR'].rolling(14).mean(); delta = df['Close'].diff()
         gain = (delta.where(delta > 0, 0)).rolling(14).mean(); loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
@@ -682,16 +699,10 @@ def get_stock_data(ticker, current_run_count):
             if adjusted_vol_avg > 0: vol_ratio = info["volume"] / adjusted_vol_avg
         rsi_val = last['RSI'] if not pd.isna(last['RSI']) else 50
         
-        # ★★★ 修正箇所: rsi_mark の割り当てロジックを修正 ★★★
-        if rsi_val <= 30: 
-            rsi_mark = "🔵"
-        elif 55 <= rsi_val <= 65: 
-            rsi_mark = "🟢"
-        elif rsi_val >= 70: 
-            rsi_mark = "🔴"
-        else: 
-            rsi_mark = "⚪"
-        # ★★★ 修正箇所ここまで ★★★
+        if rsi_val <= 30: rsi_mark = "🔵"
+        elif 55 <= rsi_val <= 65: rsi_mark = "🟢"
+        elif rsi_val >= 70: rsi_mark = "🔴"
+        else: rsi_mark = "⚪"
             
         strategy, buy_target, p_half, p_full = "様子見", int(ma5), 0, 0
         is_aoteng = False; target_pct = get_target_pct(info["cap"])
@@ -1103,7 +1114,7 @@ if st.session_state.analyzed_data:
             avg_vol_html = format_volume(d.get('avg_volume_5d', 0))
             current_score = d.get("score"); score_diff = d.get('score_diff', 0) 
             score_disp_main = f'{current_score}'
-            if current_score >= 80: score_disp_main = f'<span class="score-high">{score_disp_main}</span>'
+            if current_score >= 80: score_disp_main = f'<span style="color:#d32f2f; font-weight:bold;">{score_disp_main}</span>'
             diff_color = "red" if score_diff < 0 else ("#1976d2" if score_diff > 0 else "#666")
             if status_label != "場中(進行中)" and st.session_state.analysis_run_count > 0:
                  if abs(score_diff) > 0: diff_disp = f'<span style="font-size:10px;color:{diff_color}">{score_diff:+.0f}</span>'
