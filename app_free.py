@@ -322,7 +322,7 @@ with st.sidebar:
     else:
         api_key = st.text_input("Gemini API Key", type="password")
 
-    st.markdown("---") 
+    # st.markdown("---") 
     
     # 【新規追加】AIモデル選択ボックス
     model_options = [
@@ -1239,6 +1239,7 @@ if st.session_state.analyzed_data:
         for col in columns_to_drop:
              if col in df_raw.columns: df_raw = df_raw.drop(columns=[col]) 
         st.dataframe(df_raw)
+
 
 
 
