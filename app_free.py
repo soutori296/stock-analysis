@@ -123,8 +123,8 @@ st.markdown(f"""
     /* ========== 【新規追加】サイドバーの幅調整 ========== */
     /* stSidebarV内の幅を調整 (現在のStreamlitバージョンで広く機能するセレクタ) */
     [data-testid="stSidebar"] > div:first-child {{
-        width: 300px !important; 
-        max-width: 300px !important;
+        width: 250px !important; 
+        max-width: 250px !important;
     }}
 
     /* Streamlit標準のフォント設定を邪魔しないように限定的に適用 */
@@ -363,7 +363,7 @@ with st.sidebar:
         height=150
         # key='main_ticker_input' # ❌ 削除
     )
-    
+   
     # ★ ユーザー入力値の同期ロジック (追記・上書きに最適化)
     if tickers_input != st.session_state.tickers_input_value:
         st.session_state.tickers_input_value = tickers_input
@@ -1240,4 +1240,5 @@ if st.session_state.analyzed_data:
         for col in columns_to_drop:
              if col in df_raw.columns: df_raw = df_raw.drop(columns=[col]) 
         st.dataframe(df_raw)
+
 
