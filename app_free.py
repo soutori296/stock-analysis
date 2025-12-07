@@ -1,3 +1,5 @@
+--- START OF FILE stock_analyzer.py ---
+
 import streamlit as st
 import pandas as pd
 import google.generativeai as genai
@@ -10,6 +12,11 @@ import math
 import numpy as np
 import random 
 import hashlib 
+
+# --- ハッシュ化ヘルパー関数 ---
+def hash_password(password):
+    """入力されたパスワードをSHA256でハッシュ化する"""
+    return hashlib.sha256(password.encode('utf-8')).hexdigest()
 
 # --- アイコン設定 ---
 ICON_URL = "https://raw.githubusercontent.com/soutori296/stock-analysis/main/aisan.png"
@@ -37,8 +44,6 @@ if 'analysis_run_count' not in st.session_state:
     st.session_state.analysis_run_count = 0 
 if 'is_first_session_run' not in st.session_state:
     st.session_state.is_first_session_run = True 
-# if 'main_ticker_input' not in st.session_state: 
-#     st.session_state.main_ticker_input = "" # ❌ StreamlitAPIException回避のため、不要な初期化を削除
     
 # 【★ 進行状況管理用の新規セッションステート】
 if 'analysis_index' not in st.session_state:
@@ -52,6 +57,9 @@ if 'sort_option_key' not in st.session_state:
 if 'selected_model_name' not in st.session_state:
     st.session_state.selected_model_name = "gemini-2.5-flash" # 初期値
 
+# 【★ パスワード認証用の新規セッションステート】 <--- ★ ここを追加
+if 'authenticated' not in st.session_state:
+    st.session_state.authenticated = False
     
 # 【★ スコア変動の永続化用データ構造の初期化】
 if 'score_history' not in st.session_state:
@@ -64,6 +72,7 @@ MAX_TICKERS = 10
 # --- 時間管理 (JST) ---
 def get_market_status():
     """市場状態を返す"""
+# ... (get_market_status関数は変更なし) ...
     jst_now = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=9)
     current_time = jst_now.time()
     
@@ -82,6 +91,7 @@ status_label, jst_now = get_market_status()
 status_color = "#d32f2f" if "進行中" in status_label else "#1976d2"
 
 # --- 出来高調整ウェイト（時価総額別ロジック） ---
+# ... (WEIGHT_MODELS, get_volume_weight関数は変更なし) ...
 WEIGHT_MODELS = {
     "large": {
         (9 * 60 + 0): 0.00, (9 * 60 + 30): 0.25, (10 * 60 + 0): 0.30, (11 * 60 + 30): 0.50, 
@@ -291,7 +301,7 @@ with st.expander("📘 取扱説明書 (データ仕様・判定基準)"):
 
 
 # --- コールバック関数定義 ---
-
+# ... (コールバック関数は変更なし) ...
 def clear_all_data_confirm():
     """全ての結果と入力をクリアし、確認ダイアログを表示する"""
     st.session_state.clear_confirmed = True
@@ -315,72 +325,98 @@ def reanalyze_all_data_logic():
 with st.sidebar:
     # st.title("設定と操作")
     
-    # 1. API Key
-    if "GEMINI_API_KEY" in st.secrets:
-        api_key = st.secrets["GEMINI_API_KEY"]
-        st.success("🔑 セキュリティ: OK")
+    # 【新規追加】パスワード認証ロジック
+    if 'security' not in st.secrets or 'secret_password_hash' not in st.secrets.get('security', {}):
+        st.warning("⚠️ パスワードのハッシュ値がsecrets.tomlに設定されていません。")
+        is_password_set = False
+        SECRET_HASH = ""
     else:
-        api_key = st.text_input("Gemini API Key", type="password")
+        SECRET_HASH = st.secrets["security"]["secret_password_hash"]
+        is_password_set = True
 
-    # st.markdown("---") 
-    
-    # 【新規追加】AIモデル選択ボックス
-    model_options = [
-        "gemini-2.5-flash", 
-        "gemma-3-12b-it",
-    ]
-    st.session_state.selected_model_name = st.selectbox(
-        "使用AIモデルを選択", 
-        options=model_options, 
-        index=model_options.index(st.session_state.selected_model_name) if st.session_state.selected_model_name in model_options else 0,
-        key='model_select_key' 
-    )
-    st.markdown("---") 
+    if not st.session_state.authenticated:
+        st.header("🔑 認証が必要です")
+        user_password = st.text_input("パスワードを入力", type="password", key='password_input')
+        
+        if st.button("ログイン", use_container_width=True, disabled=not is_password_set):
+            if user_password and hash_password(user_password) == SECRET_HASH:
+                st.session_state.authenticated = True
+                st.success("ログイン成功！")
+                st.rerun() 
+            else:
+                st.error("パスワードが異なります。")
+        st.markdown("---") 
+        
+    # 1. API Key (認証成功後のみ表示)
+    api_key = None
+    if st.session_state.authenticated: # 認証成功後のみ表示・処理
+        st.success("✅ 認証済み")
+        if "GEMINI_API_KEY" in st.secrets:
+            api_key = st.secrets["GEMINI_API_KEY"]
+            st.success("🔑 Gemini API Key: OK")
+        else:
+            api_key = st.text_input("Gemini API Key", type="password")
 
-    # 2. ソート選択ボックス (★ レイアウト変更: テキストボックスの上に配置)
-    sort_options = [
-        "スコア順 (高い順)", "更新回数順", "時価総額順 (高い順)", 
-        "RSI順 (低い順)", "RSI順 (高い順)", "出来高倍率順 (高い順)",
-        "銘柄コード順"
-    ]
-    
-    current_index = sort_options.index(st.session_state.sort_option_key) if st.session_state.sort_option_key in sort_options else 0
-    st.session_state.sort_option_key = st.selectbox(
-        "📊 結果のソート順", 
-        options=sort_options, 
-        index=current_index, 
-        key='sort_selectbox_ui_key' 
-    )
+        st.markdown("---") 
 
-    # 3. 銘柄コード入力エリア
-    # ★ StreamlitAPIException回避のため、key='main_ticker_input' のみを残すか、キー自体を削除
-    # 今回はキーを削除し、valueで完全に制御する方式に戻します。
-    tickers_input = st.text_area(
-        f"銘柄コード（上限{MAX_TICKERS}銘柄/回）", 
-        value=st.session_state.tickers_input_value, 
-        placeholder="例:\n7203\n8306\n9984",
-        height=150
-    )
-   
-    # ★ ユーザー入力値の同期ロジック (追記・上書きに最適化)
-    if tickers_input != st.session_state.tickers_input_value:
-        st.session_state.tickers_input_value = tickers_input
-        st.session_state.analysis_index = 0
-        st.session_state.current_input_hash = "" 
+        # 2. AIモデル選択ボックス
+        model_options = [
+            "gemini-2.5-flash", 
+            "gemma-3-12b-it",
+        ]
+        st.session_state.selected_model_name = st.selectbox(
+            "使用AIモデルを選択", 
+            options=model_options, 
+            index=model_options.index(st.session_state.selected_model_name) if st.session_state.selected_model_name in model_options else 0,
+            key='model_select_key' 
+        )
+        st.markdown("---") 
 
-    # st.markdown("---") # ★ 水平ライン
+        # 3. ソート選択ボックス (★ レイアウト変更: テキストボックスの上に配置)
+        sort_options = [
+            "スコア順 (高い順)", "更新回数順", "時価総額順 (高い順)", 
+            "RSI順 (低い順)", "RSI順 (高い順)", "出来高倍率順 (高い順)",
+            "銘柄コード順"
+        ]
+        
+        current_index = sort_options.index(st.session_state.sort_option_key) if st.session_state.sort_option_key in sort_options else 0
+        st.session_state.sort_option_key = st.selectbox(
+            "📊 結果のソート順", 
+            options=sort_options, 
+            index=current_index, 
+            key='sort_selectbox_ui_key' 
+        )
 
-    # 4. ボタン類 
-    
-    # 【4-1. 分析開始ボタン】(最重要)
-    analyze_start_clicked = st.button("🚀 分析開始", use_container_width=True, disabled=st.session_state.clear_confirmed) 
-    
-    # 【4-2. 結果を消去ボタン】(単独配置)
-    clear_button_clicked = st.button("🗑️ 結果を消去", on_click=clear_all_data_confirm, use_container_width=True)
+        # 4. 銘柄コード入力エリア
+        tickers_input = st.text_area(
+            f"銘柄コード（上限{MAX_TICKERS}銘柄/回）", 
+            value=st.session_state.tickers_input_value, 
+            placeholder="例:\n7203\n8306\n9984",
+            height=150
+        )
+       
+        # ★ ユーザー入力値の同期ロジック (追記・上書きに最適化)
+        if tickers_input != st.session_state.tickers_input_value:
+            st.session_state.tickers_input_value = tickers_input
+            st.session_state.analysis_index = 0
+            st.session_state.current_input_hash = "" 
 
-    # 【4-3. 再投入ボタン】
-    is_reload_disabled = not st.session_state.analyzed_data
-    reload_button_clicked = st.button("🔄 結果を再分析", on_click=reanalyze_all_data_logic, use_container_width=True, disabled=is_reload_disabled)
+        # 5. ボタン類 
+        
+        # 【5-1. 分析開始ボタン】(最重要)
+        analyze_start_clicked = st.button("🚀 分析開始", use_container_width=True, disabled=st.session_state.clear_confirmed) 
+        
+        # 【5-2. 結果を消去ボタン】(単独配置)
+        clear_button_clicked = st.button("🗑️ 結果を消去", on_click=clear_all_data_confirm, use_container_width=True)
+
+        # 【5-3. 再投入ボタン】
+        is_reload_disabled = not st.session_state.analyzed_data
+        reload_button_clicked = st.button("🔄 結果を再分析", on_click=reanalyze_all_data_logic, use_container_width=True, disabled=is_reload_disabled)
+    else:
+        # 認証されていない場合、ボタンクリックを無効化
+        analyze_start_clicked = False
+        clear_button_clicked = False
+        reload_button_clicked = False
 
 
 # --- ボタンの実行ロジック (メインスコープでの処理) ---
@@ -414,7 +450,14 @@ if st.session_state.clear_confirmed:
         st.session_state.clear_confirmed = False
         st.rerun() 
 
+# --- 認証チェック: 認証されていなければここで停止 --- <--- ★ ここを追加
+if not st.session_state.authenticated:
+    st.info("⬅️ サイドバーでパスワードを入力してログインしてください。")
+    st.stop()
+# ----------------------------------------------------
+
 # --- 関数群 (中略 - 安定版の関数定義をここに含める) ---
+# ... (関数定義は変更なし) ...
 
 def fmt_market_cap(val):
     if not val or val == 0: return "-"
@@ -974,6 +1017,9 @@ def merge_new_data(new_data_list):
 # ★ モデル名をセッションステートから取得
 model_name = st.session_state.selected_model_name
 
+# APIキーの取得（サイドバーで認証後に設定されるapi_key変数を使用）
+# api_key = None # 初期化はサイドバーで行うため不要
+
 model = None
 if api_key:
     try:
@@ -1238,21 +1284,3 @@ if st.session_state.analyzed_data:
         for col in columns_to_drop:
              if col in df_raw.columns: df_raw = df_raw.drop(columns=[col]) 
         st.dataframe(df_raw)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
