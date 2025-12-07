@@ -58,7 +58,7 @@ if 'score_history' not in st.session_state:
     st.session_state.score_history = {} 
     
 # --- 分析上限定数 ---
-MAX_TICKERS = 3 
+MAX_TICKERS = 10 
 
 
 # --- 時間管理 (JST) ---
@@ -1238,6 +1238,7 @@ if st.session_state.analyzed_data:
         for col in columns_to_drop:
              if col in df_raw.columns: df_raw = df_raw.drop(columns=[col]) 
         st.dataframe(df_raw)
+
 
 
 
