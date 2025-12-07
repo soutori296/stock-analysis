@@ -105,17 +105,14 @@ def get_volume_weight(current_dt, market_cap):
     elif market_cap >= 500: weights = WEIGHT_MODELS["mid"]
     else: weights = WEIGHT_MODELS["small"]
 
-    last_weight = 0.0
-    last_minutes = (9 * 60)
-
+    last_weight = 0.0; last_minutes = (9 * 60)
     for end_minutes, weight in weights.items():
         if current_minutes <= end_minutes:
             if end_minutes == last_minutes: return weight
             progress = (current_minutes - last_minutes) / (end_minutes - last_minutes)
             interpolated_weight = last_weight + progress * (weight - last_weight)
             return max(0.01, interpolated_weight)
-        last_weight = weight
-        last_minutes = end_minutes
+        last_weight = weight; last_minutes = end_minutes
     return 1.0
 # --- CSSスタイル (中略 - 変更なし) ---
 st.markdown(f"""
@@ -483,6 +480,7 @@ def get_25day_ratio():
             return ratio_val
         return default_ratio
     except Exception:
+        # エラー発生時もデフォルト値を返し、StreamlitAPIException を回避
         return default_ratio
 
 market_25d_ratio = get_25day_ratio()
@@ -539,42 +537,27 @@ def run_backtest(df, market_cap):
 def get_base_score(ticker, df_base, info):
     if len(df_base) < 80: return 50 
 
-    df_base['SMA5'] = df_base['Close'].rolling(5).mean()
-    df_base['SMA25'] = df_base['Close'].rolling(25).mean()
-    df_base['SMA75'] = df_base['Close'].rolling(75).mean()
-    df_base['Vol_SMA5'] = df_base['Volume'].rolling(5).mean()
-    df_base['High_Low'] = df_base['High'] - df_base['Low']
-    df_base['High_PrevClose'] = abs(df_base['High'] - df_base['Close'].shift(1))
-    df_base['Low_PrevClose'] = abs(df_base['Low'] - df_base['Close'].shift(1))
-    df_base['TR'] = df_base[['High_Low', 'High_PrevClose', 'Low_PrevClose']].max(axis=1)
-    df_base['ATR'] = df_base['TR'].rolling(14).mean()
-    delta = df_base['Close'].diff()
-    gain = (delta.where(delta > 0, 0)).rolling(14).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
-    rs = gain / loss
+    df_base['SMA5'] = df_base['Close'].rolling(5).mean(); df_base['SMA25'] = df_base['Close'].rolling(25).mean()
+    df_base['SMA75'] = df_base['Close'].rolling(75).mean(); df_base['Vol_SMA5'] = df_base['Volume'].rolling(5).mean()
+    df_base['High_PrevClose'] = abs(df_base['High'] - df_base['Close'].shift(1)); df_base['Low_PrevClose'] = abs(df_base['Low'] - df_base['Close'].shift(1))
+    df_base['TR'] = df_base[['High_Low', 'High_PrevClose', 'Low_PrevClose']].max(axis=1); df_base['ATR'] = df_base['TR'].rolling(14).mean()
+    delta = df_base['Close'].diff(); gain = (delta.where(delta > 0, 0)).rolling(14).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(14).mean(); rs = gain / loss
     df_base['RSI'] = 100 - (100 / (1 + rs))
 
-    last_base = df_base.iloc[-1]
-    prev_base = df_base.iloc[-2] if len(df_base) >= 2 else last_base
-    ma5_b = last_base['SMA5'] if not pd.isna(last_base['SMA5']) else 0
-    ma25_b = last_base['SMA25'] if not pd.isna(last_base['SMA25']) else 0
-    ma75_b = last_base['SMA75'] if not pd.isna(last_base['SMA75']) else 0
-    prev_ma5_b = prev_base['SMA5'] if not pd.isna(prev_base['SMA5']) else ma5_b
+    last_base = df_base.iloc[-1]; prev_base = df_base.iloc[-2] if len(df_base) >= 2 else last_base
+    ma5_b = last_base['SMA5'] if not pd.isna(last_base['SMA5']) else 0; ma25_b = last_base['SMA25'] if not pd.isna(last_base['SMA25']) else 0
+    ma75_b = last_base['SMA75'] if not pd.isna(last_base['SMA75']) else 0; prev_ma5_b = prev_base['SMA5'] if not pd.isna(prev_base['SMA5']) else ma5_b
     prev_ma25_b = prev_base['SMA25'] if not pd.isna(prev_base['SMA25']) else ma5_b
-    is_gc_b = (ma5_b > ma25_b) and (prev_ma5_b <= prev_ma25_b)
-    is_dc_b = (ma5_b < ma25_b) and (prev_ma5_b >= prev_ma25_b)
-    atr_val_b = last_base['ATR'] if not pd.isna(last_base['ATR']) else 0
-    rsi_val_b = last_base['RSI'] if not pd.isna(last_base['RSI']) else 50
-    avg_vol_5d_b = last_base['Vol_SMA5'] if not pd.isna(last_base['Vol_SMA5']) else 0
-    curr_price_b = last_base.get('Close', 0)
+    is_gc_b = (ma5_b > ma25_b) and (prev_ma5_b <= prev_ma25_b); is_dc_b = (ma5_b < ma25_b) and (prev_ma5_b >= prev_ma25_b)
+    atr_val_b = last_base['ATR'] if not pd.isna(last_base['ATR']) else 0; rsi_val_b = last_base['RSI'] if not pd.isna(last_base['RSI']) else 50
+    avg_vol_5d_b = last_base['Vol_SMA5'] if not pd.isna(last_base['Vol_SMA5']) else 0; curr_price_b = last_base.get('Close', 0)
 
-    strategy_b = "様子見"
-    buy_target_b = int(ma5_b) if ma5_b > 0 else 0
+    strategy_b = "様子見"; buy_target_b = int(ma5_b) if ma5_b > 0 else 0
     if ma5_b > ma25_b > ma75_b and ma5_b > prev_ma5_b: strategy_b = "🔥順張り"
     elif rsi_val_b <= 30 or (curr_price_b < ma25_b * 0.9 if ma25_b else False): strategy_b = "🌊逆張り"
 
-    score_b = 50 
-    total_structural_deduction_b = 0
+    score_b = 50; total_structural_deduction_b = 0
     if "🔥順張り" in strategy_b:
         if info["cap"] >= 3000: 
             if rsi_val_b >= 85: total_structural_deduction_b -= 15 
@@ -603,16 +586,11 @@ def get_base_score(ticker, df_base, info):
 
 @st.cache_data(ttl=300) 
 def get_stock_data(ticker, current_run_count):
-    # ... (get_stock_data の定義は元のコードと同一) ...
     status, jst_now_local = get_market_status() 
-    
     ticker = str(ticker).strip().replace(".T", "").upper()
     stock_code = f"{ticker}.JP" 
-    
     info = get_stock_info(ticker) 
-    
     issued_shares = info.get("issued_shares", 0.0)
-    
     ma5, ma25, ma75, atr_val, rsi_val = 0, 0, 0, 0, 0
     risk_reward_ratio, risk_value, avg_vol_5d = 0.0, 0.0, 0
     sl_pct, atr_sl_price, vol_ratio, liquidity_ratio_pct = 0, 0, 0.0, 0.0
@@ -656,8 +634,7 @@ def get_stock_data(ticker, current_run_count):
         
         df = df_raw.copy()
         curr_price = info.get("close") 
-        if status == "場中(進行中)" or curr_price is None: 
-             curr_price = info.get("price")
+        if status == "場中(進行中)" or curr_price is None: curr_price = info.get("price")
         
         if info.get("open") and info.get("high") and info.get("low") and info.get("volume") and curr_price:
               today_date_dt = pd.to_datetime(jst_now_local.strftime("%Y-%m-%d"))
@@ -671,61 +648,39 @@ def get_stock_data(ticker, current_run_count):
                    df.loc[df.index[-1], 'Close'] = curr_price
                    df.loc[df.index[-1], 'Volume'] = info['volume']
 
-        if curr_price is None or math.isnan(curr_price):
-             curr_price = df.iloc[-1].get('Close', None)
+        if curr_price is None or math.isnan(curr_price): curr_price = df.iloc[-1].get('Close', None)
         
         if curr_price is None or math.isnan(curr_price):
              st.session_state.error_messages.append(f"価格データ取得エラー (コード:{ticker}): 価格情報が見つかりませんでした。")
              return None
 
-        # テクニカル指標の計算
-        df['SMA5'] = df['Close'].rolling(5).mean()
-        df['SMA25'] = df['Close'].rolling(25).mean()
-        df['SMA75'] = df['Close'].rolling(75).mean()
-        df['Vol_SMA5'] = df['Volume'].rolling(5).mean() 
-        df['High_Low'] = df['High'] - df['Low']
-        df['High_PrevClose'] = abs(df['High'] - df['Close'].shift(1))
-        df['Low_PrevClose'] = abs(df['Low'] - df['Close'].shift(1))
-        df['TR'] = df[['High_Low', 'High_PrevClose', 'Low_PrevClose']].max(axis=1)
-        df['ATR'] = df['TR'].rolling(14).mean()
-        delta = df['Close'].diff()
-        gain = (delta.where(delta > 0, 0)).rolling(14).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
-        rs = gain / loss
-        df['RSI'] = 100 - (100 / (1 + rs))
-        recent = df['Close'].diff().tail(5)
-        up_days = (recent > 0).sum()
-        win_rate_pct = (up_days / 5) * 100
-        momentum_str = f"{win_rate_pct:.0f}%"
-        last = df.iloc[-1]
-        prev = df.iloc[-2] if len(df) >= 2 else last
-        ma5 = last['SMA5'] if not pd.isna(last['SMA5']) else 0
-        ma25 = last['SMA25'] if not pd.isna(last['SMA25']) else 0
-        ma75 = last['SMA75'] if not pd.isna(last['SMA75']) else 0 
-        prev_ma5 = prev['SMA5'] if not pd.isna(prev['SMA5']) else ma5
+        df['SMA5'] = df['Close'].rolling(5).mean(); df['SMA25'] = df['Close'].rolling(25).mean()
+        df['SMA75'] = df['Close'].rolling(75).mean(); df['Vol_SMA5'] = df['Volume'].rolling(5).mean() 
+        df['High_Low'] = df['High'] - df['Low']; df['High_PrevClose'] = abs(df['High'] - df['Close'].shift(1))
+        df['Low_PrevClose'] = abs(df['Low'] - df['Close'].shift(1)); df['TR'] = df[['High_Low', 'High_PrevClose', 'Low_PrevClose']].max(axis=1)
+        df['ATR'] = df['TR'].rolling(14).mean(); delta = df['Close'].diff()
+        gain = (delta.where(delta > 0, 0)).rolling(14).mean(); loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
+        rs = gain / loss; df['RSI'] = 100 - (100 / (1 + rs))
+        recent = df['Close'].diff().tail(5); up_days = (recent > 0).sum(); win_rate_pct = (up_days / 5) * 100
+        momentum_str = f"{win_rate_pct:.0f}%"; last = df.iloc[-1]; prev = df.iloc[-2] if len(df) >= 2 else last
+        ma5 = last['SMA5'] if not pd.isna(last['SMA5']) else 0; ma25 = last['SMA25'] if not pd.isna(last['SMA25']) else 0
+        ma75 = last['SMA75'] if not pd.isna(last['SMA75']) else 0; prev_ma5 = prev['SMA5'] if not pd.isna(prev['SMA5']) else ma5
         prev_ma25 = prev['SMA25'] if not pd.isna(prev['SMA25']) else ma25
         high_250d = df['High'].tail(250).max() if len(df) >= 250 else 0
-        is_gc_raw = (ma5 > ma25) and (prev_ma5 <= prev_ma25)
-        is_dc_raw = (ma5 < ma25) and (prev_ma5 >= prev_ma25)
+        is_gc_raw = (ma5 > ma25) and (prev_ma5 <= prev_ma25); is_dc_raw = (ma5 < ma25) and (prev_ma5 >= prev_ma25)
         ma_diff_pct = abs((ma5 - ma25) / ma25) * 100 if ma25 > 0 else 100
         is_gc, is_dc = is_gc_raw, is_dc_raw
         if ma_diff_pct < 0.1: is_gc, is_dc = False, False
         atr_val = last['ATR'] if not pd.isna(last['ATR']) else 0
         atr_sl_price = 0
-        if curr_price > 0 and atr_val > 0:
-             atr_sl_price = curr_price - (atr_val * 1.5) 
-             atr_sl_price = max(0, atr_sl_price)
+        if curr_price > 0 and atr_val > 0: atr_sl_price = curr_price - (atr_val * 1.5); atr_sl_price = max(0, atr_sl_price)
         bt_str, bt_cnt, max_dd_pct = run_backtest(df, info["cap"]) 
-        vol_ratio = 0
-        volume_weight = get_volume_weight(jst_now_local, info["cap"]) 
+        vol_ratio = 0; volume_weight = get_volume_weight(jst_now_local, info["cap"]) 
         if info.get("volume") and not pd.isna(last['Vol_SMA5']) and volume_weight > 0.0001: 
             adjusted_vol_avg = last['Vol_SMA5'] * volume_weight
             if adjusted_vol_avg > 0: vol_ratio = info["volume"] / adjusted_vol_avg
         rsi_val = last['RSI'] if not pd.isna(last['RSI']) else 50
-        if rsi_val <= 30: rsi_mark = "🔵"
-        elif 55 <= rsi_val <= 65: rsi_mark = "🟢"
-        elif rsi_val >= 70: rsi_mark = "🔴"
-        else: rsi_mark = "⚪"
+        if rsi_val <= 30: rsi_mark = "🔵"; elif 55 <= rsi_val <= 65: rsi_mark = "🟢"; elif rsi_val >= 70: rsi_mark = "🔴"; else: rsi_mark = "⚪"
         strategy, buy_target, p_half, p_full = "様子見", int(ma5), 0, 0
         is_aoteng = False; target_pct = get_target_pct(info["cap"])
         if ma5 > ma25 > ma75 and ma5 > prev_ma5:
@@ -757,18 +712,14 @@ def get_stock_data(ticker, current_run_count):
         if curr_price > 0 and sl_ma > 0: sl_pct = ((curr_price / sl_ma) - 1) * 100 
             
         risk_reward_ratio, risk_value = 0.0, 0.0
-            
         if buy_target > 0 and sl_ma > 0 and (p_half > 0 or is_aoteng or p_full > 0): 
-            if is_aoteng:
-                 reward_value, risk_value, risk_reward_ratio = 0, 1, 50.0 
+            if is_aoteng: reward_value, risk_value, risk_reward_ratio = 0, 1, 50.0 
             else:
                  avg_target = (p_half + p_full) / 2 if p_half > 0 and p_full > 0 else (p_full if p_full > 0 and p_half == 0 else 0)
-                 reward_value = avg_target - buy_target
-                 risk_value = buy_target - sl_ma 
+                 reward_value = avg_target - buy_target; risk_value = buy_target - sl_ma 
                  if risk_value > 0 and reward_value > 0: risk_reward_ratio = min(reward_value / risk_value, 50.0)
 
-        score = 50 
-        total_structural_deduction = 0
+        score = 50; total_structural_deduction = 0
         avg_vol_5d = last['Vol_SMA5'] if not pd.isna(last['Vol_SMA5']) else 0
         if not is_aoteng:
              is_rr_buffer_zone = (0.95 <= risk_reward_ratio <= 1.05)
@@ -792,8 +743,7 @@ def get_stock_data(ticker, current_run_count):
         if vol_ratio > 1.5: score += 10;
         if vol_ratio > 3.0: score += 5;
         if up_days >= 4: score += 5
-        rr_bonus = 0
-        min_risk_threshold = buy_target * 0.01 
+        rr_bonus = 0; min_risk_threshold = buy_target * 0.01 
         if not is_aoteng and not is_rr_buffer_zone and risk_value >= min_risk_threshold:
             if risk_reward_ratio >= 2.0: rr_bonus = 15
             elif risk_reward_ratio >= 1.5: rr_bonus = 5
@@ -822,27 +772,22 @@ def get_stock_data(ticker, current_run_count):
         is_low_vol_buffer_zone = (0.45 <= atr_pct <= 0.55)
         if atr_pct < 0.5 and not is_low_vol_buffer_zone: score -= 10 
         current_calculated_score = max(0, min(100, score)) 
-        history = st.session_state.score_history.get(ticker, {})
-        fixed_score_core = history.get('final_score') 
+        history = st.session_state.score_history.get(ticker, {}); fixed_score_core = history.get('final_score') 
         fixed_market_ratio_score = history.get('market_ratio_score', 0)
-        score_to_return = current_calculated_score
-        score_diff = 0
-        is_market_alert = market_25d_ratio >= 125.0
-        current_market_deduct = -20 if is_market_alert else 0
+        score_to_return = current_calculated_score; score_diff = 0
+        is_market_alert = market_25d_ratio >= 125.0; current_market_deduct = -20 if is_market_alert else 0
 
         if status != "場中(進行中)":
              if fixed_score_core is None:
                   st.session_state.score_history[ticker] = {'final_score': current_calculated_score - current_market_deduct, 'market_ratio_score': current_market_deduct}
-                  score_to_return = current_calculated_score
-                  score_diff = 0 
+                  score_to_return, score_diff = current_calculated_score, 0 
              else:
                   score_to_return = fixed_score_core + current_market_deduct 
                   score_diff = current_market_deduct - fixed_market_ratio_score 
         else:
              if fixed_score_core is None:
                   st.session_state.score_history[ticker] = {'final_score': current_calculated_score - current_market_deduct, 'market_ratio_score': current_market_deduct}
-                  score_to_return = current_calculated_score
-                  score_diff = 0
+                  score_to_return, score_diff = current_calculated_score, 0
              else:
                   start_score = fixed_score_core + fixed_market_ratio_score 
                   score_diff = current_calculated_score - start_score
@@ -855,10 +800,8 @@ def get_stock_data(ticker, current_run_count):
             "cap_disp": fmt_market_cap(info["cap"]), "per": info["per"], "pbr": info["pbr"],
             "rsi": rsi_val, "rsi_disp": f"{rsi_mark}{rsi_val:.1f}", "vol_ratio": vol_ratio,
             "vol_disp": vol_disp, "momentum": momentum_str, "strategy": strategy, "score": score_to_return,
-            "buy": buy_target, "p_half": p_half, 
-            "p_full": p_full, 
-            "backtest": bt_str, 
-            "backtest_raw": re.sub(r'<[^>]+>', '', bt_str.replace("<br>", " ")).replace("(", "").replace(")", ""),
+            "buy": buy_target, "p_half": p_half, "p_full": p_full, 
+            "backtest": bt_str, "backtest_raw": re.sub(r'<[^>]+>', '', bt_str.replace("<br>", " ")).replace("(", "").replace(")", ""),
             "max_dd_pct": max_dd_pct, "sl_pct": sl_pct, "sl_ma": sl_ma, "avg_volume_5d": avg_vol_5d, 
             "is_low_liquidity": avg_vol_5d < 10000, "risk_reward": risk_reward_ratio, "risk_value": risk_value, 
             "issued_shares": issued_shares, "liquidity_ratio_pct": liquidity_ratio_pct, "atr_val": atr_val, 
@@ -870,7 +813,7 @@ def get_stock_data(ticker, current_run_count):
         return None
 
 def batch_analyze_with_ai(data_list):
-    # ... (batch_analyze_with_ai の定義は元のコードと同一) ...
+    # ★ 修正: コメント生成ロジックの安定化
     if not model: return {}, "⚠️ AIモデルが設定されていません。APIキーを確認してください。"
     prompt_text = ""
     for d in data_list:
@@ -905,42 +848,14 @@ def batch_analyze_with_ai(data_list):
     elif r25 <= 80.0: market_alert_info += "市場は【明確な底値ゾーン】にあり、全体的な反発期待が高いです。"
     else: market_alert_info += "市場の過熱感は中立的です。"
     
-    prompt = f"""
-    あなたは「アイ」という名前のプロトレーダー（30代女性、冷静・理知的）。
-    以下の【市場環境】と【銘柄リスト】に基づき、それぞれの「所感コメント（丁寧語）」を【生成コメントの原則】に従って作成してください。
-    
-    【市場環境】
-    {market_alert_info}
-    
-    【生成コメントの原則（厳守）】
-    1.  <b>Markdownの太字（**）は絶対に使用せず、HTMLの太字（<b>）のみをコメント内で使用してください。</b>
-    2.  <b>表現の多様性を最重視してください。</b>紋切り型な文章は厳禁です。
-    3.  <b>コメントの先頭に、必ず「<b>[銘柄名]</b>｜」というプレフィックスを挿入してください。</b>
-    4.  <b>最大文字数の厳守：全てのコメント（プレフィックス含む）は最大でも150文字とします。この150文字制限は、プレフィックスを含めた全体の文字数です。</b>投資助言と誤解される表現、特に「最終的な売買判断は、ご自身の分析とリスク許容度に基づいて行うことが重要です。」という定型文は、<b>全てのコメントから完全に削除してください。</b>具体的な行動（「買い」「売り」など）を促す表現は厳禁です。
-    5.  <b>総合分析点に応じた文章量とトーンを厳格に調整してください。</b>（プレフィックスの文字数も考慮し、制限を厳しくします）
-        - 総合分析点 85点以上 (超高評価): 80文字〜145文字程度。客観的な事実と技術的な評価のみに言及し、期待感を示す言葉や断定的な表現は厳禁とする。
-        - 総合分析点 75点 (高評価): 70文字〜110文字程度。分析上の結果と客観的なデータ提示に留める。
-        - 総合分析点 65点以下 (中立/様子見): 50文字〜70文字程度。リスクと慎重な姿勢を強調してください。
-    6.  市場環境が【明確な過熱ゾーン】の場合、全てのコメントのトーンを控えめにし、「市場全体が過熱しているため、この銘柄にも調整が入るリスクがある」といった<b>強い警戒感</b>を盛り込んでください。
-    7.  戦略の根拠、RSIの状態（極端な減点があったか否か）、出来高倍率（1.5倍超）、およびR/R比（1.0未満の不利、2.0超の有利など）を必ず具体的に盛り込んでください。
-    8.  <b>GC:発生またはDC:発生の銘柄については、コメント内で必ずその事実に言及し、トレンド転換の可能性を慎重に伝えてください。</b>
-    9.  【リスク情報と撤退基準】
-        - リスク情報（MDD、SL乖離率）を参照し、リスク管理の重要性に言及してください。MDDが-8.0%を超える場合は、「過去の最大下落リスクが高いデータ」がある旨を明確に伝えてください。
-        - 流動性: 致命的低流動性:警告(1000株未満)の銘柄については、コメントの冒頭（プレフィックスの次）で「平均出来高が1,000株未満と極めて低く、希望価格での売買が困難な<b>流動性リスク</b>を伴います。ご自身の資金規模に応じたロット調整をご検討ください。」といった<b>明確な警告</b>を必ず含めてください。
-        - 新規追加: 極端な低流動性 (流動性比率 < 0.05% や ATR < 0.5% の場合) についても、同様に<b>明確な警告</b>を盛り込んでください。
-        - 撤退基準: コメントの末尾で、<b>SL目安MA（構造的崩壊の支持線：{{sl_ma_disp}}）</b>を終値で明確に割り込む場合と、<b>ATRに基づくボラティリティ水準（急落・ノイズ逸脱の基準：{{atr_sl_disp}}）</b>を終値で明確に下回る場合を、**両方とも**、具体的な価格を付記して言及してください。（例: 撤退基準はMA支持線（X円）またはATR水準（Y円）です。）
-        - **青天井領域の追記:** ターゲット情報が「青天井追従」または「追従目標」の場合、**「利益目標は固定目標ではなく、動的なATRトレーリング・ストップ（X円）に切り替わっています。この価格を終値で下回った場合は、利益を確保するための撤退を検討します。」**という趣旨を、コメントの適切な位置に含めてください。
-        - 強調表現の制限: 総合分析点85点以上の銘柄コメントに限り、全体の5%の割合（例: 20銘柄中1つ程度）で、特に重要な部分（例：出来高増加の事実、高い整合性）を1箇所（10文字以内）に限り、<b>赤太字のHTMLタグ（<span style="color:red;">...</span>）</b>を使用して強調しても良い。それ以外のコメントでは赤太字を絶対に使用しないでください。
-    
-    【出力形式】
-    ID:コード | コメント
-    
-    {prompt_text}
-    
-    【最後に】
-    リストの最後に「END_OF_LIST」と書き、その後に続けて「アイの独り言（常体・独白調）」を1行で書いてください。語尾に「ね」や「だわ」などはしないこと。
-    ※見出し不要。独り言は、市場25日騰落レシオ({r25:.2f}%)を総括し、規律ある撤退の重要性に言及する。
-    """
+    # ★ 修正: プロンプト内の {{}} を適切にエスケープし、改行を削除してプロンプトの長さを制限
+    prompt = f"""あなたは「アイ」という名前のプロトレーダー（30代女性、冷静・理知的）。以下の【市場環境】と【銘柄リスト】に基づき、それぞれの「所感コメント（丁寧語）」を【生成コメントの原則】に従って作成してください。
+【市場環境】{market_alert_info}
+【生成コメントの原則（厳守）】1. <b>Markdownの太字（**）は絶対に使用せず、HTMLの太字（<b>）のみをコメント内で使用してください。</b>2. <b>表現の多様性を最重視してください。</b>紋切り型な文章は厳禁です。3. <b>コメントの先頭に、必ず「<b>[銘柄名]</b>｜」というプレフィックスを挿入してください。</b>4. <b>最大文字数の厳守：全てのコメント（プレフィックス含む）は最大でも150文字とします。この150文字制限は、プレフィックスを含めた全体の文字数です。</b>投資助言と誤解される表現、特に「最終的な売買判断は、ご自身の分析とリスク許容度に基づいて行うことが重要です。」という定型文は、<b>全てのコメントから完全に削除してください。</b>具体的な行動（「買い」「売り」など）を促す表現は厳禁です。5. <b>総合分析点に応じた文章量とトーンを厳格に調整してください。</b>（プレフィックスの文字数も考慮し、制限を厳しくします）- 総合分析点 85点以上 (超高評価): 80文字〜145文字程度。客観的な事実と技術的な評価のみに言及し、期待感を示す言葉や断定的な表現は厳禁とする。- 総合分析点 75点 (高評価): 70文字〜110文字程度。分析上の結果と客観的なデータ提示に留める。- 総合分析点 65点以下 (中立/様子見): 50文字〜70文字程度。リスクと慎重な姿勢を強調してください。6. 市場環境が【明確な過熱ゾーン】の場合、全てのコメントのトーンを控えめにし、「市場全体が過熱しているため、この銘柄にも調整が入るリスクがある」といった<b>強い警戒感</b>を盛り込んでください。7. 戦略の根拠、RSIの状態（極端な減点があったか否か）、出来高倍率（1.5倍超）、およびR/R比（1.0未満の不利、2.0超の有利など）を必ず具体的に盛り込んでください。8. <b>GC:発生またはDC:発生の銘柄については、コメント内で必ずその事実に言及し、トレンド転換の可能性を慎重に伝えてください。</b>9. 【リスク情報と撤退基準】- リスク情報（MDD、SL乖離率）を参照し、リスク管理の重要性に言及してください。MDDが-8.0%を超える場合は、「過去の最大下落リスクが高いデータ」がある旨を明確に伝えてください。- 流動性: 致命的低流動性:警告(1000株未満)の銘柄については、コメントの冒頭（プレフィックスの次）で「平均出来高が1,000株未満と極めて低く、希望価格での売買が困難な<b>流動性リスク</b>を伴います。ご自身の資金規模に応じたロット調整をご検討ください。」といった<b>明確な警告</b>を必ず含めてください。- 新規追加: 極端な低流動性 (流動性比率 < 0.05% や ATR < 0.5% の場合) についても、同様に<b>明確な警告</b>を盛り込んでください。- 撤退基準: コメントの末尾で、<b>SL目安MA（構造的崩壊の支持線：{sl_ma_disp}）</b>を終値で明確に割り込む場合と、<b>ATRに基づくボラティリティ水準（急落・ノイズ逸脱の基準：{atr_sl_disp}）</b>を終値で明確に下回る場合を、**両方とも**、具体的な価格を付記して言及してください。（例: 撤退基準はMA支持線（X円）またはATR水準（Y円）です。）- **青天井領域の追記:** ターゲット情報が「青天井追従」または「追従目標」の場合、**「利益目標は固定目標ではなく、動的なATRトレーリング・ストップ（X円）に切り替わっています。この価格を終値で下回った場合は、利益を確保するための撤退を検討します。」**という趣旨を、コメントの適切な位置に含めてください。- 強調表現の制限: 総合分析点85点以上の銘柄コメントに限り、全体の5%の割合（例: 20銘柄中1つ程度）で、特に重要な部分（例：出来高増加の事実、高い整合性）を1箇所（10文字以内）に限り、<b>赤太字のHTMLタグ（<span style="color:red;">...</span>）</b>を使用して強調しても良い。それ以外のコメントでは赤太字を絶対に使用しないでください。
+【出力形式】ID:コード | コメント
+{prompt_text}
+【最後に】リストの最後に「END_OF_LIST」と書き、その後に続けて「アイの独り言（常体・独白調）」を1行で書いてください。語尾に「ね」や「だわ」などはしないこと。※見出し不要。独り言は、市場25日騰落レシオ({r25:.2f}%)を総括し、規律ある撤退の重要性に言及する。
+"""
     try:
         res = model.generate_content(prompt)
         text = res.text
@@ -969,10 +884,12 @@ def batch_analyze_with_ai(data_list):
             elif "|" not in line and line.strip().startswith('総合分析点'): continue
         return comments, monologue
     except Exception as e:
-        st.session_state.error_messages.append(f"AI分析エラー: Geminiモデルからの応答解析に失敗しました。詳細: {e}")
-        return {}, "AI分析失敗"
+        # ★ 修正: エラーメッセージに詳細を含めて、デバッグを支援
+        st.session_state.error_messages.append(f"AI分析エラー: Geminiモデルからの応答解析に失敗しました。詳細: {e}。プロンプトが長すぎるか、API側の問題の可能性があります。")
+        return {}, "コメント生成エラー"
 
 def merge_new_data(new_data_list):
+    # ... (merge_new_data の定義は元のコードと同一) ...
     existing_map = {d['code']: d for d in st.session_state.analyzed_data}
     for d in existing_map.values():
         if 'is_updated_in_this_run' in d: d['is_updated_in_this_run'] = False
@@ -1058,8 +975,10 @@ if analyze_start_clicked:
             st.session_state.is_first_session_run = False
             st.session_state.analysis_index = end_index 
             
+            # 8. 完了判定とテキストボックスのクリア (★ 修正箇所)
             if end_index >= total_tickers:
                  st.success(f"🎉 全{total_tickers}銘柄の分析が完了しました。")
+                 # ★ 完了時に入力欄をクリア
                  st.session_state.tickers_input_value = "" 
                  st.session_state.analysis_index = 0 
             elif new_analyzed_data:
@@ -1067,6 +986,7 @@ if analyze_start_clicked:
                  
             if raw_tickers: st.rerun() 
 
+        # --- エラーメッセージ一括表示 ---
         if st.session_state.error_messages:
             processed_count = len(new_analyzed_data)
             skipped_count = len(raw_tickers) - processed_count
