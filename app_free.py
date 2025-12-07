@@ -37,8 +37,8 @@ if 'analysis_run_count' not in st.session_state:
     st.session_state.analysis_run_count = 0 
 if 'is_first_session_run' not in st.session_state:
     st.session_state.is_first_session_run = True 
-if 'main_ticker_input' not in st.session_state: 
-    st.session_state.main_ticker_input = "" 
+# if 'main_ticker_input' not in st.session_state: 
+#     st.session_state.main_ticker_input = "" # ❌ StreamlitAPIException回避のため、不要な初期化を削除
     
 # 【★ 進行状況管理用の新規セッションステート】
 if 'analysis_index' not in st.session_state:
@@ -294,9 +294,8 @@ def reanalyze_all_data_logic():
     all_tickers = [d['code'] for d in st.session_state.analyzed_data]
     new_input_value = "\n".join(all_tickers)
     
-    # 1. 入力欄に全銘柄を再投入 (key='main_ticker_input'のvalueに設定されている変数のみを更新)
+    # 1. 入力欄に全銘柄を再投入 (st.text_areaのvalueに指定されている変数のみを更新)
     st.session_state.tickers_input_value = new_input_value
-    # st.session_state.main_ticker_input = new_input_value # ❌ StreamlitAPIException回避のため削除
     
     # 2. ハッシュと進行状況をリセット（次の分析で新しい分析として走るように）
     new_hash_after_reload = hashlib.sha256(new_input_value.replace("\n", ",").encode()).hexdigest()
@@ -348,16 +347,17 @@ with st.sidebar:
     )
 
     # 3. 銘柄コード入力エリア
+    # ★ StreamlitAPIException回避のため、key='main_ticker_input' のみを残すか、キー自体を削除
+    # 今回はキーを削除し、valueで完全に制御する方式に戻します。
     tickers_input = st.text_area(
         f"Analysing Targets (銘柄コードを入力) - 上限{MAX_TICKERS}銘柄/回", 
         value=st.session_state.tickers_input_value, 
         placeholder="例:\n7203\n8306\n9984",
-        height=150,
-        key='main_ticker_input' 
+        height=150
+        # key='main_ticker_input' # ❌ 削除
     )
     
     # ★ ユーザー入力値の同期ロジック (追記・上書きに最適化)
-    # テキストエリアの値が変更されたら、セッションステートを更新し、進行状況をリセット
     if tickers_input != st.session_state.tickers_input_value:
         st.session_state.tickers_input_value = tickers_input
         st.session_state.analysis_index = 0
@@ -401,7 +401,6 @@ if st.session_state.clear_confirmed:
         st.session_state.is_first_session_run = True 
         st.session_state.score_history = {} 
         st.session_state.tickers_input_value = "" 
-        # st.session_state.main_ticker_input = "" # ❌ StreamlitAPIException回避のため削除
         st.session_state.analysis_index = 0 
         st.session_state.current_input_hash = "" 
         st.rerun() 
@@ -867,6 +866,15 @@ def batch_analyze_with_ai(data_list):
     # ★ 選択されたモデルを使用
     model_name = st.session_state.selected_model_name
     
+    # モデルの再設定（ここでmodelがNoneになる可能性があるため）
+    model = None
+    if api_key:
+        try:
+            genai.configure(api_key=api_key)
+            model = genai.GenerativeModel(model_name)
+        except Exception as e:
+            st.session_state.error_messages.append(f"System Error: Gemini設定時にエラーが発生しました: {e}")
+
     if not model: return {}, f"⚠️ AIモデル ({model_name}) が設定されていません。APIキーを確認してください。"
     prompt_text = ""
     for d in data_list:
@@ -958,7 +966,7 @@ def merge_new_data(new_data_list):
     st.session_state.analyzed_data = list(existing_map.values())
 
 
-# ★ モデル名をセッションステートから取得するように変更
+# ★ モデル名をセッションステートから取得
 model_name = st.session_state.selected_model_name
 
 model = None
@@ -967,7 +975,8 @@ if api_key:
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel(model_name)
     except Exception as e:
-        st.error(f"System Error: Gemini設定時にエラーが発生しました: {e}")
+        # st.error(f"System Error: Gemini設定時にエラーが発生しました: {e}") # 処理中にエラーを出すと再分析で邪魔になるためコメントアウト
+        pass
 
 
 # --- メイン処理 ---
@@ -994,6 +1003,7 @@ if analyze_start_clicked:
         end_index = min(start_index + MAX_TICKERS, total_tickers)
         raw_tickers = all_unique_tickers[start_index:end_index] 
         
+        # --- メッセージ表示ロジックの改善 ---
         if not raw_tickers:
              if start_index > 0:
                   st.info("✅ すでに全銘柄の分析が完了しています。次の分析を行うには、テキストボックスの内容を変更してください。")
@@ -1005,84 +1015,81 @@ if analyze_start_clicked:
         current_run_count = st.session_state.analysis_run_count
         
         if total_tickers > MAX_TICKERS and end_index < total_tickers:
-            st.warning(f"⚠️ 入力銘柄数が{MAX_TICKERS}を超えています。自動で{MAX_TICKERS}銘柄ずつ順次分析しています。分析を続けるには、再度【🚀 分析開始】を押してください。")
-        elif end_index < total_tickers:
-            st.info(f"📊 第{start_index // MAX_TICKERS + 1}回 ({start_index + 1}〜{end_index}銘柄) の分析を開始します。")
+            # 継続分析が必要
+            current_batch_num = start_index // MAX_TICKERS + 1
+            remaining_tickers = total_tickers - end_index
+            st.warning(f"⚠️ 入力銘柄数が{MAX_TICKERS}を超えています。現在【第{current_batch_num}回】の分析中です。（残り {remaining_tickers} 銘柄）分析を続けるには、再度【🚀 分析開始】を押してください。")
+        elif total_tickers > MAX_TICKERS and end_index == total_tickers:
+            # 最終回
+            current_batch_num = start_index // MAX_TICKERS + 1
+            st.info(f"📊 【最終回: 第{current_batch_num}回】({start_index + 1}〜{end_index}銘柄) の分析を開始します。")
+        elif end_index <= total_tickers:
+            # 1回で終わる or 少ない銘柄
+            st.info(f"📊 分析を開始します。({start_index + 1}〜{end_index}銘柄)")
         
         data_list, bar, status_label, jst_now, new_analyzed_data = [], None, get_market_status(), get_market_status()[1], []
         
-        if len(raw_tickers) > 20: 
-             st.info(f"💡 {len(raw_tickers)}銘柄の分析を開始します。銘柄数が多いため、処理に時間がかかる（数分程度）場合があります。また、AIの処理能力を超えた場合、途中でエラーになる可能性があります。")
-        else:
-             bar = st.progress(0)
-        
-        for i, t in enumerate(raw_tickers):
-            d = get_stock_data(t, current_run_count)
-            if d: 
-                d['batch_order'] = start_index + i + 1 
-                new_analyzed_data.append(d)
-            if bar: bar.progress((i+1)/len(raw_tickers))
-            time.sleep(random.uniform(1.5, 2.5)) 
+        if len(raw_tickers) > 0:
+            if len(raw_tickers) > 20: 
+                 st.info(f"💡 {len(raw_tickers)}銘柄の分析を開始します。銘柄数が多いため、処理に時間がかかる（数分程度）場合があります。また、AIの処理能力を超えた場合、途中でエラーになる可能性があります。")
+            else:
+                 bar = st.progress(0)
             
-        with st.spinner("アイが全銘柄を診断中..."):
-            comments_map, monologue = batch_analyze_with_ai(new_analyzed_data) 
-            for d in new_analyzed_data: d["comment"] = comments_map.get(d["code"], "コメント生成失敗")
-            merge_new_data(new_analyzed_data)
-            st.session_state.ai_monologue = monologue
-            st.session_state.is_first_session_run = False
-            st.session_state.analysis_index = end_index 
-            
-            # 8. 完了判定とテキストボックスのクリア (★ 修正箇所)
-            if end_index >= total_tickers:
-                 st.success(f"🎉 全{total_tickers}銘柄の分析が完了しました。")
-                 st.session_state.tickers_input_value = "" 
-                 # st.session_state.main_ticker_input = "" # ❌ StreamlitAPIException回避のため削除
-                 st.session_state.analysis_index = 0 
-            elif new_analyzed_data:
-                 st.success(f"✅ 第{start_index // MAX_TICKERS + 1}回の分析が完了しました。")
-                 
-            if raw_tickers: st.rerun() 
+            for i, t in enumerate(raw_tickers):
+                d = get_stock_data(t, current_run_count)
+                if d: 
+                    d['batch_order'] = start_index + i + 1 
+                    new_analyzed_data.append(d)
+                if bar: bar.progress((i+1)/len(raw_tickers))
+                time.sleep(random.uniform(1.5, 2.5)) 
+                
+            with st.spinner("アイが全銘柄を診断中..."):
+                comments_map, monologue = batch_analyze_with_ai(new_analyzed_data) 
+                for d in new_analyzed_data: d["comment"] = comments_map.get(d["code"], "コメント生成失敗")
+                merge_new_data(new_analyzed_data)
+                st.session_state.ai_monologue = monologue
+                st.session_state.is_first_session_run = False
+                st.session_state.analysis_index = end_index 
+                
+                # 8. 完了判定とテキストボックスのクリア (★ 修正箇所)
+                if end_index >= total_tickers:
+                     st.success(f"🎉 全{total_tickers}銘柄の分析が完了しました。")
+                     st.session_state.tickers_input_value = "" # テキストボックスの値をクリア
+                     st.session_state.analysis_index = 0 
+                elif new_analyzed_data:
+                     current_batch_num = start_index // MAX_TICKERS + 1
+                     st.success(f"✅ 第{current_batch_num}回の分析が完了しました。")
+                     
+                if raw_tickers: st.rerun() 
 
         # --- エラーメッセージ一括表示 ---
         if st.session_state.error_messages:
-            processed_count = len(new_analyzed_data)
-            skipped_count = len(raw_tickers) - processed_count
-            if skipped_count < 0: skipped_count = len(raw_tickers) 
-            st.error(f"❌ 警告: 以下のエラーにより{skipped_count}銘柄の処理がスキップされました。")
-            with st.expander("詳細エラーメッセージ"):
-                for msg in st.session_state.error_messages:
-                    st.markdown(f'<p style="color: red; margin-left: 20px;">- {msg}</p>', unsafe_allow_html=True)
+            # 既に分析が完了している場合は、メッセージを隠す
+            if not st.session_state.tickers_input_value and end_index >= total_tickers:
+                # 全銘柄完了後は、エラーメッセージを消去
+                st.session_state.error_messages = []
+            else:
+                processed_count = len(new_analyzed_data)
+                skipped_count = len(raw_tickers) - processed_count
+                if skipped_count < 0: skipped_count = len(raw_tickers) 
+                st.error(f"❌ 警告: 以下のエラーにより{skipped_count}銘柄の処理がスキップされました。")
+                with st.expander("詳細エラーメッセージ"):
+                    for msg in st.session_state.error_messages:
+                        st.markdown(f'<p style="color: red; margin-left: 20px;">- {msg}</p>', unsafe_allow_html=True)
         elif not st.session_state.analyzed_data and raw_tickers:
             st.warning("⚠️ 全ての銘柄コードについて、データ取得またはAI分析に失敗しました。APIキーまたは入力コードをご確認ください。")
         
+        # 最終的な完了メッセージ
         if new_analyzed_data and end_index >= total_tickers: 
              st.success(f"✅ 全{total_tickers}銘柄の診断が完了しました。（既存銘柄は上書き更新）")
         elif new_analyzed_data and end_index < total_tickers:
-             st.success(f"✅ 第{start_index // MAX_TICKERS + 1}回、{len(new_analyzed_data)}銘柄の診断が完了しました。（次回分析へ進むには、再度【🚀 分析開始】を押してください）")
+             current_batch_num = start_index // MAX_TICKERS + 1
+             st.success(f"✅ 第{current_batch_num}回、{len(new_analyzed_data)}銘柄の診断が完了しました。（次回分析へ進むには、再度【🚀 分析開始】を押してください）")
              
 
         
 # --- 表示 ---
-# ★★★ デバッグ情報: analyzed_dataの存在を強制的に表示 ★★★
 st.markdown("---")
-# st.markdown("### 🔍 デバッグ情報")
-
-# if st.session_state.analyzed_data:
-#     st.success(f"✅ analyzed_dataには {len(st.session_state.analyzed_data)} 件のデータが存在します。テーブルが表示されない場合は、表示CSSの問題の可能性があります。")
-#     st.dataframe(pd.DataFrame(st.session_state.analyzed_data)) # データの中身を強制表示
-# else:
-#     st.warning("⚠️ analyzed_dataは空です。データ取得に失敗したか、分析対象銘柄がありません。")
-
-# if st.session_state.error_messages:
-#     st.error("❌ エラーメッセージがセッションに存在します。詳細を展開して確認してください。")
-#     with st.expander("詳細なエラーメッセージ"):
-#         for msg in st.session_state.error_messages:
-#              st.markdown(f'<p style="color: red; margin-left: 20px;">- {msg}</p>', unsafe_allow_html=True)
-# else:
-#      st.info("ℹ️ エラーメッセージは空です。")
-     
-# st.markdown("---")
-# ★★★ デバッグ情報ここまで ★★★
 
 
 if st.session_state.analyzed_data:
