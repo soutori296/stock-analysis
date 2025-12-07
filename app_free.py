@@ -356,7 +356,7 @@ with st.sidebar:
     # ★ StreamlitAPIException回避のため、key='main_ticker_input' のみを残すか、キー自体を削除
     # 今回はキーを削除し、valueで完全に制御する方式に戻します。
     tickers_input = st.text_area(
-        f"Analysing Targets (銘柄コードを入力)\n上限{MAX_TICKERS}銘柄/回", 
+        f"銘柄コードを入力\n上限{MAX_TICKERS}銘柄/回", 
         value=st.session_state.tickers_input_value, 
         placeholder="例:\n7203\n8306\n9984",
         height=150
@@ -1238,6 +1238,7 @@ if st.session_state.analyzed_data:
         for col in columns_to_drop:
              if col in df_raw.columns: df_raw = df_raw.drop(columns=[col]) 
         st.dataframe(df_raw)
+
 
 
 
