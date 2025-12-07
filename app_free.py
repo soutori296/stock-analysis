@@ -120,6 +120,13 @@ def get_volume_weight(current_dt, market_cap):
 # --- CSSスタイル (中略 - 変更なし) ---
 st.markdown(f"""
 <style>
+    /* ========== 【新規追加】サイドバーの幅調整 ========== */
+    /* stSidebarV内の幅を調整 (現在のStreamlitバージョンで広く機能するセレクタ) */
+    [data-testid="stSidebar"] > div:first-child {{
+        width: 300px !important; 
+        max-width: 300px !important;
+    }}
+
     /* Streamlit標準のフォント設定を邪魔しないように限定的に適用 */
     .big-font {{ font-size:18px !important; font-weight: bold; color: #4A4A4A; font-family: "Meiryo", sans-serif; }}
     .status-badge {{ background-color: {status_color}; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; vertical-align: middle; }}
@@ -1233,3 +1240,4 @@ if st.session_state.analyzed_data:
         for col in columns_to_drop:
              if col in df_raw.columns: df_raw = df_raw.drop(columns=[col]) 
         st.dataframe(df_raw)
+
