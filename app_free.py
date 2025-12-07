@@ -38,7 +38,7 @@ if 'analysis_run_count' not in st.session_state:
 if 'is_first_session_run' not in st.session_state:
     st.session_state.is_first_session_run = True 
 if 'main_ticker_input' not in st.session_state: 
-    st.session_state.main_ticker_input = "" # ★ テキストエリアのkeyとして使われているため、再分析時に更新が必要
+    st.session_state.main_ticker_input = "" 
     
 # 【★ 進行状況管理用の新規セッションステート】
 if 'analysis_index' not in st.session_state:
@@ -294,10 +294,9 @@ def reanalyze_all_data_logic():
     all_tickers = [d['code'] for d in st.session_state.analyzed_data]
     new_input_value = "\n".join(all_tickers)
     
-    # 1. 入力欄に全銘柄を再投入
+    # 1. 入力欄に全銘柄を再投入 (key='main_ticker_input'のvalueに設定されている変数のみを更新)
     st.session_state.tickers_input_value = new_input_value
-    # ★ 修正: st.text_areaのkeyに設定されているセッションステートも更新
-    st.session_state.main_ticker_input = new_input_value 
+    # st.session_state.main_ticker_input = new_input_value # ❌ StreamlitAPIException回避のため削除
     
     # 2. ハッシュと進行状況をリセット（次の分析で新しい分析として走るように）
     new_hash_after_reload = hashlib.sha256(new_input_value.replace("\n", ",").encode()).hexdigest()
@@ -349,20 +348,18 @@ with st.sidebar:
     )
 
     # 3. 銘柄コード入力エリア
-    # key='main_ticker_input' でウィジェットの状態が管理される。
     tickers_input = st.text_area(
         f"Analysing Targets (銘柄コードを入力) - 上限{MAX_TICKERS}銘柄/回", 
-        value=st.session_state.tickers_input_value, # 初回描画/Rerun時のデフォルト値
+        value=st.session_state.tickers_input_value, 
         placeholder="例:\n7203\n8306\n9984",
         height=150,
-        key='main_ticker_input' # ウィジェットの状態を管理するキー
+        key='main_ticker_input' 
     )
     
     # ★ ユーザー入力値の同期ロジック (追記・上書きに最適化)
-    # ユーザーがUI上のテキストエリアを操作したとき、session_stateの管理用変数を更新
+    # テキストエリアの値が変更されたら、セッションステートを更新し、進行状況をリセット
     if tickers_input != st.session_state.tickers_input_value:
         st.session_state.tickers_input_value = tickers_input
-        # 入力内容が変わったので、進行状況をリセット
         st.session_state.analysis_index = 0
         st.session_state.current_input_hash = "" 
 
@@ -404,7 +401,7 @@ if st.session_state.clear_confirmed:
         st.session_state.is_first_session_run = True 
         st.session_state.score_history = {} 
         st.session_state.tickers_input_value = "" 
-        st.session_state.main_ticker_input = "" # ★ main_ticker_inputもクリア
+        # st.session_state.main_ticker_input = "" # ❌ StreamlitAPIException回避のため削除
         st.session_state.analysis_index = 0 
         st.session_state.current_input_hash = "" 
         st.rerun() 
@@ -1039,7 +1036,7 @@ if analyze_start_clicked:
             if end_index >= total_tickers:
                  st.success(f"🎉 全{total_tickers}銘柄の分析が完了しました。")
                  st.session_state.tickers_input_value = "" 
-                 st.session_state.main_ticker_input = "" # ★ main_ticker_inputもクリア
+                 # st.session_state.main_ticker_input = "" # ❌ StreamlitAPIException回避のため削除
                  st.session_state.analysis_index = 0 
             elif new_analyzed_data:
                  st.success(f"✅ 第{start_index // MAX_TICKERS + 1}回の分析が完了しました。")
@@ -1068,14 +1065,14 @@ if analyze_start_clicked:
 # --- 表示 ---
 # ★★★ デバッグ情報: analyzed_dataの存在を強制的に表示 ★★★
 st.markdown("---")
-# **このデバッグ情報は、ユーザーには見えないようにコメントアウトまたは削除を推奨しますが、
-# ユーザーのコードには存在していたため、一時的に残します。**
 # st.markdown("### 🔍 デバッグ情報")
+
 # if st.session_state.analyzed_data:
 #     st.success(f"✅ analyzed_dataには {len(st.session_state.analyzed_data)} 件のデータが存在します。テーブルが表示されない場合は、表示CSSの問題の可能性があります。")
 #     st.dataframe(pd.DataFrame(st.session_state.analyzed_data)) # データの中身を強制表示
 # else:
 #     st.warning("⚠️ analyzed_dataは空です。データ取得に失敗したか、分析対象銘柄がありません。")
+
 # if st.session_state.error_messages:
 #     st.error("❌ エラーメッセージがセッションに存在します。詳細を展開して確認してください。")
 #     with st.expander("詳細なエラーメッセージ"):
@@ -1083,6 +1080,7 @@ st.markdown("---")
 #              st.markdown(f'<p style="color: red; margin-left: 20px;">- {msg}</p>', unsafe_allow_html=True)
 # else:
 #      st.info("ℹ️ エラーメッセージは空です。")
+     
 # st.markdown("---")
 # ★★★ デバッグ情報ここまで ★★★
 
