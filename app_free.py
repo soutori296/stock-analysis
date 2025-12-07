@@ -328,7 +328,6 @@ with st.sidebar:
     model_options = [
         "gemini-2.5-flash", 
         "gemma-3-12b-it",
-        "gemini-1.5-flash"
     ]
     st.session_state.selected_model_name = st.selectbox(
         "🤖 使用AIモデルを選択", 
@@ -1240,5 +1239,6 @@ if st.session_state.analyzed_data:
         for col in columns_to_drop:
              if col in df_raw.columns: df_raw = df_raw.drop(columns=[col]) 
         st.dataframe(df_raw)
+
 
 
