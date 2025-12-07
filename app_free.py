@@ -359,7 +359,7 @@ with st.sidebar:
         f"Analysing Targets (銘柄コードを入力) - 上限{MAX_TICKERS}銘柄/回", 
         value=st.session_state.tickers_input_value, 
         placeholder="例:\n7203\n8306\n9984",
-        height=250
+        height=200
     )
    
     # ★ ユーザー入力値の同期ロジック (追記・上書きに最適化)
@@ -368,7 +368,7 @@ with st.sidebar:
         st.session_state.analysis_index = 0
         st.session_state.current_input_hash = "" 
 
-    st.markdown("---") # ★ 水平ライン
+    # st.markdown("---") # ★ 水平ライン
 
     # 4. ボタン類 
     
@@ -1238,6 +1238,7 @@ if st.session_state.analyzed_data:
         for col in columns_to_drop:
              if col in df_raw.columns: df_raw = df_raw.drop(columns=[col]) 
         st.dataframe(df_raw)
+
 
 
 
