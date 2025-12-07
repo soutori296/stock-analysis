@@ -926,7 +926,10 @@ def merge_new_data(new_data_list):
     st.session_state.analyzed_data = list(existing_map.values())
 
 
-model_name = 'gemini-2.0-flash'
+#model_name = 'gemini-flash-latest'
+model_name = 'gemma-3-12b-it'
+#model_name = 'gemini-2.5-flash'
+
 model = None
 if api_key:
     try:
@@ -1176,6 +1179,7 @@ if st.session_state.analyzed_data:
         for col in columns_to_drop:
              if col in df_raw.columns: df_raw = df_raw.drop(columns=[col]) 
         st.dataframe(df_raw)
+
 
 
 
