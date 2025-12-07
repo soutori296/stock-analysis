@@ -123,8 +123,8 @@ st.markdown(f"""
     /* ========== 【新規追加】サイドバーの幅調整 ========== */
     /* stSidebarV内の幅を調整 (現在のStreamlitバージョンで広く機能するセレクタ) */
     [data-testid="stSidebar"] > div:first-child {{
-        width: 250px !important; 
-        max-width: 250px !important;
+        width: 230px !important; 
+        max-width: 230px !important;
     }}
 
     /* Streamlit標準のフォント設定を邪魔しないように限定的に適用 */
@@ -1239,6 +1239,7 @@ if st.session_state.analyzed_data:
         for col in columns_to_drop:
              if col in df_raw.columns: df_raw = df_raw.drop(columns=[col]) 
         st.dataframe(df_raw)
+
 
 
 
