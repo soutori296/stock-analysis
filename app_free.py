@@ -10,6 +10,11 @@ import math
 import numpy as np
 import random 
 import hashlib 
+import os # ★ 環境変数チェックのため追加
+
+# --- 環境変数チェックで認証のON/OFFを決定 ---
+# ローカルで 'SKIP_AUTH=true streamlit run your_app.py' のように実行すると認証をスキップ
+IS_LOCAL_SKIP_AUTH = os.environ.get("SKIP_AUTH", "false").lower() == 'true'
 
 # --- ハッシュ化ヘルパー関数 ---
 def hash_password(password):
@@ -55,9 +60,9 @@ if 'sort_option_key' not in st.session_state:
 if 'selected_model_name' not in st.session_state:
     st.session_state.selected_model_name = "gemini-2.5-flash" # 初期値
 
-# 【★ パスワード認証用の新規セッションステート】
+# 【★ パスワード認証用の新規セッションステート】 <--- ★ ここを修正
 if 'authenticated' not in st.session_state:
-    st.session_state.authenticated = False
+    st.session_state.authenticated = IS_LOCAL_SKIP_AUTH # ローカルスキップモード時は自動でTrue
     
 # 【★ スコア変動の永続化用データ構造の初期化】
 if 'score_history' not in st.session_state:
@@ -70,6 +75,7 @@ MAX_TICKERS = 10
 # --- 時間管理 (JST) ---
 def get_market_status():
     """市場状態を返す"""
+# ... (get_market_status関数は変更なし) ...
     jst_now = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=9)
     current_time = jst_now.time()
     
@@ -88,6 +94,7 @@ status_label, jst_now = get_market_status()
 status_color = "#d32f2f" if "進行中" in status_label else "#1976d2"
 
 # --- 出来高調整ウェイト（時価総額別ロジック） ---
+# ... (WEIGHT_MODELS, get_volume_weight関数は変更なし) ...
 WEIGHT_MODELS = {
     "large": {
         (9 * 60 + 0): 0.00, (9 * 60 + 30): 0.25, (10 * 60 + 0): 0.30, (11 * 60 + 30): 0.50, 
@@ -297,6 +304,7 @@ with st.expander("📘 取扱説明書 (データ仕様・判定基準)"):
 
 
 # --- コールバック関数定義 ---
+# ... (コールバック関数は変更なし) ...
 def clear_all_data_confirm():
     """全ての結果と入力をクリアし、確認ダイアログを表示する"""
     st.session_state.clear_confirmed = True
@@ -318,17 +326,21 @@ def reanalyze_all_data_logic():
 
 # --- サイドバー (UIのコアを移動) ---
 with st.sidebar:
+    # st.title("設定と操作")
     
     # 【新規追加】パスワード認証ロジック
     if 'security' not in st.secrets or 'secret_password_hash' not in st.secrets.get('security', {}):
-        st.warning("⚠️ パスワードのハッシュ値がsecrets.tomlに設定されていません。")
+        # Web環境でSecretsがない場合 or ローカルテストの場合
         is_password_set = False
-        SECRET_HASH = ""
+        SECRET_HASH = hash_password("default_password_for_local_test") # ローカルテスト用デフォルト
+        if not IS_LOCAL_SKIP_AUTH:
+             st.warning("⚠️ secrets.tomlに認証情報がないため、ローカルテスト用パスワード: 'default_password_for_local_test' を使用します。")
     else:
         SECRET_HASH = st.secrets["security"]["secret_password_hash"]
         is_password_set = True
 
     if not st.session_state.authenticated:
+        # ★ 認証スキップがTrueでない場合にのみ認証UIを表示
         st.header("🔑 認証が必要です")
         user_password = st.text_input("パスワードを入力", type="password", key='password_input')
         
@@ -344,7 +356,11 @@ with st.sidebar:
     # 1. API Key (認証成功後のみ表示)
     api_key = None
     if st.session_state.authenticated: # 認証成功後のみ表示・処理
-        st.success("✅ 認証済み")
+        if IS_LOCAL_SKIP_AUTH:
+             st.info("✅ ローカルスキップモードで実行中")
+        else:
+             st.success("✅ 認証済み")
+             
         if "GEMINI_API_KEY" in st.secrets:
             api_key = st.secrets["GEMINI_API_KEY"]
             st.success("🔑 Gemini API Key: OK")
@@ -444,13 +460,77 @@ if st.session_state.clear_confirmed:
         st.session_state.clear_confirmed = False
         st.rerun() 
 
-# --- 認証チェック: 認証されていなければここで停止 ---
+# --- 認証チェック: 認証されていなければここで停止 --- <--- ★ ここを修正
 if not st.session_state.authenticated:
     st.info("⬅️ サイドバーでパスワードを入力してログインしてください。")
     st.stop()
 # ----------------------------------------------------
 
-# --- 関数群 ---
+# --- 関数群の追加: 新ロジックのためのヘルパー関数群 ---
+# 【新規ロジックのためのヘルパー関数】
+def get_market_cap_category(market_cap):
+    if market_cap >= 10000: return "超大型"
+    elif market_cap >= 3000: return "大型"
+    elif market_cap >= 500: return "中型"
+    elif market_cap >= 100: return "小型"
+    else: return "超小型"
+
+def get_target_pct_new(category, is_half):
+    if is_half:
+        if category == "超大型": return 0.015
+        elif category == "大型": return 0.020
+        elif category == "中型": return 0.025
+        elif category == "小型": return 0.030
+        else: return 0.040 
+    else:
+        if category == "超大型": return 0.025
+        elif category == "大型": return 0.035
+        elif category == "中型": return 0.040
+        elif category == "小型": return 0.050
+        else: return 0.070 
+
+def create_signals(df, info, jst_now_local):
+    last = df.iloc[-1]
+    market_cap = info.get("cap", 0); category = get_market_cap_category(market_cap)
+    ma5 = last.get('SMA5', 0); close = last.get('Close', 0); open_price = last.get('Open', 0)
+    vol_ratio = df.iloc[-1].get('Vol_Ratio', 0.0) 
+    if ma5 == 0 or close == 0 or open_price == 0:
+        return {"strategy": "様子見", "buy": 0, "p_half": 0, "p_full": 0, "sl_ma": 0, "signal_success": False}
+    proximity_pct = abs((close - ma5) / ma5) if ma5 > 0 else 1.0
+    is_touching_or_close = proximity_pct <= 0.005 
+    is_reversal_shape = False; is_positive_candle = close > open_price
+    if 'High' in df.columns and 'Low' in df.columns:
+        body = abs(close - open_price)
+        lower_shadow = min(close, open_price) - last.get('Low', 0)
+        if is_positive_candle or (body > 0 and lower_shadow / body >= 0.3) or (body == 0 and lower_shadow > 0):
+             is_reversal_shape = True
+    required_vol_ratio = 1.5
+    if category == "大型" or category == "超大型": required_vol_ratio = 1.3
+    elif category in ["小型", "超小型"]: required_vol_ratio = 1.7
+    is_volume_spike = vol_ratio >= required_vol_ratio
+    rsi = last.get('RSI', 50); ma_diff_pct = (close / ma5 - 1) * 100 
+    is_momentum_ok = (30 <= rsi <= 60) and (-1.0 <= ma_diff_pct <= 0.5) 
+    is_entry_signal = is_touching_or_close and is_reversal_shape and is_volume_spike and is_momentum_ok
+    if not is_entry_signal:
+        return {"strategy": "様子見", "buy": 0, "p_half": 0, "p_full": 0, "sl_ma": 0, "signal_success": False}
+    entry_price = close; stop_price = entry_price * (1 - 0.03)
+    half_pct = get_target_pct_new(category, is_half=True)
+    full_pct = get_target_pct_new(category, is_half=False)
+    p_half = int(np.floor(entry_price * (1 + half_pct)))
+    p_full = int(np.floor(entry_price * (1 + full_pct)))
+    if p_full < p_half: p_full = p_half 
+    if p_half <= entry_price or p_full <= entry_price: p_half, p_full = 0, 0 
+    is_strong = last.get('SMA5', 0) > last.get('SMA25', 0)
+    strategy_name = "🔥ロジック順張" if is_strong else "🔥順張り"
+    return {
+        "strategy": strategy_name, 
+        "buy": int(np.floor(entry_price)),
+        "p_half": p_half,
+        "p_full": p_full,
+        "sl_ma": int(np.floor(stop_price)), 
+        "signal_success": True
+    }
+# --- 関数群の追加ここまで ---
 
 def fmt_market_cap(val):
     if not val or val == 0: return "-"
@@ -466,6 +546,7 @@ def fmt_market_cap(val):
     except:
         return "-"
 
+# ★ 修正: ttl を 1秒 に一時的に変更してキャッシュをクリア
 @st.cache_data(ttl=1) 
 def get_stock_info(code):
     url = f"https://kabutan.jp/stock/?code={code}"
@@ -652,108 +733,8 @@ def get_base_score(ticker, df_base, info):
     score_b = max(0, min(100, score_b)) 
     return score_b
 
-# ----------------------------------------------------
-# 【★ AI指示書に基づく新規ロジック実装 ★】
-# ----------------------------------------------------
 
-def get_market_cap_category(market_cap):
-    """時価総額に応じた銘柄カテゴリを返す (指示書準拠)"""
-    if market_cap >= 10000: return "超大型"
-    elif market_cap >= 3000: return "大型"
-    elif market_cap >= 500: return "中型"
-    elif market_cap >= 100: return "小型"
-    else: return "超小型"
-
-def get_target_pct_new(category, is_half):
-    """指示書に基づく時価総額別の利益率を返す"""
-    # 📌半益率
-    if is_half:
-        if category == "超大型": return 0.015
-        elif category == "大型": return 0.020
-        elif category == "中型": return 0.025
-        elif category == "小型": return 0.030
-        else: return 0.040 # 超小型
-    # 📌基本全益率
-    else:
-        if category == "超大型": return 0.025
-        elif category == "大型": return 0.035
-        elif category == "中型": return 0.040
-        elif category == "小型": return 0.050
-        else: return 0.070 # 超小型
-
-def create_signals(df, info, jst_now_local):
-    """AI指示書に基づく売買シグナルを生成する (5MA押し目ロジック)"""
-    last = df.iloc[-1]
-    
-    market_cap = info.get("cap", 0)
-    category = get_market_cap_category(market_cap)
-
-    # 3️⃣ 買いエントリー条件（最重要）チェック
-    ma5 = last.get('SMA5', 0); close = last.get('Close', 0); open_price = last.get('Open', 0)
-    vol_ratio = last.get('Vol_Ratio', 0.0)
-    
-    if ma5 == 0 or close == 0 or open_price == 0:
-        return {"strategy": "様子見", "buy": 0, "p_half": 0, "p_full": 0, "sl_ma": 0, "signal_success": False}
-        
-    # ① 5MA接触 or 接近 (0.5%以内)
-    proximity_pct = abs((close - ma5) / ma5) if ma5 > 0 else 1.0
-    is_touching_or_close = proximity_pct <= 0.005 
-
-    # ② ローソク足の反発形状 (陽線 or 長い下ヒゲ)
-    is_reversal_shape = False
-    is_positive_candle = close > open_price
-    if 'High' in df.columns and 'Low' in df.columns:
-        body = abs(close - open_price)
-        lower_shadow = min(close, open_price) - last.get('Low', 0)
-        # 実体が小さいか、ヒゲが実体より長い場合に反転形状と見なす (または陽線)
-        if (body > 0 and lower_shadow / body >= 0.3) or (body == 0 and lower_shadow > 0) or is_positive_candle:
-             is_reversal_shape = True
-    
-    # ③ 出来高増加
-    required_vol_ratio = 1.5
-    if category == "大型": required_vol_ratio = 1.3
-    elif category in ["小型", "超小型"]: required_vol_ratio = 1.7
-    is_volume_spike = vol_ratio >= required_vol_ratio
-
-    # ④ モメンタムが下げ止まり → 上向き変化の初期
-    rsi = last.get('RSI', 50)
-    ma_diff_pct = (close / ma5 - 1) * 100 # 5MA乖離率
-    is_momentum_ok = (30 <= rsi <= 60) and (-1.0 <= ma_diff_pct <= 0.5) 
-    
-    # 総合的なエントリー可否
-    is_entry_signal = is_touching_or_close and is_reversal_shape and is_volume_spike and is_momentum_ok
-
-    if not is_entry_signal:
-        return {"strategy": "様子見", "buy": 0, "p_half": 0, "p_full": 0, "sl_ma": 0, "signal_success": False}
-        
-    # 4️⃣ エントリー価格決定: 反発確定足の終値 (Close)
-    entry_price = close 
-    
-    # 6️⃣ 損切り価格 (-3%固定)
-    stop_price = entry_price * (1 - 0.03)
-
-    # 5️⃣ 利確戦略（半益 → 全益）
-    half_pct = get_target_pct_new(category, is_half=True)
-    full_pct = get_target_pct_new(category, is_half=False)
-
-    p_half = int(np.floor(entry_price * (1 + half_pct)))
-    p_full = int(np.floor(entry_price * (1 + full_pct)))
-    
-    if p_full < p_half: p_full = p_half # p_fullはp_half以上
-    if p_half <= entry_price or p_full <= entry_price: p_half, p_full = 0, 0 
-
-    return {
-        "strategy": "🔥ロジック順張", # 新しい順張りロジックであることを示す
-        "buy": int(np.floor(entry_price)),
-        "p_half": p_half,
-        "p_full": p_full,
-        "sl_ma": int(np.floor(stop_price)), # 損切価格をSL MAとして使用
-        "signal_success": True
-    }
-
-# ----------------------------------------------------
-# 【★ get_stock_data の修正 ★】
-# ----------------------------------------------------
+# --- 関数群の統合: 新ロジックをget_stock_dataに組み込む ---
 
 # ★ 修正: ttl を 1秒 に一時的に変更してキャッシュをクリア
 @st.cache_data(ttl=1) 
@@ -826,10 +807,10 @@ def get_stock_data(ticker, current_run_count):
              st.session_state.error_messages.append(f"価格データ取得エラー (コード:{ticker}): 価格情報が見つかりませんでした。")
              return None
 
-        # --- テクニカル指標の計算（既存ロジック） ---
         df['SMA5'] = df['Close'].rolling(5).mean(); df['SMA25'] = df['Close'].rolling(25).mean()
         df['SMA75'] = df['Close'].rolling(75).mean(); df['Vol_SMA5'] = df['Volume'].rolling(5).mean() 
         
+        # ★★★ 修正箇所: High_Low の計算を安全化（get_base_score と同様） ★★★
         if 'High' in df.columns and 'Low' in df.columns:
             df['High_Low'] = df['High'] - df['Low']
         else:
@@ -840,10 +821,8 @@ def get_stock_data(ticker, current_run_count):
         df['ATR'] = df['TR'].rolling(14).mean(); delta = df['Close'].diff()
         gain = (delta.where(delta > 0, 0)).rolling(14).mean(); loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
         rs = gain / loss; df['RSI'] = 100 - (100 / (1 + rs))
-        
         recent = df['Close'].diff().tail(5); up_days = (recent > 0).sum(); win_rate_pct = (up_days / 5) * 100
         momentum_str = f"{win_rate_pct:.0f}%"; last = df.iloc[-1]; prev = df.iloc[-2] if len(df) >= 2 else last
-        
         ma5 = last['SMA5'] if not pd.isna(last['SMA5']) else 0; ma25 = last['SMA25'] if not pd.isna(last['SMA25']) else 0
         ma75 = last['SMA75'] if not pd.isna(last['SMA75']) else 0; prev_ma5 = prev['SMA5'] if not pd.isna(prev['SMA5']) else ma5
         prev_ma25 = prev['SMA25'] if not pd.isna(prev['SMA25']) else ma25
@@ -868,7 +847,7 @@ def get_stock_data(ticker, current_run_count):
         # --- 【新規ロジック適用】 ---
         signals = create_signals(df, info, jst_now_local)
         
-        if signals["signal_success"]:
+        if signals["signal_success"] and "順張" in signals["strategy"]: # 新規順張りロジックに合致
              strategy = signals["strategy"]
              buy_target = signals["buy"]
              p_half = signals["p_half"]
@@ -890,12 +869,11 @@ def get_stock_data(ticker, current_run_count):
                   risk_reward_ratio = 0.0
                   risk_value = 0.0
 
-        # --- 【新規ロジック不成立の場合、既存の逆張り・様子見ロジックを維持】 ---
+        # --- 【新規ロジック不成立の場合、既存の逆張り・青天井ロジックを維持】 ---
         else:
+             # 既存のロジックをそのまま使用 (新ロジック不採用時のフォールバック)
              strategy, buy_target, p_half, p_full = "様子見", int(ma5), 0, 0
              is_aoteng = False; target_pct = get_target_pct(info["cap"])
-
-             # 既存の順張りロジック（青天井判定も含む）
              if ma5 > ma25 > ma75 and ma5 > prev_ma5:
                   strategy, buy_target = "🔥順張り", int(ma5)
                   target_half_raw = buy_target * (1 + target_pct / 2); p_half_candidate = int(np.floor(target_half_raw)) 
@@ -911,7 +889,6 @@ def get_stock_data(ticker, current_run_count):
                             p_full_fallback_raw = curr_price * (1 + target_pct); p_full_fallback = int(np.floor(p_full_fallback_raw))
                             if p_full_fallback > curr_price: p_full, p_half = p_full_fallback, 0
                             else: p_full, p_half = 0, 0
-             # 既存の逆張りロジック
              elif rsi_val <= 30 or (curr_price < ma25 * 0.9 if ma25 else False):
                  strategy, buy_target = "🌊逆張り", int(curr_price)
                  p_half_candidate = int(np.floor(ma5 - 1)) if ma5 else 0 
@@ -930,9 +907,9 @@ def get_stock_data(ticker, current_run_count):
              risk_reward_ratio, risk_value = 0.0, 0.0
              if buy_target > 0 and sl_ma > 0 and (p_half > 0 or is_aoteng or p_full > 0): 
                  if is_aoteng: 
-                     risk_value_raw = buy_target - sl_ma 
+                     risk_value_raw = buy_target - sl_ma # 順張り想定水準とSL MAの差
                      if risk_value_raw > 0: 
-                         risk_reward_ratio = 50.0 
+                         risk_reward_ratio = 50.0 # 青天井時は高評価として固定
                          risk_value = risk_value_raw
                      else:
                          risk_reward_ratio = 0.0
@@ -1239,6 +1216,7 @@ if analyze_start_clicked:
                  bar = st.progress(0)
             
             for i, t in enumerate(raw_tickers):
+                # ★ get_stock_dataで新しいロジックが組み込まれたものを使用
                 d = get_stock_data(t, current_run_count)
                 if d: 
                     d['batch_order'] = start_index + i + 1 
