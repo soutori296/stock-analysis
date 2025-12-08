@@ -55,7 +55,7 @@ if 'sort_option_key' not in st.session_state:
 if 'selected_model_name' not in st.session_state:
     st.session_state.selected_model_name = "gemini-2.5-flash" # 初期値
 
-# 【★ パスワード認証用の新規セッションステート】 <--- ★ ここを追加
+# 【★ パスワード認証用の新規セッションステート】
 if 'authenticated' not in st.session_state:
     st.session_state.authenticated = False
     
@@ -70,7 +70,6 @@ MAX_TICKERS = 10
 # --- 時間管理 (JST) ---
 def get_market_status():
     """市場状態を返す"""
-# ... (get_market_status関数は変更なし) ...
     jst_now = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=9)
     current_time = jst_now.time()
     
@@ -89,7 +88,6 @@ status_label, jst_now = get_market_status()
 status_color = "#d32f2f" if "進行中" in status_label else "#1976d2"
 
 # --- 出来高調整ウェイト（時価総額別ロジック） ---
-# ... (WEIGHT_MODELS, get_volume_weight関数は変更なし) ...
 WEIGHT_MODELS = {
     "large": {
         (9 * 60 + 0): 0.00, (9 * 60 + 30): 0.25, (10 * 60 + 0): 0.30, (11 * 60 + 30): 0.50, 
@@ -299,7 +297,6 @@ with st.expander("📘 取扱説明書 (データ仕様・判定基準)"):
 
 
 # --- コールバック関数定義 ---
-# ... (コールバック関数は変更なし) ...
 def clear_all_data_confirm():
     """全ての結果と入力をクリアし、確認ダイアログを表示する"""
     st.session_state.clear_confirmed = True
@@ -321,7 +318,6 @@ def reanalyze_all_data_logic():
 
 # --- サイドバー (UIのコアを移動) ---
 with st.sidebar:
-    # st.title("設定と操作")
     
     # 【新規追加】パスワード認証ロジック
     if 'security' not in st.secrets or 'secret_password_hash' not in st.secrets.get('security', {}):
@@ -448,14 +444,13 @@ if st.session_state.clear_confirmed:
         st.session_state.clear_confirmed = False
         st.rerun() 
 
-# --- 認証チェック: 認証されていなければここで停止 --- <--- ★ ここを追加
+# --- 認証チェック: 認証されていなければここで停止 ---
 if not st.session_state.authenticated:
     st.info("⬅️ サイドバーでパスワードを入力してログインしてください。")
     st.stop()
 # ----------------------------------------------------
 
-# --- 関数群 (中略 - 安定版の関数定義をここに含める) ---
-# ... (関数定義は変更なし) ...
+# --- 関数群 ---
 
 def fmt_market_cap(val):
     if not val or val == 0: return "-"
@@ -471,7 +466,6 @@ def fmt_market_cap(val):
     except:
         return "-"
 
-# ★ 修正: ttl を 1秒 に一時的に変更してキャッシュをクリア
 @st.cache_data(ttl=1) 
 def get_stock_info(code):
     url = f"https://kabutan.jp/stock/?code={code}"
@@ -658,6 +652,108 @@ def get_base_score(ticker, df_base, info):
     score_b = max(0, min(100, score_b)) 
     return score_b
 
+# ----------------------------------------------------
+# 【★ AI指示書に基づく新規ロジック実装 ★】
+# ----------------------------------------------------
+
+def get_market_cap_category(market_cap):
+    """時価総額に応じた銘柄カテゴリを返す (指示書準拠)"""
+    if market_cap >= 10000: return "超大型"
+    elif market_cap >= 3000: return "大型"
+    elif market_cap >= 500: return "中型"
+    elif market_cap >= 100: return "小型"
+    else: return "超小型"
+
+def get_target_pct_new(category, is_half):
+    """指示書に基づく時価総額別の利益率を返す"""
+    # 📌半益率
+    if is_half:
+        if category == "超大型": return 0.015
+        elif category == "大型": return 0.020
+        elif category == "中型": return 0.025
+        elif category == "小型": return 0.030
+        else: return 0.040 # 超小型
+    # 📌基本全益率
+    else:
+        if category == "超大型": return 0.025
+        elif category == "大型": return 0.035
+        elif category == "中型": return 0.040
+        elif category == "小型": return 0.050
+        else: return 0.070 # 超小型
+
+def create_signals(df, info, jst_now_local):
+    """AI指示書に基づく売買シグナルを生成する (5MA押し目ロジック)"""
+    last = df.iloc[-1]
+    
+    market_cap = info.get("cap", 0)
+    category = get_market_cap_category(market_cap)
+
+    # 3️⃣ 買いエントリー条件（最重要）チェック
+    ma5 = last.get('SMA5', 0); close = last.get('Close', 0); open_price = last.get('Open', 0)
+    vol_ratio = last.get('Vol_Ratio', 0.0)
+    
+    if ma5 == 0 or close == 0 or open_price == 0:
+        return {"strategy": "様子見", "buy": 0, "p_half": 0, "p_full": 0, "sl_ma": 0, "signal_success": False}
+        
+    # ① 5MA接触 or 接近 (0.5%以内)
+    proximity_pct = abs((close - ma5) / ma5) if ma5 > 0 else 1.0
+    is_touching_or_close = proximity_pct <= 0.005 
+
+    # ② ローソク足の反発形状 (陽線 or 長い下ヒゲ)
+    is_reversal_shape = False
+    is_positive_candle = close > open_price
+    if 'High' in df.columns and 'Low' in df.columns:
+        body = abs(close - open_price)
+        lower_shadow = min(close, open_price) - last.get('Low', 0)
+        # 実体が小さいか、ヒゲが実体より長い場合に反転形状と見なす (または陽線)
+        if (body > 0 and lower_shadow / body >= 0.3) or (body == 0 and lower_shadow > 0) or is_positive_candle:
+             is_reversal_shape = True
+    
+    # ③ 出来高増加
+    required_vol_ratio = 1.5
+    if category == "大型": required_vol_ratio = 1.3
+    elif category in ["小型", "超小型"]: required_vol_ratio = 1.7
+    is_volume_spike = vol_ratio >= required_vol_ratio
+
+    # ④ モメンタムが下げ止まり → 上向き変化の初期
+    rsi = last.get('RSI', 50)
+    ma_diff_pct = (close / ma5 - 1) * 100 # 5MA乖離率
+    is_momentum_ok = (30 <= rsi <= 60) and (-1.0 <= ma_diff_pct <= 0.5) 
+    
+    # 総合的なエントリー可否
+    is_entry_signal = is_touching_or_close and is_reversal_shape and is_volume_spike and is_momentum_ok
+
+    if not is_entry_signal:
+        return {"strategy": "様子見", "buy": 0, "p_half": 0, "p_full": 0, "sl_ma": 0, "signal_success": False}
+        
+    # 4️⃣ エントリー価格決定: 反発確定足の終値 (Close)
+    entry_price = close 
+    
+    # 6️⃣ 損切り価格 (-3%固定)
+    stop_price = entry_price * (1 - 0.03)
+
+    # 5️⃣ 利確戦略（半益 → 全益）
+    half_pct = get_target_pct_new(category, is_half=True)
+    full_pct = get_target_pct_new(category, is_half=False)
+
+    p_half = int(np.floor(entry_price * (1 + half_pct)))
+    p_full = int(np.floor(entry_price * (1 + full_pct)))
+    
+    if p_full < p_half: p_full = p_half # p_fullはp_half以上
+    if p_half <= entry_price or p_full <= entry_price: p_half, p_full = 0, 0 
+
+    return {
+        "strategy": "🔥ロジック順張", # 新しい順張りロジックであることを示す
+        "buy": int(np.floor(entry_price)),
+        "p_half": p_half,
+        "p_full": p_full,
+        "sl_ma": int(np.floor(stop_price)), # 損切価格をSL MAとして使用
+        "signal_success": True
+    }
+
+# ----------------------------------------------------
+# 【★ get_stock_data の修正 ★】
+# ----------------------------------------------------
 
 # ★ 修正: ttl を 1秒 に一時的に変更してキャッシュをクリア
 @st.cache_data(ttl=1) 
@@ -730,10 +826,10 @@ def get_stock_data(ticker, current_run_count):
              st.session_state.error_messages.append(f"価格データ取得エラー (コード:{ticker}): 価格情報が見つかりませんでした。")
              return None
 
+        # --- テクニカル指標の計算（既存ロジック） ---
         df['SMA5'] = df['Close'].rolling(5).mean(); df['SMA25'] = df['Close'].rolling(25).mean()
         df['SMA75'] = df['Close'].rolling(75).mean(); df['Vol_SMA5'] = df['Volume'].rolling(5).mean() 
         
-        # ★★★ 修正箇所: High_Low の計算を安全化（get_base_score と同様） ★★★
         if 'High' in df.columns and 'Low' in df.columns:
             df['High_Low'] = df['High'] - df['Low']
         else:
@@ -744,8 +840,10 @@ def get_stock_data(ticker, current_run_count):
         df['ATR'] = df['TR'].rolling(14).mean(); delta = df['Close'].diff()
         gain = (delta.where(delta > 0, 0)).rolling(14).mean(); loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
         rs = gain / loss; df['RSI'] = 100 - (100 / (1 + rs))
+        
         recent = df['Close'].diff().tail(5); up_days = (recent > 0).sum(); win_rate_pct = (up_days / 5) * 100
         momentum_str = f"{win_rate_pct:.0f}%"; last = df.iloc[-1]; prev = df.iloc[-2] if len(df) >= 2 else last
+        
         ma5 = last['SMA5'] if not pd.isna(last['SMA5']) else 0; ma25 = last['SMA25'] if not pd.isna(last['SMA25']) else 0
         ma75 = last['SMA75'] if not pd.isna(last['SMA75']) else 0; prev_ma5 = prev['SMA5'] if not pd.isna(prev['SMA5']) else ma5
         prev_ma25 = prev['SMA25'] if not pd.isna(prev['SMA25']) else ma25
@@ -757,70 +855,112 @@ def get_stock_data(ticker, current_run_count):
         atr_val = last['ATR'] if not pd.isna(last['ATR']) else 0
         atr_sl_price = 0
         if curr_price > 0 and atr_val > 0: atr_sl_price = curr_price - (atr_val * 1.5); atr_sl_price = max(0, atr_sl_price)
-        bt_str, bt_cnt, max_dd_pct = run_backtest(df, info["cap"]) 
+        
+        # 出来高倍率の計算 (Vol_Ratio として df に格納)
         vol_ratio = 0; volume_weight = get_volume_weight(jst_now_local, info["cap"]) 
         if info.get("volume") and not pd.isna(last['Vol_SMA5']) and volume_weight > 0.0001: 
             adjusted_vol_avg = last['Vol_SMA5'] * volume_weight
             if adjusted_vol_avg > 0: vol_ratio = info["volume"] / adjusted_vol_avg
+        df['Vol_Ratio'] = vol_ratio # create_signalsで使用
+
         rsi_val = last['RSI'] if not pd.isna(last['RSI']) else 50
         
+        # --- 【新規ロジック適用】 ---
+        signals = create_signals(df, info, jst_now_local)
+        
+        if signals["signal_success"]:
+             strategy = signals["strategy"]
+             buy_target = signals["buy"]
+             p_half = signals["p_half"]
+             p_full = signals["p_full"]
+             sl_ma = signals["sl_ma"] # SL MAとして損切価格を使用
+             is_aoteng = False
+             
+             # 損切乖離率の計算
+             sl_pct = 0.0
+             if curr_price > 0 and sl_ma > 0: sl_pct = ((curr_price / sl_ma) - 1) * 100 
+
+             # R/R比の計算 (新しいシグナルに基づく)
+             risk_reward_ratio, risk_value = 0.0, 0.0
+             if buy_target > 0 and sl_ma > 0 and (p_half > 0 or p_full > 0): 
+                 avg_target = (p_half + p_full) / 2 if p_half > 0 and p_full > 0 else (p_full if p_full > 0 and p_half == 0 else 0)
+                 reward_value = avg_target - buy_target; risk_value = buy_target - sl_ma 
+                 if risk_value > 0 and reward_value > 0: risk_reward_ratio = min(reward_value / risk_value, 50.0)
+             else:
+                  risk_reward_ratio = 0.0
+                  risk_value = 0.0
+
+        # --- 【新規ロジック不成立の場合、既存の逆張り・様子見ロジックを維持】 ---
+        else:
+             strategy, buy_target, p_half, p_full = "様子見", int(ma5), 0, 0
+             is_aoteng = False; target_pct = get_target_pct(info["cap"])
+
+             # 既存の順張りロジック（青天井判定も含む）
+             if ma5 > ma25 > ma75 and ma5 > prev_ma5:
+                  strategy, buy_target = "🔥順張り", int(ma5)
+                  target_half_raw = buy_target * (1 + target_pct / 2); p_half_candidate = int(np.floor(target_half_raw)) 
+                  target_full_raw = buy_target * (1 + target_pct); p_full_candidate = int(np.floor(target_full_raw))
+                  if high_250d > 0 and curr_price > high_250d and p_half_candidate <= curr_price:
+                       is_aoteng = True; max_high_today = df['High'].iloc[-1]; atr_trailing_price = max_high_today - (atr_val * 2.5); atr_trailing_price = max(0, atr_trailing_price)
+                       p_full = int(np.floor(atr_trailing_price)) # SLとして使用
+                       p_half = 0 
+                  else: 
+                       if p_half_candidate > curr_price: p_half, p_full = p_half_candidate, p_full_candidate if p_full_candidate > p_half else p_half + 1 
+                       elif p_half_candidate <= curr_price and p_full_candidate > curr_price: p_half, p_full = 0, p_full_candidate
+                       elif p_full_candidate <= curr_price:
+                            p_full_fallback_raw = curr_price * (1 + target_pct); p_full_fallback = int(np.floor(p_full_fallback_raw))
+                            if p_full_fallback > curr_price: p_full, p_half = p_full_fallback, 0
+                            else: p_full, p_half = 0, 0
+             # 既存の逆張りロジック
+             elif rsi_val <= 30 or (curr_price < ma25 * 0.9 if ma25 else False):
+                 strategy, buy_target = "🌊逆張り", int(curr_price)
+                 p_half_candidate = int(np.floor(ma5 - 1)) if ma5 else 0 
+                 p_full_candidate = int(np.floor(ma25 - 1)) if ma25 else 0 
+                 p_half = p_half_candidate if p_half_candidate > curr_price else 0; p_full = p_full_candidate if p_full_candidate > curr_price else 0
+                 if p_half > 0 and p_full > 0 and p_half > p_full: p_half = p_full - 1 
+            
+             # sl_ma の決定 (既存ロジック)
+             if strategy == "🔥順張り": sl_ma = ma25 if ma25 > 0 else (ma75 if ma75 > 0 else 0)
+             elif strategy == "🌊逆張り": sl_ma = ma75 if ma75 > 0 else (ma25 if ma25 > 0 else 0)
+             elif ma25 > 0: sl_ma = ma25
+             else: sl_ma = 0
+             if curr_price > 0 and sl_ma > 0: sl_pct = ((curr_price / sl_ma) - 1) * 100 
+                 
+             # R/R比の計算 (既存ロジック)
+             risk_reward_ratio, risk_value = 0.0, 0.0
+             if buy_target > 0 and sl_ma > 0 and (p_half > 0 or is_aoteng or p_full > 0): 
+                 if is_aoteng: 
+                     risk_value_raw = buy_target - sl_ma 
+                     if risk_value_raw > 0: 
+                         risk_reward_ratio = 50.0 
+                         risk_value = risk_value_raw
+                     else:
+                         risk_reward_ratio = 0.0
+                         risk_value = 0.0
+                 else:
+                      avg_target = (p_half + p_full) / 2 if p_half > 0 and p_full > 0 else (p_full if p_full > 0 and p_half == 0 else 0)
+                      reward_value = avg_target - buy_target; risk_value = buy_target - sl_ma 
+                      if risk_value > 0 and reward_value > 0: risk_reward_ratio = min(reward_value / risk_value, 50.0)
+
+
+        # --- 共通のテクニカル計算、過去実績、スコア計算 ---
+        
+        bt_str, bt_cnt, max_dd_pct = run_backtest(df, info["cap"]) 
+
         if rsi_val <= 30: rsi_mark = "🔵"
         elif 55 <= rsi_val <= 65: rsi_mark = "🟢"
         elif rsi_val >= 70: rsi_mark = "🔴"
         else: rsi_mark = "⚪"
             
-        strategy, buy_target, p_half, p_full = "様子見", int(ma5), 0, 0
-        is_aoteng = False; target_pct = get_target_pct(info["cap"])
-        if ma5 > ma25 > ma75 and ma5 > prev_ma5:
-            strategy, buy_target = "🔥順張り", int(ma5)
-            target_half_raw = buy_target * (1 + target_pct / 2); p_half_candidate = int(np.floor(target_half_raw)) 
-            target_full_raw = buy_target * (1 + target_pct); p_full_candidate = int(np.floor(target_full_raw))
-            if high_250d > 0 and curr_price > high_250d and p_half_candidate <= curr_price:
-                 is_aoteng = True; max_high_today = df['High'].iloc[-1]; atr_trailing_price = max_high_today - (atr_val * 2.5); atr_trailing_price = max(0, atr_trailing_price)
-                 p_full = int(np.floor(atr_trailing_price)) # SLとして使用
-                 p_half = 0 # 青天井領域ではハーフ目標は無効
-            else: 
-                 if p_half_candidate > curr_price: p_half, p_full = p_half_candidate, p_full_candidate if p_full_candidate > p_half else p_half + 1 
-                 elif p_half_candidate <= curr_price and p_full_candidate > curr_price: p_half, p_full = 0, p_full_candidate
-                 elif p_full_candidate <= curr_price:
-                      p_full_fallback_raw = curr_price * (1 + target_pct); p_full_fallback = int(np.floor(p_full_fallback_raw))
-                      if p_full_fallback > curr_price: p_full, p_half = p_full_fallback, 0
-                      else: p_full, p_half = 0, 0
-        elif rsi_val <= 30 or (curr_price < ma25 * 0.9 if ma25 else False):
-            strategy, buy_target = "🌊逆張り", int(curr_price)
-            p_half_candidate = int(np.floor(ma5 - 1)) if ma5 else 0 
-            p_full_candidate = int(np.floor(ma25 - 1)) if ma25 else 0 
-            p_half = p_half_candidate if p_half_candidate > curr_price else 0; p_full = p_full_candidate if p_full_candidate > curr_price else 0
-            if p_half > 0 and p_full > 0 and p_half > p_full: p_half = p_full - 1 
-            
-        sl_pct, sl_ma = 0.0, 0
-        if strategy == "🔥順張り": sl_ma = ma25 if ma25 > 0 else (ma75 if ma75 > 0 else 0)
-        elif strategy == "🌊逆張り": sl_ma = ma75 if ma75 > 0 else (ma25 if ma25 > 0 else 0)
-        elif ma25 > 0: sl_ma = ma25
-        else: sl_ma = 0
-        if curr_price > 0 and sl_ma > 0: sl_pct = ((curr_price / sl_ma) - 1) * 100 
-            
-        risk_reward_ratio, risk_value = 0.0, 0.0
-        if buy_target > 0 and sl_ma > 0 and (p_half > 0 or is_aoteng or p_full > 0): 
-            if is_aoteng: 
-                risk_value_raw = buy_target - sl_ma # 順張り想定水準とSL MAの差
-                if risk_value_raw > 0: 
-                    risk_reward_ratio = 50.0 # 青天井時は高評価として固定
-                    risk_value = risk_value_raw
-                else:
-                    risk_reward_ratio = 0.0
-                    risk_value = 0.0
-            else:
-                 avg_target = (p_half + p_full) / 2 if p_half > 0 and p_full > 0 else (p_full if p_full > 0 and p_half == 0 else 0)
-                 reward_value = avg_target - buy_target; risk_value = buy_target - sl_ma 
-                 if risk_value > 0 and reward_value > 0: risk_reward_ratio = min(reward_value / risk_value, 50.0)
-
         score = 50; total_structural_deduction = 0
         avg_vol_5d = last['Vol_SMA5'] if not pd.isna(last['Vol_SMA5']) else 0
+        
+        is_rr_buffer_zone = (0.95 <= risk_reward_ratio <= 1.05)
+
         if not is_aoteng:
-             is_rr_buffer_zone = (0.95 <= risk_reward_ratio <= 1.05)
              if risk_reward_ratio < 1.0 and not is_rr_buffer_zone: total_structural_deduction -= 25 
-        if "🔥順張り" in strategy:
+             
+        if "順張" in strategy: # 新旧順張りロジック共通
             if info["cap"] >= 3000:
                 if rsi_val >= 85: total_structural_deduction -= 15 
             else:
@@ -829,28 +969,34 @@ def get_stock_data(ticker, current_run_count):
             if rsi_val <= 20: 
                 if info["cap"] >= 3000: total_structural_deduction -= 15
                 else: total_structural_deduction -= 25
+                
         if avg_vol_5d < 1000: total_structural_deduction -= 30 
         liquidity_ratio_pct = (avg_vol_5d / issued_shares) * 100 if issued_shares > 0 else 0.0
         if liquidity_ratio_pct < 0.05: total_structural_deduction -= 10
         score += total_structural_deduction
-        if "順張り" in strategy: score += 15 
-        if "逆張り" in strategy: score += 10
+        
+        if "順張" in strategy: score += 15 # 新旧順張りロジック共通
+        if "🌊逆張り" in strategy: score += 10
         if 55 <= rsi_val <= 65: score += 10
         if vol_ratio > 1.5: score += 10;
         if vol_ratio > 3.0: score += 5;
         if up_days >= 4: score += 5
+        
         rr_bonus = 0; min_risk_threshold = buy_target * 0.01 
         if not is_aoteng and not is_rr_buffer_zone and risk_value >= min_risk_threshold:
             if risk_reward_ratio >= 2.0: rr_bonus = 15
             elif risk_reward_ratio >= 1.5: rr_bonus = 5
         score += rr_bonus
+        
         aoteng_bonus = 0
         if is_aoteng and rsi_val < 80 and vol_ratio > 1.5: aoteng_bonus = 15 
         score += aoteng_bonus
+        
         is_final_cross = (status != "場中(進行中)") 
         if is_final_cross:
             if is_gc: score += 15 
             elif is_dc: score -= 10
+            
         is_market_alert = market_25d_ratio >= 125.0
         dd_abs = abs(max_dd_pct); dd_score = 0
         if dd_abs < 1.0: dd_score = 5
@@ -858,16 +1004,21 @@ def get_stock_data(ticker, current_run_count):
         elif 2.0 < dd_abs <= 10.0: dd_score = -int(np.floor(dd_abs - 2.0)) * 2 
         elif dd_abs > 10.0: dd_score = -20
         score += dd_score
+        
         sl_risk_deduct = 0
         if not is_aoteng: 
              if sl_ma > 0 and abs(sl_pct) < 3.0: 
-                 if "順張り" in strategy: 
+                 if "順張" in strategy: # 新旧順張りロジック共通
                      if is_market_alert: sl_risk_deduct = -20 
         score += sl_risk_deduct
+        
         atr_pct = (atr_val / curr_price) * 100 if curr_price > 0 and atr_val > 0 else 0
         is_low_vol_buffer_zone = (0.45 <= atr_pct <= 0.55)
         if atr_pct < 0.5 and not is_low_vol_buffer_zone: score -= 10 
+        
         current_calculated_score = max(0, min(100, score)) 
+        
+        # --- スコア変動の永続化ロジック ---
         history = st.session_state.score_history.get(ticker, {}); fixed_score_core = history.get('final_score') 
         fixed_market_ratio_score = history.get('market_ratio_score', 0)
         score_to_return = current_calculated_score; score_diff = 0
@@ -890,6 +1041,9 @@ def get_stock_data(ticker, current_run_count):
                   score_to_return = current_calculated_score
 
         vol_disp = f"🔥{vol_ratio:.1f}倍" if vol_ratio > 1.5 else f"{vol_ratio:.1f}倍"
+        
+        # 表示用の戦略名調整
+        if strategy == "🔥ロジック順張": strategy = "🔥順張り"
         
         return {
             "code": ticker, "name": info["name"], "price": curr_price, "cap_val": info["cap"],
@@ -1282,4 +1436,3 @@ if st.session_state.analyzed_data:
         for col in columns_to_drop:
              if col in df_raw.columns: df_raw = df_raw.drop(columns=[col]) 
         st.dataframe(df_raw)
-
