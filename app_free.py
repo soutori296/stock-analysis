@@ -10,7 +10,7 @@ import math
 import numpy as np
 import random 
 import hashlib 
-import os # ★ 環境変数チェックのため追加
+import os 
 
 # --- 環境変数チェックで認証のON/OFFを決定 ---
 # ローカルで 'SKIP_AUTH=true streamlit run your_app.py' のように実行すると認証をスキップ
@@ -495,7 +495,9 @@ def create_signals(df, info, jst_now_local):
     ma5 = last.get('SMA5', 0); close = last.get('Close', 0); open_price = last.get('Open', 0)
     vol_ratio = df.iloc[-1].get('Vol_Ratio', 0.0) 
     if ma5 == 0 or close == 0 or open_price == 0:
+        # 【★ 修正: 戻り値のstrategyを文字列に修正】
         return {"strategy": "様子見", "buy": 0, "p_half": 0, "p_full": 0, "sl_ma": 0, "signal_success": False}
+        
     proximity_pct = abs((close - ma5) / ma5) if ma5 > 0 else 1.0
     is_touching_or_close = proximity_pct <= 0.005 
     is_reversal_shape = False; is_positive_candle = close > open_price
@@ -512,7 +514,9 @@ def create_signals(df, info, jst_now_local):
     is_momentum_ok = (30 <= rsi <= 60) and (-1.0 <= ma_diff_pct <= 0.5) 
     is_entry_signal = is_touching_or_close and is_reversal_shape and is_volume_spike and is_momentum_ok
     if not is_entry_signal:
+        # 【★ 修正: 戻り値のstrategyを文字列に修正】
         return {"strategy": "様子見", "buy": 0, "p_half": 0, "p_full": 0, "sl_ma": 0, "signal_success": False}
+        
     entry_price = close; stop_price = entry_price * (1 - 0.03)
     half_pct = get_target_pct_new(category, is_half=True)
     full_pct = get_target_pct_new(category, is_half=False)
@@ -520,8 +524,10 @@ def create_signals(df, info, jst_now_local):
     p_full = int(np.floor(entry_price * (1 + full_pct)))
     if p_full < p_half: p_full = p_half 
     if p_half <= entry_price or p_full <= entry_price: p_half, p_full = 0, 0 
-    is_strong = last.get('SMA5', 0) > last.get('SMA25', 0)
-    strategy_name = "🔥ロジック順張" if is_strong else "🔥順張り"
+    
+    # 【★ 修正: 戦略名を「🚀ロジック」に変更】
+    strategy_name = "🚀ロジック" 
+    
     return {
         "strategy": strategy_name, 
         "buy": int(np.floor(entry_price)),
@@ -847,7 +853,7 @@ def get_stock_data(ticker, current_run_count):
         # --- 【新規ロジック適用】 ---
         signals = create_signals(df, info, jst_now_local)
         
-        if signals["signal_success"] and "順張" in signals["strategy"]: # 新規順張りロジックに合致
+        if signals["signal_success"] and signals["strategy"] == "🚀ロジック": # 新規順張りロジックに合致
              strategy = signals["strategy"]
              buy_target = signals["buy"]
              p_half = signals["p_half"]
@@ -937,7 +943,7 @@ def get_stock_data(ticker, current_run_count):
         if not is_aoteng:
              if risk_reward_ratio < 1.0 and not is_rr_buffer_zone: total_structural_deduction -= 25 
              
-        if "順張" in strategy: # 新旧順張りロジック共通
+        if "順張" in strategy or strategy == "🚀ロジック": # 新旧順張りロジック共通
             if info["cap"] >= 3000:
                 if rsi_val >= 85: total_structural_deduction -= 15 
             else:
@@ -952,7 +958,7 @@ def get_stock_data(ticker, current_run_count):
         if liquidity_ratio_pct < 0.05: total_structural_deduction -= 10
         score += total_structural_deduction
         
-        if "順張" in strategy: score += 15 # 新旧順張りロジック共通
+        if "順張" in strategy or strategy == "🚀ロジック": score += 15 # 新旧順張りロジック共通
         if "🌊逆張り" in strategy: score += 10
         if 55 <= rsi_val <= 65: score += 10
         if vol_ratio > 1.5: score += 10;
@@ -985,7 +991,7 @@ def get_stock_data(ticker, current_run_count):
         sl_risk_deduct = 0
         if not is_aoteng: 
              if sl_ma > 0 and abs(sl_pct) < 3.0: 
-                 if "順張" in strategy: # 新旧順張りロジック共通
+                 if "順張" in strategy or strategy == "🚀ロジック": # 新旧順張りロジック共通
                      if is_market_alert: sl_risk_deduct = -20 
         score += sl_risk_deduct
         
@@ -1019,8 +1025,8 @@ def get_stock_data(ticker, current_run_count):
 
         vol_disp = f"🔥{vol_ratio:.1f}倍" if vol_ratio > 1.5 else f"{vol_ratio:.1f}倍"
         
-        # 表示用の戦略名調整
-        if strategy == "🔥ロジック順張": strategy = "🔥順張り"
+        # 【★ 修正: 表示用の戦略名調整（ここでは不要な変換を削除し、🚀ロジックはそのまま維持）】
+        # if strategy == "🔥ロジック順張": strategy = "🔥順張り" 
         
         return {
             "code": ticker, "name": info["name"], "price": curr_price, "cap_val": info["cap"],
@@ -1276,7 +1282,8 @@ st.markdown("---")
 if st.session_state.analyzed_data:
     data = st.session_state.analyzed_data
     
-    rec_data = [d for d in data if d['strategy'] != "様子見" and d['score'] >= 50]
+    # 【★ 修正: 注目銘柄の判定に🚀ロジックを追加】
+    rec_data = [d for d in data if (d['strategy'] != "様子見" or d['strategy'] == "🚀ロジック") and d['score'] >= 50]
     watch_data = [d for d in data if d['strategy'] == "様子見" or d['score'] < 50]
 
     def sort_data(lst, option):
@@ -1314,6 +1321,8 @@ if st.session_state.analyzed_data:
             if update_count > 1 and d.get('is_updated_in_this_run', False): code_status_disp = '<span style="font-size:10px; font-weight: bold; color: #ff6347;">更新済</span>'
             else: code_status_disp = '<span style="font-size:10px; color:transparent;">更新済</span>' 
             kabu_price = d.get("price"); target_txt = "-"
+            
+            # 利益確定目標値の表示ロジック
             if d.get('is_aoteng'):
                  # 青天井時はp_fullにSLが入っている
                  full_pct = ((p_full / kabu_price) - 1) * 100 if kabu_price > 0 and p_full > 0 else 0
@@ -1322,11 +1331,12 @@ if st.session_state.analyzed_data:
                  # 順張りでハーフ目標を超えているか、または目標超過
                  full_pct = ((p_full / kabu_price) - 1) * 100 if kabu_price > 0 and p_full > 0 else 0
                  target_txt = f'<span style="color:green;font-weight:bold;">目標追従</span><br>全:{p_full:,} ({full_pct:+.1f}%)'
-            elif p_half > 0:
+            elif p_half == 0 and d.get('strategy') == "🔥順張り":
+                 target_txt = "目標超過/無効"
+            elif p_half > 0 and d.get('strategy') in ["🔥順張り", "🚀ロジック"]:
                  half_pct = ((p_half / kabu_price) - 1) * 100 if kabu_price > 0 and p_half > 0 else 0
                  full_pct = ((p_full / kabu_price) - 1) * 100 if kabu_price > 0 and p_full > 0 else 0
                  target_txt = f"半:{p_half:,} ({half_pct:+.1f}%)<br>全:{p_full:,} ({full_pct:+.1f}%)" 
-            else: target_txt = "目標超過/無効"
             
             # 逆張り戦略のターゲット表示を修正
             if d.get('strategy') == "🌊逆張り":
@@ -1359,15 +1369,26 @@ if st.session_state.analyzed_data:
                  else: diff_disp = f'<span style="font-size:10px;color:#666">±0</span>'
             else: diff_disp = f'<span style="font-size:10px;color:{diff_color}">{score_diff:+.0f}</span>'
             comment_html = d.get("comment", "")
+            
+            # 【★ 修正: 🚀ロジックの強調表示】
+            if d.get("strategy") == "🚀ロジック":
+                 # 5MAタッチ反発時は、想定水準（買値）を強調する
+                 buy_display_html = f'<span style="color:#1976d2; font-weight:bold; background-color:#E3F2FD; padding:1px 3px;">{buy:,.0f}</span>'
+                 diff_display_html = f'<span style="font-size:10px;color:#1976d2; font-weight:bold;">{diff_txt}</span>'
+            else:
+                 # それ以外（乖離中、逆張りなど）は通常の表示
+                 buy_display_html = f'{buy:,.0f}'
+                 diff_display_html = f'<span style="font-size:10px;color:#666">{diff_txt}</span>'
 
-            rows += f'<tr><td class="td-center"><div class="two-line-cell"><b>{display_no}</b><span class="small-font-no">{run_count_disp}</span></div></td><td class="td-center"><div class="two-line-cell"><b>{d.get("code")}</b>{code_status_disp}</div></td><td class="th-left td-bold">{d.get("name")}</td><td class="td-right">{d.get("cap_disp")}</td><td class="td-center">{score_disp_main}<br>{diff_disp}</td><td class="td-center">{d.get("strategy")}</td><td class="td-right td-bold">{price_disp}</td><td class="td-right">{buy:,.0f}<br><span style="font-size:10px;color:#666">{diff_txt}</span></span></td><td class="td-center">{rr_disp}</td><td class="td-right">{mdd_disp}<br>{sl_pct_disp}</td><td class="td-left" style="line-height:1.2;font-size:11px;">{target_txt}</td><td class="td-center">{d.get("rsi_disp")}</td><td class="td-right">{vol_disp}<br>({avg_vol_html})</td><td class="td-center td-blue">{bt_cell_content}</td><td class="td-center">{d.get("per")}<br>{d.get("pbr")}</td><td class="td-center">{d.get("momentum")}</td><td class="th-left"><div class="comment-scroll-box">{comment_html}</div></td></tr>'
+
+            rows += f'<tr><td class="td-center"><div class="two-line-cell"><b>{display_no}</b><span class="small-font-no">{run_count_disp}</span></div></td><td class="td-center"><div class="two-line-cell"><b>{d.get("code")}</b>{code_status_disp}</div></td><td class="th-left td-bold">{d.get("name")}</td><td class="td-right">{d.get("cap_disp")}</td><td class="td-center">{score_disp_main}<br>{diff_disp}</td><td class="td-center">{d.get("strategy")}</td><td class="td-right td-bold">{price_disp}</td><td class="td-right">{buy_display_html}<br>{diff_display_html}</td><td class="td-center">{rr_disp}</td><td class="td-right">{mdd_disp}<br>{sl_pct_disp}</td><td class="td-left" style="line-height:1.2;font-size:11px;">{target_txt}</td><td class="td-center">{d.get("rsi_disp")}</td><td class="td-right">{vol_disp}<br>({avg_vol_html})</td><td class="td-center td-blue">{bt_cell_content}</td><td class="td-center">{d.get("per")}<br>{d.get("pbr")}</td><td class="td-center">{d.get("momentum")}</td><td class="th-left"><div class="comment-scroll-box">{comment_html}</div></td></tr>'
 
         headers = [
             ("No\n(更新回)", "55px", "上段: 総合ナンバー（順位）。下段: (X回目) はデータが更新された回数。初回実行時は空欄です。"), 
             ("コード\n(更新)", "60px", "上段: 銘柄コード。下段: (更新済)は2回目以降の実行で更新された銘柄。"), 
             ("企業名", "125px", None), ("時価総額", "95px", None), ("点", "35px", "上段: 総合分析点。下段: **本日の市場開始時からの差分**（前日比ではない）。"), 
-            ("分析戦略", "75px", "🔥順張り: 上昇トレンド（MA）時の押し目待ちモデル。🌊逆張り: RSI低位や長期MA乖離時の反発待ちモデル。"), 
-            ("現在値", "60px", None), ("想定水準\n(乖離)", "65px", "この分析モデルが買付を「想定」するテクニカル水準。乖離は現在値との差額。売買判断はご自身の責任において行います。"), 
+            ("分析戦略", "75px", "🚀ロジック: 5MAタッチ反発の優位なシグナル。🔥順張り: トレンド継続/青天井。🌊逆張り: RSI低位/MA乖離反発。"), 
+            ("現在値", "60px", None), ("想定水準\n(乖離)", "65px", "**🚀ロジック時: 確定したエントリー価格。** その他: 買付を「想定」するMA水準。乖離は現在値との差額。売買判断はご自身の責任において行います。"), 
             ("R/R比", "40px", "想定水準から利益確定目標までの値幅を、SL MAまでの値幅で割った比率。1.0未満は-25点。"), 
             ("最大DD率\nSL乖離率", "70px", "最大DD率: 過去の同条件トレードでの最大下落率。SL乖離率: SLライン（過去の支持線）までの余地。"), 
             ("利益確定\n目標値", "120px", "時価総額別の分析リターンに基づき、利益確定の「目標値」として算出した水準。青天井時や目標超過時は動的な追従目標を表示。"), 
