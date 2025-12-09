@@ -60,7 +60,7 @@ if 'sort_option_key' not in st.session_state:
 if 'selected_model_name' not in st.session_state:
     st.session_state.selected_model_name = "gemini-2.5-flash" # 初期値
 
-# 【★ パスワード認証用の新規セッションステート】 <--- ★ ここを修正
+# 【★ パスワード認証用の新規セッションステート】 
 if 'authenticated' not in st.session_state:
     st.session_state.authenticated = IS_LOCAL_SKIP_AUTH # ローカルスキップモード時は自動でTrue
     
@@ -130,7 +130,7 @@ def get_volume_weight(current_dt, market_cap):
             return max(0.01, interpolated_weight)
         last_weight = weight; last_minutes = end_minutes
     return 1.0
-# --- CSSスタイル (中略 - 変更なし) ---
+# --- CSSスタイル (変更なし) ---
 st.markdown(f"""
 <style>
     /* ========== 【新規追加】サイドバーの幅調整 ========== */
@@ -460,7 +460,7 @@ if st.session_state.clear_confirmed:
         st.session_state.clear_confirmed = False
         st.rerun() 
 
-# --- 認証チェック: 認証されていなければここで停止 --- <--- ★ ここを修正
+# --- 認証チェック: 認証されていなければここで停止 --- 
 if not st.session_state.authenticated:
     st.info("⬅️ サイドバーでパスワードを入力してログインしてください。")
     st.stop()
@@ -495,7 +495,6 @@ def create_signals(df, info, jst_now_local):
     ma5 = last.get('SMA5', 0); close = last.get('Close', 0); open_price = last.get('Open', 0)
     vol_ratio = df.iloc[-1].get('Vol_Ratio', 0.0) 
     if ma5 == 0 or close == 0 or open_price == 0:
-        # 【★ 修正: 戻り値のstrategyを文字列に修正】
         return {"strategy": "様子見", "buy": 0, "p_half": 0, "p_full": 0, "sl_ma": 0, "signal_success": False}
         
     proximity_pct = abs((close - ma5) / ma5) if ma5 > 0 else 1.0
@@ -514,7 +513,6 @@ def create_signals(df, info, jst_now_local):
     is_momentum_ok = (30 <= rsi <= 60) and (-1.0 <= ma_diff_pct <= 0.5) 
     is_entry_signal = is_touching_or_close and is_reversal_shape and is_volume_spike and is_momentum_ok
     if not is_entry_signal:
-        # 【★ 修正: 戻り値のstrategyを文字列に修正】
         return {"strategy": "様子見", "buy": 0, "p_half": 0, "p_full": 0, "sl_ma": 0, "signal_success": False}
         
     entry_price = close; stop_price = entry_price * (1 - 0.03)
@@ -559,7 +557,8 @@ def get_stock_info(code):
     headers = {"User-Agent": "Mozilla/5.0"}
     data = {"name": "不明", "per": "-", "pbr": "-", "price": None, "volume": None, "cap": 0, "open": None, "high": None, "low": None, "close": None, "issued_shares": 0.0}
     try:
-        res = requests.get(url, headers=headers, timeout=8)
+        # timeoutを8秒に設定（通信問題回避）
+        res = requests.get(url, headers=headers, timeout=8) 
         res.encoding = res.apparent_encoding
         html = res.text.replace("\n", "")
         m_name = re.search(r'<title>(.*?)【', html)
@@ -608,6 +607,7 @@ def get_stock_info(code):
         if m_issued: data["issued_shares"] = float(m_issued.group(1).replace(",", ""))
         return data
     except Exception as e:
+        # Kabutanアクセス/解析失敗はエラーメッセージに格納される
         st.session_state.error_messages.append(f"データ取得エラー (コード:{code}): Kabutanアクセス/解析失敗。詳細: {e}")
         return data
 
@@ -1025,8 +1025,7 @@ def get_stock_data(ticker, current_run_count):
 
         vol_disp = f"🔥{vol_ratio:.1f}倍" if vol_ratio > 1.5 else f"{vol_ratio:.1f}倍"
         
-        # 【★ 修正: 表示用の戦略名調整（ここでは不要な変換を削除し、🚀ロジックはそのまま維持）】
-        # if strategy == "🔥ロジック順張": strategy = "🔥順張り" 
+        # 【★ 修正: 表示用の戦略名調整（🚀ロジックはそのまま維持）】
         
         return {
             "code": ticker, "name": info["name"], "price": curr_price, "cap_val": info["cap"],
@@ -1153,7 +1152,7 @@ def merge_new_data(new_data_list):
 model_name = st.session_state.selected_model_name
 
 # APIキーの取得（サイドバーで認証後に設定されるapi_key変数を使用）
-# api_key = None # 初期化はサイドバーで行うため不要
+# api_key はサイドバーで設定されます
 
 model = None
 if api_key:
@@ -1161,7 +1160,7 @@ if api_key:
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel(model_name)
     except Exception as e:
-        # st.error(f"System Error: Gemini設定時にエラーが発生しました: {e}") # 処理中にエラーを出すと再分析で邪魔になるためコメントアウト
+        # エラーメッセージは、analyze_start_clicked 内で処理されます
         pass
 
 
@@ -1170,6 +1169,7 @@ if analyze_start_clicked:
     st.session_state.error_messages = [] 
     input_tickers = st.session_state.tickers_input_value
     
+    # APIキーがNoneの場合、ここでエラーを出す
     if not api_key:
         st.warning("APIキーを入力してください。")
     elif not input_tickers.strip():
@@ -1247,7 +1247,10 @@ if analyze_start_clicked:
                      current_batch_num = start_index // MAX_TICKERS + 1
                      st.success(f"✅ 第{current_batch_num}回の分析が完了しました。")
                      
-                if raw_tickers: st.rerun() 
+                if raw_tickers: 
+                     # 【★ 修正：セッション安定化用のダミー描画を挿入】
+                     st.empty() 
+                     st.rerun() 
 
         # --- エラーメッセージ一括表示 ---
         if st.session_state.error_messages:
@@ -1277,7 +1280,6 @@ if analyze_start_clicked:
         
 # --- 表示 ---
 st.markdown("---")
-
 
 if st.session_state.analyzed_data:
     data = st.session_state.analyzed_data
