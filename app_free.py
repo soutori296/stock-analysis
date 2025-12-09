@@ -567,6 +567,17 @@ def safe_float_convert(s):
         return float(s.replace(",", ""))
     except ValueError:
         return 0.0
+        
+# 【★ ソートバグ修正のためのヘルパー関数を定義】
+def safe_float(val):
+    """ソートキーを安全に float に変換する"""
+    try:
+        if isinstance(val, (int, float)):
+            return float(val)
+        return float(val)
+    except:
+        return 0.0
+
 
 # ★ 修正: ttl を 1秒 に一時的に変更してキャッシュをクリア
 @st.cache_data(ttl=1) 
@@ -1212,6 +1223,7 @@ def get_stock_data(ticker, current_run_count):
 
         if status != "場中(進行中)":
              if fixed_score_core is None:
+                  # スコアは数値で格納
                   st.session_state.score_history[ticker] = {'final_score': current_calculated_score - current_market_deduct, 'market_ratio_score': current_market_deduct}
                   score_to_return, score_diff = current_calculated_score, 0 
              else:
@@ -1219,6 +1231,7 @@ def get_stock_data(ticker, current_run_count):
                   score_diff = current_market_deduct - fixed_market_ratio_score 
         else:
              if fixed_score_core is None:
+                  # スコアは数値で格納
                   st.session_state.score_history[ticker] = {'final_score': current_calculated_score - current_market_deduct, 'market_ratio_score': current_market_deduct}
                   score_to_return, score_diff = current_calculated_score, 0
              else:
@@ -1237,7 +1250,6 @@ def get_stock_data(ticker, current_run_count):
             "code": ticker,
             "name": info["name"],
             "price": curr_price,
-            # ★ 修正: score_to_return は float/int なのでそのまま格納
             "cap_val": info["cap"],
             "cap_disp": fmt_market_cap(info["cap"]),
             "per": info["per"],
@@ -1251,7 +1263,7 @@ def get_stock_data(ticker, current_run_count):
             "momentum": momentum_str,
 
             "strategy": strategy, # 🚀順ロジ, 🚀逆ロジ, 🔥順張り, 🌊逆張り
-            "score": score_to_return,
+            "score": score_to_return, # ★ ここに float/int が入っている
 
             "buy": buy_target,
             "p_half": p_half,
@@ -1551,14 +1563,22 @@ if st.session_state.analyzed_data:
     watch_data = [d for d in data if not ("🚀" in d['strategy'] or d['strategy'] == "🔥順張り") or d['score'] < 50]
 
     def sort_data(lst, option):
-        # 【★ ソートバグ修正: 数値キーを明示的にキャスト】
-        if "スコア" in option: lst.sort(key=lambda x: int(x.get('score', 0)), reverse=True)
-        elif "更新回数" in option: lst.sort(key=lambda x: (x.get('score', 0) < 50, x.get('update_count', 0) * -1, int(x.get('score', 0)) * -1))
-        elif "時価総額" in option: lst.sort(key=lambda x: float(x.get('cap_val', 0)), reverse=True)
-        elif "RSI順 (低い" in option: lst.sort(key=lambda x: float(x.get('rsi', 50)))
-        elif "RSI順 (高い" in option: lst.sort(key=lambda x: float(x.get('rsi', 50)), reverse=True)
-        elif "出来高倍率順 (高い順)" in option: lst.sort(key=lambda x: float(x.get('vol_ratio', 0)), reverse=True) 
-        elif "勝率順 (高い順)" in option: lst.sort(key=lambda x: float(x.get('win_rate_pct', 0.0)), reverse=True) 
+        # 【★ ソートバグ修正: 全ての数値ソートキーを safe_float でキャスト】
+        if "スコア" in option: 
+            lst.sort(key=lambda x: safe_float(x.get('score', 0)), reverse=True)
+        elif "更新回数" in option: 
+            # 更新回数順は、50点未満を後回し（True=1）、更新回数の降順、スコアの降順
+            lst.sort(key=lambda x: (safe_float(x.get('score', 0)) < 50, x.get('update_count', 0) * -1, safe_float(x.get('score', 0)) * -1))
+        elif "時価総額" in option: 
+            lst.sort(key=lambda x: safe_float(x.get('cap_val', 0)), reverse=True)
+        elif "RSI順 (低い" in option: 
+            lst.sort(key=lambda x: safe_float(x.get('rsi', 50)))
+        elif "RSI順 (高い" in option: 
+            lst.sort(key=lambda x: safe_float(x.get('rsi', 50)), reverse=True)
+        elif "出来高倍率順 (高い順)" in option: 
+            lst.sort(key=lambda x: safe_float(x.get('vol_ratio', 0)), reverse=True) 
+        elif "勝率順 (高い順)" in option: 
+            lst.sort(key=lambda x: safe_float(x.get('win_rate_pct', 0.0)), reverse=True) 
         else: lst.sort(key=lambda x: x.get('code', ''))
     
     current_sort_option = st.session_state['sort_option_key']
@@ -1710,6 +1730,10 @@ if st.session_state.analyzed_data:
     
     rec_data = [d for d in data if ("🚀" in d['strategy'] or d['strategy'] == "🔥順張り") and d['score'] >= 50]
     watch_data = [d for d in data if not ("🚀" in d['strategy'] or d['strategy'] == "🔥順張り") or d['score'] < 50]
+    
+    # ソートの実行
+    sort_data(rec_data, current_sort_option)
+    sort_data(watch_data, current_sort_option)
     
     st.markdown(create_table(rec_data, "🔥 注目銘柄"), unsafe_allow_html=True) 
     st.markdown(create_table(watch_data, "👀 その他の銘柄"), unsafe_allow_html=True) 
