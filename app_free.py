@@ -1,3 +1,5 @@
+--- START OF FILE stock_analyzer.py ---
+
 import streamlit as st
 import pandas as pd
 import google.generativeai as genai
@@ -476,6 +478,7 @@ def get_market_cap_category(market_cap):
     else: return "超小型"
 
 def get_target_pct_new(category, is_half):
+    # 要件書 2-1 に基づく利益率
     if is_half:
         if category == "超大型": return 0.015
         elif category == "大型": return 0.020
@@ -515,11 +518,18 @@ def create_signals(df, info, jst_now_local):
     if not is_entry_signal:
         return {"strategy": "様子見", "buy": 0, "p_half": 0, "p_full": 0, "sl_ma": 0, "signal_success": False}
         
-    entry_price = close; stop_price = entry_price * (1 - 0.03)
+    # 要件書 1-2: 想定水準 ＝ 前日確定足の終値 (ここではシグナル成立時の終値/現在値を使用)
+    entry_price = close
+    
+    # 要件書 3-1-①: SL = 想定水準 × 0.97
+    stop_price = entry_price * (1 - 0.03) 
+    
+    # 要件書 2: 利益目標の計算と端数処理 (floor)
     half_pct = get_target_pct_new(category, is_half=True)
     full_pct = get_target_pct_new(category, is_half=False)
     p_half = int(np.floor(entry_price * (1 + half_pct)))
     p_full = int(np.floor(entry_price * (1 + full_pct)))
+    
     if p_full < p_half: p_full = p_half 
     if p_half <= entry_price or p_full <= entry_price: p_half, p_full = 0, 0 
     
@@ -528,10 +538,10 @@ def create_signals(df, info, jst_now_local):
     
     return {
         "strategy": strategy_name, 
-        "buy": int(np.floor(entry_price)),
+        "buy": int(np.floor(entry_price)), # 想定水準
         "p_half": p_half,
         "p_full": p_full,
-        "sl_ma": int(np.floor(stop_price)), 
+        "sl_ma": int(np.floor(stop_price)), # SL（採用された実SL）
         "signal_success": True
     }
 # --- 関数群の追加ここまで ---
@@ -640,7 +650,8 @@ def get_target_pct(market_cap):
 def run_backtest(df, market_cap):
     try:
         if len(df) < 80: return "データ不足", 0, 0.0 
-        target_pct = get_target_pct(market_cap)
+        # 旧ロジックのTarget Percentageを使用（バックテスト部分の要件定義がないため現状維持）
+        target_pct = get_target_pct(market_cap) 
         cap_str = f"{target_pct*100:.1f}%"
         wins, losses, max_dd_pct = 0, 0, 0.0 
         test_data = df.tail(75)
@@ -838,6 +849,8 @@ def get_stock_data(ticker, current_run_count):
         is_gc, is_dc = is_gc_raw, is_dc_raw
         if ma_diff_pct < 0.1: is_gc, is_dc = False, False
         atr_val = last['ATR'] if not pd.isna(last['ATR']) else 0
+        
+        # 要件書 3-1-②: ATRベースの推奨SL (SL_ATR = 現在値 - ATR14 × 1.5)
         atr_sl_price = 0
         if curr_price > 0 and atr_val > 0: atr_sl_price = curr_price - (atr_val * 1.5); atr_sl_price = max(0, atr_sl_price)
         
@@ -858,7 +871,7 @@ def get_stock_data(ticker, current_run_count):
              buy_target = signals["buy"]
              p_half = signals["p_half"]
              p_full = signals["p_full"]
-             sl_ma = signals["sl_ma"] # SL MAとして損切価格を使用
+             sl_ma = signals["sl_ma"] # SL MAとして損切価格 (-3%) を使用
              is_aoteng = False
              
              # 損切乖離率の計算
@@ -869,7 +882,10 @@ def get_stock_data(ticker, current_run_count):
              risk_reward_ratio, risk_value = 0.0, 0.0
              if buy_target > 0 and sl_ma > 0 and (p_half > 0 or p_full > 0): 
                  avg_target = (p_half + p_full) / 2 if p_half > 0 and p_full > 0 else (p_full if p_full > 0 and p_half == 0 else 0)
-                 reward_value = avg_target - buy_target; risk_value = buy_target - sl_ma 
+                 # 要件書 5: Reward = (半益目標 + 全益目標) / 2 - 想定水準
+                 reward_value = avg_target - buy_target
+                 # 要件書 5: Risk = 想定水準 - SL（採用された実SL）
+                 risk_value = buy_target - sl_ma 
                  if risk_value > 0 and reward_value > 0: risk_reward_ratio = min(reward_value / risk_value, 50.0)
              else:
                   risk_reward_ratio = 0.0
@@ -880,21 +896,35 @@ def get_stock_data(ticker, current_run_count):
              # 既存のロジックをそのまま使用 (新ロジック不採用時のフォールバック)
              strategy, buy_target, p_half, p_full = "様子見", int(ma5), 0, 0
              is_aoteng = False; target_pct = get_target_pct(info["cap"])
+             
+             # 要件書 1-1: 順張り想定水準 = MA5
              if ma5 > ma25 > ma75 and ma5 > prev_ma5:
                   strategy, buy_target = "🔥順張り", int(ma5)
                   target_half_raw = buy_target * (1 + target_pct / 2); p_half_candidate = int(np.floor(target_half_raw)) 
                   target_full_raw = buy_target * (1 + target_pct); p_full_candidate = int(np.floor(target_full_raw))
-                  if high_250d > 0 and curr_price > high_250d and p_half_candidate <= curr_price:
-                       is_aoteng = True; max_high_today = df['High'].iloc[-1]; atr_trailing_price = max_high_today - (atr_val * 2.5); atr_trailing_price = max(0, atr_trailing_price)
+                  
+                  # 【★ 修正箇所：青天井判定の条件を要件書4に合わせる】
+                  is_ath = high_250d > 0 and curr_price > high_250d
+                  is_rsi_ok = rsi_val < 80
+                  is_volume_ok = vol_ratio >= 1.5
+                  
+                  if is_ath and is_rsi_ok and is_volume_ok:
+                       # 要件書 4: 青天井領域の利益確定ロジック
+                       is_aoteng = True; max_high_today = df['High'].iloc[-1]; 
+                       # 要件書 4: TSL = 現在値 - ATR14 × 2.5
+                       atr_trailing_price = max_high_today - (atr_val * 2.5); atr_trailing_price = max(0, atr_trailing_price)
                        p_full = int(np.floor(atr_trailing_price)) # SLとして使用
                        p_half = 0 
                   else: 
+                       # 青天井条件を満たさない場合、通常の順張りロジックを適用
                        if p_half_candidate > curr_price: p_half, p_full = p_half_candidate, p_full_candidate if p_full_candidate > p_half else p_half + 1 
                        elif p_half_candidate <= curr_price and p_full_candidate > curr_price: p_half, p_full = 0, p_full_candidate
                        elif p_full_candidate <= curr_price:
                             p_full_fallback_raw = curr_price * (1 + target_pct); p_full_fallback = int(np.floor(p_full_fallback_raw))
                             if p_full_fallback > curr_price: p_full, p_half = p_full_fallback, 0
                             else: p_full, p_half = 0, 0
+                            
+             # 要件書 1-3: 逆張り想定水準 = 現在値
              elif rsi_val <= 30 or (curr_price < ma25 * 0.9 if ma25 else False):
                  strategy, buy_target = "🌊逆張り", int(curr_price)
                  p_half_candidate = int(np.floor(ma5 - 1)) if ma5 else 0 
@@ -902,18 +932,16 @@ def get_stock_data(ticker, current_run_count):
                  p_half = p_half_candidate if p_half_candidate > curr_price else 0; p_full = p_full_candidate if p_full_candidate > curr_price else 0
                  if p_half > 0 and p_full > 0 and p_half > p_full: p_half = p_full - 1 
             
-             # sl_ma の決定 (既存ロジック)
-             if strategy == "🔥順張り": sl_ma = ma25 if ma25 > 0 else (ma75 if ma75 > 0 else 0)
-             elif strategy == "🌊逆張り": sl_ma = ma75 if ma75 > 0 else (ma25 if ma25 > 0 else 0)
-             elif ma25 > 0: sl_ma = ma25
-             else: sl_ma = 0
+             # sl_ma の決定 (要件書 3-2: 🚀ロジック不成立時はATRベースを採用)
+             sl_ma = atr_sl_price # ATRベースのSL (現在値 - ATR14 * 1.5) を採用
+             
              if curr_price > 0 and sl_ma > 0: sl_pct = ((curr_price / sl_ma) - 1) * 100 
                  
              # R/R比の計算 (既存ロジック)
              risk_reward_ratio, risk_value = 0.0, 0.0
              if buy_target > 0 and sl_ma > 0 and (p_half > 0 or is_aoteng or p_full > 0): 
                  if is_aoteng: 
-                     risk_value_raw = buy_target - sl_ma # 順張り想定水準とSL MAの差
+                     risk_value_raw = buy_target - sl_ma # 想定水準と採用されたSL(ATR SL)の差
                      if risk_value_raw > 0: 
                          risk_reward_ratio = 50.0 # 青天井時は高評価として固定
                          risk_value = risk_value_raw
@@ -940,41 +968,52 @@ def get_stock_data(ticker, current_run_count):
         
         is_rr_buffer_zone = (0.95 <= risk_reward_ratio <= 1.05)
 
+        # 要件書 6: R/R < 1 → -25点
         if not is_aoteng:
              if risk_reward_ratio < 1.0 and not is_rr_buffer_zone: total_structural_deduction -= 25 
              
         if "順張" in strategy or strategy == "🚀ロジック": # 新旧順張りロジック共通
+            # 要件書 6: RSI 極端
             if info["cap"] >= 3000:
                 if rsi_val >= 85: total_structural_deduction -= 15 
             else:
                 if rsi_val >= 80: total_structural_deduction -= 25 
         elif "🌊逆張り" in strategy:
+            # 要件書 6: RSI 極端
             if rsi_val <= 20: 
                 if info["cap"] >= 3000: total_structural_deduction -= 15
                 else: total_structural_deduction -= 25
                 
+        # 要件書 6: 流動性不足 → -30点（致命傷）
         if avg_vol_5d < 1000: total_structural_deduction -= 30 
         liquidity_ratio_pct = (avg_vol_5d / issued_shares) * 100 if issued_shares > 0 else 0.0
         if liquidity_ratio_pct < 0.05: total_structural_deduction -= 10
         score += total_structural_deduction
         
+        # 要件書 6: 🚀ロジック成立/順張 → +15点
         if "順張" in strategy or strategy == "🚀ロジック": score += 15 # 新旧順張りロジック共通
         if "🌊逆張り" in strategy: score += 10
+        # 要件書 6: RSI 55〜65 → +10点
         if 55 <= rsi_val <= 65: score += 10
+        # 要件書 6: 出来高 1.5倍 → +10点
         if vol_ratio > 1.5: score += 10;
+        # 要件書 6: 出来高 3倍 → +5点
         if vol_ratio > 3.0: score += 5;
         if up_days >= 4: score += 5
         
         rr_bonus = 0; min_risk_threshold = buy_target * 0.01 
+        # 要件書 6: R/R ≥ 2 → +15点 (想定リスク≧1%もチェック)
         if not is_aoteng and not is_rr_buffer_zone and risk_value >= min_risk_threshold:
             if risk_reward_ratio >= 2.0: rr_bonus = 15
             elif risk_reward_ratio >= 1.5: rr_bonus = 5
         score += rr_bonus
         
+        # 要件書 6: 青天井モメンタム → +15点
         aoteng_bonus = 0
         if is_aoteng and rsi_val < 80 and vol_ratio > 1.5: aoteng_bonus = 15 
         score += aoteng_bonus
         
+        # 要件書 6: デッドクロス（引け後） → -10点
         is_final_cross = (status != "場中(進行中)") 
         if is_final_cross:
             if is_gc: score += 15 
@@ -1076,9 +1115,10 @@ def batch_analyze_with_ai(data_list):
         mdd = d.get('max_dd_pct', 0.0); sl_pct = d.get('sl_pct', 0.0); sl_ma = d.get('sl_ma', 0); avg_vol = d.get('avg_volume_5d', 0)
         low_liquidity_status = "致命的低流動性:警告(1000株未満)" if avg_vol < 1000 else "流動性:問題なし"
         
-        sl_ma_disp = f"過去の支持線MA:{sl_ma:,.0f}" if sl_ma > 0 else "支持線:不明" 
+        # sl_ma はR/R計算に使用された実SL価格 (🚀時: -3%, 非🚀時: ATR SL)
+        sl_ma_disp = f"採用SL:{sl_ma:,.0f}円" if sl_ma > 0 else "採用SL:不明" 
         atr_sl_price = d.get('atr_sl_price', 0)
-        atr_sl_disp = f"ATR_SL:{atr_sl_price:,.0f}" if atr_sl_price > 0 else "ATR_SL:不明"
+        atr_sl_disp = f"ATR_SL:{atr_sl_price:,.0f}円" if atr_sl_price > 0 else "ATR_SL:不明"
 
         gc_dc_status = ""
         if d.get("is_gc"): gc_dc_status = "GC:発生"
@@ -1391,8 +1431,8 @@ if st.session_state.analyzed_data:
             ("企業名", "125px", None), ("時価総額", "95px", None), ("点", "35px", "上段: 総合分析点。下段: **本日の市場開始時からの差分**（前日比ではない）。"), 
             ("分析戦略", "75px", "🚀ロジック: 5MAタッチ反発の優位なシグナル。🔥順張り: トレンド継続/青天井。🌊逆張り: RSI低位/MA乖離反発。"), 
             ("現在値", "60px", None), ("想定水準\n(乖離)", "65px", "**🚀ロジック時: 確定したエントリー価格。** その他: 買付を「想定」するMA水準。乖離は現在値との差額。売買判断はご自身の責任において行います。"), 
-            ("R/R比", "40px", "想定水準から利益確定目標までの値幅を、SL MAまでの値幅で割った比率。1.0未満は-25点。"), 
-            ("最大DD率\nSL乖離率", "70px", "最大DD率: 過去の同条件トレードでの最大下落率。SL乖離率: SLライン（過去の支持線）までの余地。"), 
+            ("R/R比", "40px", "想定水準から利益確定目標までの値幅を、SLラインまでの値幅で割った比率。1.0未満は-25点。"), 
+            ("最大DD率\nSL乖離率", "70px", "最大DD率: 過去の同条件トレードでの最大下落率。SL乖離率: SLライン（ATRベースのSL）までの余地。"), 
             ("利益確定\n目標値", "120px", "時価総額別の分析リターンに基づき、利益確定の「目標値」として算出した水準。青天井時や目標超過時は動的な追従目標を表示。"), 
             ("RSI", "50px", "相対力指数。🔵30以下(売られすぎ) / 🟢55-65(上昇トレンド) / 🔴70以上(過熱)"), 
             ("出来高比\n（5日平均）", "80px", "上段は当日の出来高と5日平均出来高（補正済み）の比率。下段は5日平均出来高。1000株未満は-30点。"), 
