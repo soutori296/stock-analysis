@@ -386,6 +386,7 @@ with st.sidebar:
         sort_options = [
             "スコア順 (高い順)", "更新回数順", "時価総額順 (高い順)", 
             "RSI順 (低い順)", "RSI順 (高い順)", "出来高倍率順 (高い順)",
+            "勝率順 (高い順)", # 🎯 4. 勝率ソートの追加
             "銘柄コード順"
         ]
         
@@ -679,54 +680,92 @@ def get_25day_ratio():
 
 market_25d_ratio = get_25day_ratio()
 
-def get_target_pct(market_cap):
-    if market_cap >= 10000: return 0.015 
-    elif market_cap >= 3000: return 0.020 
-    elif market_cap >= 500: return 0.030 
-    elif market_cap >= 100: return 0.040 
-    else: return 0.050 
+# 旧ロジック (未使用)
+# def get_target_pct(market_cap):
+#     if market_cap >= 10000: return 0.015 
+#     elif market_cap >= 3000: return 0.020 
+#     elif market_cap >= 500: return 0.030 
+#     elif market_cap >= 100: return 0.040 
+#     else: return 0.050 
 
 def run_backtest(df, market_cap):
+    """
+    バックテストを実行し、時価総額別の全益率目標に基づく10日間の勝率を計算する。
+    """
     try:
-        if len(df) < 80: return "データ不足", 0, 0.0 
-        # 旧ロジックのTarget Percentageを使用（バックテスト部分の要件定義がないため現状維持）
-        target_pct = get_target_pct(market_cap) 
-        cap_str = f"{target_pct*100:.1f}%"
+        # 🎯 修正: 戻り値の形式を変更 (bt_str, win_rate_pct, bt_cnt, max_dd_pct, target_pct, wins)
+        if len(df) < 80: return "データ不足", 0.0, 0, 0.0, 0.0, 0 
+
+        category = get_market_cap_category(market_cap)
+        # 🎯 2. 要望: 全益率をターゲットとする
+        target_pct = get_target_pct_new(category, is_half=False) 
+        
+        cap_str = f"{target_pct*100:.1f}%" # n.0% の部分
         wins, losses, max_dd_pct = 0, 0, 0.0 
-        test_data = df.tail(75)
+        test_data = df.tail(75).copy() # コピーして操作
         n = len(test_data)
+        
+        # 移動平均線とテクニカル指標の再計算 (安全のため)
+        test_data['SMA5'] = test_data['Close'].rolling(5).mean()
+        test_data['SMA25'] = test_data['Close'].rolling(25).mean()
+        
         i = 0
-        while i < n - 5: 
+        # 10営業日を見るため、終端を変更
+        while i < n - 10: 
             row = test_data.iloc[i]
             low, sma5, sma25 = row.get('Low'), row.get('SMA5'), row.get('SMA25')
-            if sma5 is None or sma25 is None or low is None or pd.isna(sma5) or pd.isna(sma25):
+            
+            # データ欠損チェック
+            if pd.isna(sma5) or pd.isna(sma25) or pd.isna(low) or sma5 == 0 or sma25 == 0:
                 i += 1
                 continue
+                
+            # エントリー条件 (旧ロジックのMA5押し目買い条件を維持)
             if sma5 > sma25 and low <= sma5: 
                 entry_price = sma5 
                 target_price = entry_price * (1 + target_pct)
                 is_win, hold_days, trade_min_low = False, 0, entry_price 
-                for j in range(1, 11):
+                
+                # 🎯 2. 要望: 10営業日以内に判定 (range(1, 11) は i+1日目からi+10日目まで)
+                for j in range(1, 11): 
                     if i + j >= n: break
                     future = test_data.iloc[i + j]
                     future_high, future_low = future.get('High'), future.get('Low') 
                     hold_days = j
-                    if future_low is not None: trade_min_low = min(trade_min_low, future_low)
-                    if future_high is not None and future_high >= target_price: 
+                    
+                    if future_low is not None and not pd.isna(future_low): trade_min_low = min(trade_min_low, future_low)
+                    
+                    # 勝利判定: 10営業日以内に目標価格に到達
+                    if future_high is not None and not pd.isna(future_high) and future_high >= target_price: 
                         is_win = True
                         break
+                        
                 if not is_win: 
                     losses += 1
+                    # 最大ドローダウンの計算
                     if entry_price > 0 and trade_min_low < entry_price:
                         dd_pct = ((trade_min_low / entry_price) - 1) * 100 
                         max_dd_pct = min(max_dd_pct, dd_pct) 
                 else: wins += 1
+                
+                # 次のエントリーポイントへ移動
                 i += max(1, hold_days) 
             i += 1
-        if wins + losses == 0: return "機会なし", 0, 0.0
-        return f"{wins}勝{losses}敗 ({cap_str}抜)", wins+losses, max_dd_pct 
+            
+        total_trades = wins + losses
+        win_rate_pct = (wins / total_trades) * 100 if total_trades > 0 else 0.0
+        
+        # 🎯 修正: bt_str_new に目標パーセンテージを含める (未使用だがデータとして保持)
+        bt_str_new = f'{win_rate_pct:.0f}%' 
+        
+        # 🎯 修正: 戻り値に目標リターン率と勝ち数を追加
+        if total_trades == 0: return "機会なし", 0.0, 0, 0.0, target_pct, 0
+        
+        return bt_str_new, win_rate_pct, total_trades, max_dd_pct, target_pct, wins
+        
     except Exception:
-        return "計算エラー", 0, 0.0
+        # 🎯 修正: 戻り値の形式を変更
+        return "計算エラー", 0.0, 0, 0.0, 0.0, 0
 
 # ★ 修正: ttl を 1秒 に一時的に変更してキャッシュをクリア
 @st.cache_data(ttl=1) 
@@ -805,7 +844,9 @@ def get_stock_data(ticker, current_run_count):
     sl_pct, atr_sl_price, vol_ratio, liquidity_ratio_pct = 0, 0, 0.0, 0.0
     strategy, is_gc, is_dc, is_aoteng = "様子見", False, False, False
     rsi_mark, momentum_str, p_half, p_full = "⚪", "0%", 0, 0
-    buy_target, bt_str, max_dd_pct, win_rate_pct, sl_ma = 0, "計算エラー", 0.0, 0, 0
+    # 🎯 修正: バックテスト関連の初期値に目標リターン率と勝ち数を追加
+    buy_target, bt_str, max_dd_pct, win_rate_pct, sl_ma = 0, "計算エラー", 0.0, 0.0, 0 
+    bt_cnt = 0; bt_target_pct = 0.0; bt_win_count = 0
     current_calculated_score, score_diff, score_to_return = 0, 0, 50 
 
     curr_price_for_check = info.get("price")
@@ -882,8 +923,8 @@ def get_stock_data(ticker, current_run_count):
         df['ATR'] = df['TR'].rolling(14).mean(); delta = df['Close'].diff()
         gain = (delta.where(delta > 0, 0)).rolling(14).mean(); loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
         rs = gain / loss; df['RSI'] = 100 - (100 / (1 + rs))
-        recent = df['Close'].diff().tail(5); up_days = (recent > 0).sum(); win_rate_pct = (up_days / 5) * 100
-        momentum_str = f"{win_rate_pct:.0f}%"; last = df.iloc[-1]; prev = df.iloc[-2] if len(df) >= 2 else last
+        recent = df['Close'].diff().tail(5); up_days = (recent > 0).sum(); win_rate_pct_momentum = (up_days / 5) * 100
+        momentum_str = f"{win_rate_pct_momentum:.0f}%"; last = df.iloc[-1]; prev = df.iloc[-2] if len(df) >= 2 else last
         ma5 = last['SMA5'] if not pd.isna(last['SMA5']) else 0; ma25 = last['SMA25'] if not pd.isna(last['SMA25']) else 0
         ma75 = last['SMA75'] if not pd.isna(last['SMA75']) else 0; prev_ma5 = prev['SMA5'] if not pd.isna(prev['SMA5']) else ma5
         prev_ma25 = prev['SMA25'] if not pd.isna(prev['SMA25']) else ma25
@@ -1023,7 +1064,8 @@ def get_stock_data(ticker, current_run_count):
 
         # --- 共通のテクニカル計算、過去実績、スコア計算 ---
         
-        bt_str, bt_cnt, max_dd_pct = run_backtest(df, info["cap"]) 
+        # 🎯 修正: run_backtest の戻り値に追加
+        bt_str, win_rate_pct, bt_cnt, max_dd_pct, bt_target_pct, bt_win_count = run_backtest(df, info["cap"]) 
 
         if rsi_val <= 30: rsi_mark = "🔵"
         elif 55 <= rsi_val <= 65: rsi_mark = "🟢"
@@ -1133,11 +1175,8 @@ def get_stock_data(ticker, current_run_count):
         vol_disp = f"🔥{vol_ratio:.1f}倍" if vol_ratio > 1.5 else f"{vol_ratio:.1f}倍"
         
         # --- backtest_raw の安全な HTMLタグ除去 ---
-        # 🎯 ⑤ backtest_raw のタグ除去を安全で統一した式に変更
-        bt_raw = re.sub(r'<br\s*/?>', ' ', bt_str)
-        bt_raw = re.sub(r'</?[^>]+>', '', bt_raw)
-        bt_raw = bt_raw.replace("(", "").replace(")", "").strip()
-
+        # 🎯 修正: backtest_raw の格納を変更 (勝率 % のみ)
+        bt_raw = bt_str
 
         return {
             "code": ticker,
@@ -1162,8 +1201,8 @@ def get_stock_data(ticker, current_run_count):
             "p_half": p_half,
             "p_full": p_full,
 
-            "backtest": bt_str,
-            "backtest_raw": bt_raw,
+            "backtest": bt_str, # 🎯 勝率 % の文字列
+            "backtest_raw": bt_raw, # 🎯 勝率 % の文字列
 
             "max_dd_pct": max_dd_pct,
             "sl_pct": sl_pct,
@@ -1188,6 +1227,11 @@ def get_stock_data(ticker, current_run_count):
             "base_score": base_score,
             "is_aoteng": is_aoteng,
             "run_count": current_run_count,
+            
+            "win_rate_pct": win_rate_pct, # 🎯 ソート用に勝率 (float) を追加
+            "bt_trade_count": bt_cnt, # 🎯 取引回数を追加
+            "bt_target_pct": bt_target_pct, # 🎯 目標リターン率 (float) を追加
+            "bt_win_count": bt_win_count, # 🎯 勝ち数 (int) を追加
         }
     except Exception as e:
         st.session_state.error_messages.append(
@@ -1242,8 +1286,12 @@ def batch_analyze_with_ai(data_list):
 
         liq_disp = f"流動性比率:{d.get('liquidity_ratio_pct', 0.0):.2f}%" 
         atr_disp = f"ATR:{d.get('atr_val', 0.0):.1f}円" 
+        
+        # 🎯 過去実績の勝率を追加
+        win_rate = d.get('backtest', '-')
+        win_rate_disp = f"過去勝率:{win_rate}"
 
-        prompt_text += f"ID:{d['code']} | {d['name']} | 現在:{price:,.0f} | 分析戦略:{d['strategy']} | RSI:{d['rsi']:.1f} | 5MA乖離率:{ma_div:+.1f}%{rr_disp} | 出来高倍率:{d['vol_ratio']:.1f}倍 | リスク情報: MDD:{mdd:+.1f}%, SL乖離率:{sl_pct:+.1f}% | {sl_ma_disp} | {low_liquidity_status} | {liq_disp} | {atr_disp} | {gc_dc_status} | {atr_sl_disp} | {target_info} | 総合分析点:{d['score']}\n" 
+        prompt_text += f"ID:{d['code']} | {d['name']} | 現在:{price:,.0f} | 分析戦略:{d['strategy']} | RSI:{d['rsi']:.1f} | 5MA乖離率:{ma_div:+.1f}%{rr_disp} | 出来高倍率:{d['vol_ratio']:.1f}倍 | リスク情報: MDD:{mdd:+.1f}%, SL乖離率:{sl_pct:+.1f}% | {sl_ma_disp} | {low_liquidity_status} | {liq_disp} | {atr_disp} | {gc_dc_status} | {atr_sl_disp} | {target_info} | {win_rate_disp} | 総合分析点:{d['score']}\n" 
 
     r25 = market_25d_ratio
     market_alert_info = f"市場25日騰落レシオ: {r25:.2f}%。"
@@ -1451,6 +1499,7 @@ if st.session_state.analyzed_data:
         elif "RSI順 (低い" in option: lst.sort(key=lambda x: x.get('rsi', 50))
         elif "RSI順 (高い" in option: lst.sort(key=lambda x: x.get('rsi', 50), reverse=True)
         elif "出来高倍率順 (高い順)" in option: lst.sort(key=lambda x: x.get('vol_ratio', 0), reverse=True) 
+        elif "勝率順 (高い順)" in option: lst.sort(key=lambda x: x.get('win_rate_pct', 0.0), reverse=True) # 🎯 4. 勝率ソートのロジック
         else: lst.sort(key=lambda x: x.get('code', ''))
     
     current_sort_option = st.session_state['sort_option_key']
@@ -1466,6 +1515,9 @@ if st.session_state.analyzed_data:
 
     def create_table(d_list, title):
         if not d_list: return f"<h4>{title}: 該当なし</h4>"
+        
+        # 🎯 最終決定のヘッダーテキスト
+        header_text = "MA5押目<br>実績勝率" 
         
         rows = ""
         for i, d in enumerate(d_list):
@@ -1508,10 +1560,18 @@ if st.session_state.analyzed_data:
                  else:
                       target_txt = "MA回帰目標:なし"
 
-            bt_display = d.get("backtest", "-").replace("<br>", " ") 
-            bt_parts = bt_display.split('('); bt_row1 = bt_parts[0].strip()
-            bt_row2 = f'({bt_parts[1].strip()}' if len(bt_parts) > 1 else ""
-            bt_cell_content = f'{bt_row1}<br>{bt_row2}'
+            # 🎯 最終決定の3段表示ロジック
+            bt_win_rate = d.get("backtest", "-") # 例: 60%
+            bt_win_count = d.get("bt_win_count", 0) # 例: 12
+            bt_target_pct = d.get("bt_target_pct", 0.0) # 例: 0.040
+            
+            if "エラー" in bt_win_rate or "機会なし" in bt_win_rate:
+                 bt_cell_content = bt_win_rate
+            else:
+                 target_pct_disp = f'(+{bt_target_pct*100:.1f}%抜)'
+                 win_count_disp = f'({bt_win_count}勝)'
+                 bt_cell_content = f'<b>{bt_win_rate}</b><br>{win_count_disp}<br><span style="font-size:10px; color:#666;">{target_pct_disp}</span>'
+                 
             vol_disp = d.get("vol_disp", "-"); mdd_disp = f"{d.get('max_dd_pct', 0.0):.1f}%"; sl_pct_disp = f"{d.get('sl_pct', 0.0):.1f}%"
             rr_ratio = d.get('risk_reward', 0.0)
             if d.get('is_aoteng'): rr_disp = "青天" 
@@ -1542,7 +1602,7 @@ if st.session_state.analyzed_data:
             rows += f'<tr><td class="td-center"><div class="two-line-cell"><b>{display_no}</b><span class="small-font-no">{run_count_disp}</span></div></td><td class="td-center"><div class="two-line-cell"><b>{d.get("code")}</b>{code_status_disp}</div></td><td class="th-left td-bold">{d.get("name")}</td><td class="td-right">{d.get("cap_disp")}</td><td class="td-center">{score_disp_main}<br>{diff_disp}</td><td class="td-center">{d.get("strategy")}</td><td class="td-right td-bold">{price_disp}</td><td class="td-right">{buy_display_html}<br>{diff_display_html}</td><td class="td-center">{rr_disp}</td><td class="td-right">{mdd_disp}<br>{sl_pct_disp}</td><td class="td-left" style="line-height:1.2;font-size:11px;">{target_txt}</td><td class="td-center">{d.get("rsi_disp")}</td><td class="td-right">{vol_disp}<br>({avg_vol_html})</td><td class="td-center td-blue">{bt_cell_content}</td><td class="td-center">{d.get("per")}<br>{d.get("pbr")}</td><td class="td-center">{d.get("momentum")}</td><td class="th-left"><div class="comment-scroll-box">{comment_html}</div></td></tr>'
 
         headers = [
-            ("No\n(更新回)", "55px", "上段: 総合ナンバー（順位）。下段: (X回目) はデータが更新された回数。初回実行時は空欄です。"), 
+            ("No", "55px", "上段: 総合ナンバー（順位）。下段: (X回目) はデータが更新された回数。初回実行時は空欄です。"), 
             ("コード\n(更新)", "60px", "上段: 銘柄コード。下段: (更新済)は2回目以降の実行で更新された銘柄。"), 
             ("企業名", "125px", None), ("時価総額", "95px", None), ("点", "35px", "上段: 総合分析点。下段: **本日の市場開始時からの差分**（前日比ではない）。"), 
             ("分析戦略", "75px", "🚀ロジック: 5MAタッチ反発の優位なシグナル。🔥順張り: トレンド継続/青天井。🌊逆張り: RSI低位/MA乖離反発。"), 
@@ -1552,7 +1612,8 @@ if st.session_state.analyzed_data:
             ("利益確定\n目標値", "120px", "時価総額別の分析リターンに基づき、利益確定の「目標値」として算出した水準。青天井時や目標超過時は動的な追従目標を表示。"), 
             ("RSI", "50px", "相対力指数。🔵30以下(売られすぎ) / 🟢55-65(上昇トレンド) / 🔴70以上(過熱)"), 
             ("出来高比\n（5日平均）", "80px", "上段は当日の出来高と5日平均出来高（補正済み）の比率。下段は5日平均出来高。1000株未満は-30点。"), 
-            ("過去実績\n(勝敗)", "70px", "過去75日間で、「想定水準」での買付が「目標値」に到達した実績。将来の勝敗を保証するものではありません。"), 
+            # 🎯 最終決定のヘッダーテキスト
+            (header_text.replace("<br>","\n"), "70px", "過去75営業日での「MA5押し目買い」を仮定した同条件トレードの勝率、勝ち数、および時価総額分類別目標リターン率。勝利条件: 10営業日以内に時価総額別の全益目標値に到達。"), 
             ("PER\nPBR", "60px", "株価収益率/株価純資産倍率。株価の相対的な評価指標。"), ("直近\n勝率", "40px", "直近5日間の前日比プラスだった日数の割合。"), 
             ("アイの所感", "min-width:350px;", None),
         ]
@@ -1589,8 +1650,8 @@ if st.session_state.analyzed_data:
         df_raw = pd.DataFrame(data).copy()
         if 'backtest' in df_raw.columns: df_raw = df_raw.drop(columns=['backtest']) 
         if 'backtest_raw' in df_raw.columns: df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'}) 
-        columns_to_drop = ['risk_value', 'issued_shares', 'liquidity_ratio_pct', 'atr_val', 'is_gc', 'is_dc', 'atr_sl_price', 'score_diff', 'base_score', 'is_aoteng', 'is_updated_in_this_run', 'run_count', 'batch_order', 'update_count'] 
+        # 🎯 bt_target_pct, bt_win_count も維持する
+        columns_to_drop = ['risk_value', 'issued_shares', 'liquidity_ratio_pct', 'atr_val', 'is_gc', 'is_dc', 'atr_sl_price', 'score_diff', 'base_score', 'is_aoteng', 'is_updated_in_this_run', 'run_count', 'batch_order', 'update_count', 'bt_trade_count'] 
         for col in columns_to_drop:
              if col in df_raw.columns: df_raw = df_raw.drop(columns=[col]) 
         st.dataframe(df_raw)
-
