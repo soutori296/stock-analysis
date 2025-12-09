@@ -476,7 +476,7 @@ def get_market_cap_category(market_cap):
     else: return "超小型"
 
 def get_target_pct_new(category, is_half):
-    # 要件書 2-1 に基づく利益率
+    # 要件書 3-1 に基づく利益率
     if is_half:
         if category == "超大型": return 0.015
         elif category == "大型": return 0.020
@@ -492,51 +492,94 @@ def get_target_pct_new(category, is_half):
 
 def create_signals(df, info, jst_now_local):
     last = df.iloc[-1]
+    prev = df.iloc[-2] if len(df) >= 2 else last # 前日データを取得
+    
     market_cap = info.get("cap", 0); category = get_market_cap_category(market_cap)
     ma5 = last.get('SMA5', 0); close = last.get('Close', 0); open_price = last.get('Open', 0)
-    vol_ratio = df.iloc[-1].get('Vol_Ratio', 0.0) 
-    if ma5 == 0 or close == 0 or open_price == 0:
+    high = last.get('High', 0); low = last.get('Low', 0) # 当日高値・安値
+    vol_ratio = df.iloc[-1].get('Vol_Ratio', 0.0)
+    rsi = last.get('RSI', 50)
+    prev_close = prev.get('Close', 0) # 前日終値 (仕様 5-3のため)
+    
+    # 5-4. 必要データの欠損チェック
+    if ma5 == 0 or close == 0 or open_price == 0 or high == 0 or low == 0 or prev_close == 0:
         return {"strategy": "様子見", "buy": 0, "p_half": 0, "p_full": 0, "sl_ma": 0, "signal_success": False}
         
+    # --- 早期除外フィルター (仕様 5) ---
+    # 5-1. 当日高値が異常に高い: High >= MA5 * 1.01 → 無効
+    if high >= ma5 * 1.01:
+        return {"strategy": "様子見", "buy": 0, "p_half": 0, "p_full": 0, "sl_ma": 0, "signal_success": False}
+        
+    # 5-2. 当日終値が MA5 を勢いよく上抜けた: Close > MA5 * 1.01 → 無効
+    if close > ma5 * 1.01:
+        return {"strategy": "様子見", "buy": 0, "p_half": 0, "p_full": 0, "sl_ma": 0, "signal_success": False}
+
+    # 5-3. 当日終値が前日終値より明確に弱い: Close < 前日Close * 0.995 → 無効
+    if close < prev_close * 0.995:
+        return {"strategy": "様子見", "buy": 0, "p_half": 0, "p_full": 0, "sl_ma": 0, "signal_success": False}
+
+    # --- 1-1. MA5 接触条件 ---
+    # abs((Close - MA5) / MA5) <= 0.5%（0.005）
     proximity_pct = abs((close - ma5) / ma5) if ma5 > 0 else 1.0
-    is_touching_or_close = proximity_pct <= 0.005 
+    is_touching_or_close = proximity_pct <= 0.005
+    
+    # --- 1-2. 足形（リバーサル形状） ---
     is_reversal_shape = False; is_positive_candle = close > open_price
-    if 'High' in df.columns and 'Low' in df.columns:
-        body = abs(close - open_price)
-        lower_shadow = min(close, open_price) - last.get('Low', 0)
-        if is_positive_candle or (body > 0 and lower_shadow / body >= 0.3) or (body == 0 and lower_shadow > 0):
-             is_reversal_shape = True
+    body = abs(close - open_price)
+    
+    # 陽線 (Close > Open)
+    if is_positive_candle:
+        is_reversal_shape = True
+    # 下ヒゲが実体の 30%以上 (body > 0 の場合)
+    elif body > 0:
+        lower_shadow = min(close, open_price) - low
+        if lower_shadow > 0 and lower_shadow / body >= 0.3:
+            is_reversal_shape = True
+    # 十字線で下ヒゲがある (body == 0 の場合)
+    elif body == 0:
+        lower_shadow = min(close, open_price) - low
+        if lower_shadow > 0:
+            is_reversal_shape = True
+
+    # --- 1-3. 出来高スパイク ---
     required_vol_ratio = 1.5
-    if category == "大型" or category == "超大型": required_vol_ratio = 1.3
-    elif category in ["小型", "超小型"]: required_vol_ratio = 1.7
+    if category == "超大型" or category == "大型": required_vol_ratio = 1.3 # 1.3 倍以上
+    elif category == "中型": required_vol_ratio = 1.5 # 1.5 倍以上
+    elif category in ["小型", "超小型"]: required_vol_ratio = 1.7 # 1.7 倍以上
     is_volume_spike = vol_ratio >= required_vol_ratio
-    rsi = last.get('RSI', 50); ma_diff_pct = (close / ma5 - 1) * 100 
+    
+    # --- 1-4. 勢い（モメンタム） ---
+    ma_diff_pct = (close / ma5 - 1) * 100 # MA5乖離率 %
     is_momentum_ok = (30 <= rsi <= 60) and (-1.0 <= ma_diff_pct <= 0.5) 
+    
+    # --- 1-5. 最終判定 ---
     is_entry_signal = is_touching_or_close and is_reversal_shape and is_volume_spike and is_momentum_ok
+    
     if not is_entry_signal:
         return {"strategy": "様子見", "buy": 0, "p_half": 0, "p_full": 0, "sl_ma": 0, "signal_success": False}
         
-    # 要件書 1-2: 想定水準 ＝ 前日確定足の終値 (ここではシグナル成立時の終値/現在値を使用)
-    entry_price = close
+    # --- 2. エントリー価格 & 4. 損切り ---
+    entry_price = close # 当日終値 Close (想定水準)
+    stop_price = entry_price * (1 - 0.03) # SL = floor(entry_price × 0.97)
     
-    # 要件書 3-1-①: SL = 想定水準 × 0.97
-    stop_price = entry_price * (1 - 0.03) 
-    
-    # 要件書 2: 利益目標の計算と端数処理 (floor)
+    # --- 3. 利益目標 ---
     half_pct = get_target_pct_new(category, is_half=True)
     full_pct = get_target_pct_new(category, is_half=False)
-    p_half = int(np.floor(entry_price * (1 + half_pct)))
-    p_full = int(np.floor(entry_price * (1 + full_pct)))
     
-    if p_full < p_half: p_full = p_half 
+    p_half = int(np.floor(entry_price * (1 + half_pct))) # 端数切り捨て (floor)
+    p_full = int(np.floor(entry_price * (1 + full_pct))) # 端数切り捨て (floor)
+    
+    if p_full < p_half: p_full = p_half # p_full < p_half の場合 → p_full = p_half
+    
+    # 安全策として、目標値がエントリー価格以下なら無効
     if p_half <= entry_price or p_full <= entry_price: p_half, p_full = 0, 0 
     
-    # 【★ 修正: 戦略名を「🚀ロジック」に変更】
     strategy_name = "🚀ロジック" 
     
+    # --- 6. 返却形式 ---
     return {
         "strategy": strategy_name, 
-        "buy": int(np.floor(entry_price)), # 想定水準
+        "buy": int(np.floor(entry_price)), # 想定水準 (Closeの切り捨て)
         "p_half": p_half,
         "p_full": p_full,
         "sl_ma": int(np.floor(stop_price)), # SL（採用された実SL）
@@ -893,13 +936,19 @@ def get_stock_data(ticker, current_run_count):
         else:
              # 既存のロジックをそのまま使用 (新ロジック不採用時のフォールバック)
              strategy, buy_target, p_half, p_full = "様子見", int(ma5), 0, 0
-             is_aoteng = False; target_pct = get_target_pct(info["cap"])
+             is_aoteng = False; target_pct = get_target_pct_new(get_market_cap_category(info["cap"]), is_half=False) # 旧ロジックは旧TargetPctを使用していたため、get_target_pct_newのフル益率を使用
              
              # 要件書 1-1: 順張り想定水準 = MA5
              if ma5 > ma25 > ma75 and ma5 > prev_ma5:
                   strategy, buy_target = "🔥順張り", int(ma5)
-                  target_half_raw = buy_target * (1 + target_pct / 2); p_half_candidate = int(np.floor(target_half_raw)) 
-                  target_full_raw = buy_target * (1 + target_pct); p_full_candidate = int(np.floor(target_full_raw))
+                  
+                  # 時価総額別の利益率を再計算
+                  category_str = get_market_cap_category(info["cap"])
+                  half_pct = get_target_pct_new(category_str, is_half=True)
+                  full_pct = get_target_pct_new(category_str, is_half=False)
+                  
+                  target_half_raw = buy_target * (1 + half_pct); p_half_candidate = int(np.floor(target_half_raw)) 
+                  target_full_raw = buy_target * (1 + full_pct); p_full_candidate = int(np.floor(target_full_raw))
                   
                   # 【★ 修正箇所：青天井判定の条件を要件書4に合わせる】
                   is_ath = high_250d > 0 and curr_price > high_250d
@@ -918,7 +967,7 @@ def get_stock_data(ticker, current_run_count):
                        if p_half_candidate > curr_price: p_half, p_full = p_half_candidate, p_full_candidate if p_full_candidate > p_half else p_half + 1 
                        elif p_half_candidate <= curr_price and p_full_candidate > curr_price: p_half, p_full = 0, p_full_candidate
                        elif p_full_candidate <= curr_price:
-                            p_full_fallback_raw = curr_price * (1 + target_pct); p_full_fallback = int(np.floor(p_full_fallback_raw))
+                            p_full_fallback_raw = curr_price * (1 + full_pct); p_full_fallback = int(np.floor(p_full_fallback_raw))
                             if p_full_fallback > curr_price: p_full, p_half = p_full_fallback, 0
                             else: p_full, p_half = 0, 0
                             
@@ -1475,4 +1524,3 @@ if st.session_state.analyzed_data:
         for col in columns_to_drop:
              if col in df_raw.columns: df_raw = df_raw.drop(columns=[col]) 
         st.dataframe(df_raw)
-
