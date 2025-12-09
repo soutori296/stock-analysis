@@ -130,7 +130,7 @@ def get_volume_weight(current_dt, market_cap):
             return max(0.01, interpolated_weight)
         last_weight = weight; last_minutes = end_minutes
     return 1.0
-# --- CSSスタイル (変更なし) ---
+# --- CSSスタイル ---
 st.markdown(f"""
 <style>
     /* ========== 【新規追加】サイドバーの幅調整 ========== */
@@ -272,6 +272,38 @@ st.markdown(f"""
     .two-line-cell {{ display: flex; flex-direction: column; justify-content: center; align-items: center; line-height: 1.2; padding: 2px 0; }}
     .small-font-status {{ font-size: 10px; font-weight: bold; color: #ff6347; }} 
     .small-font-no {{ font-size: 10px; color: #666; }} 
+    
+    /* ========================================================== */
+    /* 【★ 改善要件：スマホでの所感列の幅を広くするメディアクエリの追加】 */
+    /* ========================================================== */
+    @media (max-width: 768px) {{
+        /* 狭い画面では、テーブル全体の最小幅を縮小 */
+        .ai-table {{ 
+            min-width: 1000px; /* 1200pxから縮小 */
+        }}
+        
+        /* 必須項目の幅を可能な限り縮小 */
+        .ai-table th:nth-child(1), .ai-table td:nth-child(1) {{ width: 40px !important; }} /* No */
+        .ai-table th:nth-child(2), .ai-table td:nth-child(2) {{ width: 50px !important; }} /* コード */
+        .ai-table th:nth-child(5), .ai-table td:nth-child(5) {{ width: 40px !important; }} /* 点 */
+        .ai-table th:nth-child(6), .ai-table td:nth-child(6) {{ width: 60px !important; }} /* 分析戦略 */
+        .ai-table th:nth-child(7), .ai-table td:nth-child(7) {{ width: 55px !important; }} /* 現在値 */
+        .ai-table th:nth-child(8), .ai-table td:nth-child(8) {{ width: 60px !important; }} /* 想定水準 */
+        .ai-table th:nth-child(9), .ai-table td:nth-child(9) {{ width: 35px !important; }} /* R/R比 */
+        .ai-table th:nth-child(11), .ai-table td:nth-child(11) {{ width: 100px !important; }} /* 利益確定目標値 */
+        .ai-table th:nth-child(12), .ai-table td:nth-child(12) {{ width: 45px !important; }} /* RSI */
+        .ai-table th:nth-child(16), .ai-table td:nth-child(16) {{ width: 40px !important; }} /* 直近勝率 */
+        
+        /* アイの所感列の幅を強制的に広く確保 (min-width:350pxから固定幅へ) */
+        .ai-table th:last-child, .ai-table td:last-child {{ 
+             width: 350px !important; /* 確保したい幅 */
+             min-width: 350px !important; /* 念のため */
+        }}
+        
+        /* 企業名列の幅を相対的に縮小 */
+        .ai-table th:nth-child(3), .ai-table td:nth-child(3) {{ width: 80px !important; }} /* 企業名 */
+    }}
+    /* ========================================================== */
 
 </style>
 """, unsafe_allow_html=True)
@@ -505,6 +537,23 @@ def fmt_market_cap(val):
             return f"{val_int}億円"
     except:
         return "-"
+        
+# 【改善要件 5. ライブラリ取得エラーの再試行処理】
+def fetch_with_retry(url, max_retry=3):
+    """URLからデータを取得する際に、最大 max_retry 回まで再試行する"""
+    headers = {"User-Agent": "Mozilla/5.0"}
+    for attempt in range(max_retry):
+        try:
+            # timeoutを8秒に設定（通信問題回避）
+            res = requests.get(url, headers=headers, timeout=8) 
+            res.raise_for_status() # ステータスコードが200番台以外なら例外を発生
+            return res
+        except Exception:
+            if attempt == max_retry - 1:
+                raise # 最後の試行で失敗した場合は例外を再発生
+            time.sleep(1 + attempt * 2) # 指数バックオフ的な待機
+    # 到達しないが念のため
+    raise Exception("データ取得リトライ失敗")
 
 # ------------------------------------------------------------
 # 【★ Kabutan データ取得関数群 (get_stock_data より先に定義) 】
@@ -523,11 +572,11 @@ def safe_float_convert(s):
 @st.cache_data(ttl=1) 
 def get_stock_info(code):
     url = f"https://kabutan.jp/stock/?code={code}"
-    headers = {"User-Agent": "Mozilla/5.0"}
+    # 【改善要件 5. 適用】requests.get を fetch_with_retry に置き換え
+    # headersはfetch_with_retry内で設定される
     data = {"name": "不明", "per": "-", "pbr": "-", "price": None, "volume": None, "cap": 0, "open": None, "high": None, "low": None, "close": None, "issued_shares": 0.0}
     try:
-        # timeoutを8秒に設定（通信問題回避）
-        res = requests.get(url, headers=headers, timeout=8) 
+        res = fetch_with_retry(url) 
         res.encoding = res.apparent_encoding
         html = res.text.replace("\n", "")
         
@@ -596,7 +645,8 @@ def get_25day_ratio():
     url = "https://nikkeiyosoku.com/up_down_ratio/"
     default_ratio = 100.0 
     try:
-        res = requests.get(url, timeout=5)
+        # 【改善要件 5. 適用】requests.get を fetch_with_retry に置き換え
+        res = fetch_with_retry(url)
         res.encoding = res.apparent_encoding
         html = res.text.replace("\n", "") 
         m_ratio = re.search(r'<p class="stock-txt">([0-9\.]+)', html)
@@ -853,6 +903,85 @@ def create_signals_pro_bear(df, info, vol_ratio_in):
     }
 # ------------------------------------------------------------
 
+# 【改善要件 3. 戦略判定ロジックを関数に分割して可読性を向上】
+def evaluate_strategy_new(df, info, vol_ratio, high_250d, atr_val, curr_price, ma5, ma25, ma75, prev_ma5, rsi_val, atr_sl_price):
+    """
+    既存の優先順位付けロジックをカプセル化し、戦略と主要な取引水準を返す。
+    """
+    # 既存ロジックで使用するヘルパー関数
+    def get_market_cap_category(market_cap):
+        if market_cap >= 10000: return "超大型"
+        elif market_cap >= 3000: return "大型"
+        elif market_cap >= 500: return "中型"
+        elif market_cap >= 100: return "小型"
+        else: return "超小型"
+    
+    def get_target_pct_new(category, is_half):
+        if is_half:
+            if category == "超大型": return 0.015
+            elif category == "大型": return 0.020
+            elif category == "中型": return 0.025
+            elif category == "小型": return 0.030
+            else: return 0.040 
+        else:
+            if category == "超大型": return 0.025
+            elif category == "大型": return 0.035
+            elif category == "中型": return 0.040
+            elif category == "小型": return 0.050
+            else: return 0.070 
+    
+    # create_signals_pro_bull/bear はグローバルスコープで定義済み
+    signals_bull = create_signals_pro_bull(df, info, vol_ratio)
+    signals_bear = create_signals_pro_bear(df, info, vol_ratio)
+    
+    strategy, buy_target, p_half, p_full, sl_ma, is_aoteng = "様子見", int(ma5), 0, 0, atr_sl_price, False
+
+    # 1. 🚀順ロジの判定 (優位な順張り)
+    if signals_bull["signal_success"] and signals_bull["strategy"] == "🚀順ロジ":
+         signals = signals_bull
+         strategy, buy_target, p_half, p_full, sl_ma, is_aoteng = signals["strategy"], signals["buy"], signals["p_half"], signals["p_full"], signals["sl_ma"], False
+         
+    # 2. 🚀逆ロジの判定 (優位な逆張り)
+    elif signals_bear["signal_success"] and signals_bear["strategy"] == "🚀逆ロジ":
+         signals = signals_bear
+         strategy, buy_target, p_half, p_full, sl_ma, is_aoteng = signals["strategy"], signals["buy"], signals["p_half"], signals["p_full"], signals["sl_ma"], False
+
+    # 3. 既存のフォールバックロジック (🔥順張り, 🌊逆張り, 様子見)
+    else:
+         # sl_ma は初期値の atr_sl_price をそのまま使用
+         
+         # 🔥順張り判定 (既存ロジックそのまま移植)
+         if ma5 > ma25 > ma75 and ma5 > prev_ma5:
+              strategy, buy_target = "🔥順張り", int(ma5)
+              category_str = get_market_cap_category(info["cap"])
+              half_pct = get_target_pct_new(category_str, is_half=True)
+              full_pct = get_target_pct_new(category_str, is_half=False)
+              p_half_candidate = int(np.floor(buy_target * (1 + half_pct))) 
+              p_full_candidate = int(np.floor(buy_target * (1 + full_pct)))
+              
+              is_ath = high_250d > 0 and curr_price > high_250d
+              is_rsi_ok = rsi_val < 80; is_volume_ok = vol_ratio >= 1.5
+              
+              if is_ath and is_rsi_ok and is_volume_ok:
+                   is_aoteng = True; max_high_today = df['High'].iloc[-1]; 
+                   atr_trailing_price = max_high_today - (atr_val * 2.5); atr_trailing_price = max(0, atr_trailing_price)
+                   p_full = int(np.floor(atr_trailing_price)); p_half = 0 
+                   sl_ma = p_full # 青天井時はp_fullをSLとして使用
+              else: 
+                   p_half = p_half_candidate; p_full = p_full_candidate
+                        
+         # 🌊逆張り判定 (既存ロジックそのまま移植)
+         elif rsi_val <= 30 or (curr_price < ma25 * 0.9 if ma25 else False):
+             strategy, buy_target = "🌊逆張り", int(curr_price)
+             p_half_candidate = int(np.floor(ma5 - 1)) if ma5 else 0 
+             p_full_candidate = int(np.floor(ma25 - 1)) if ma25 else 0 
+             p_half = p_half_candidate; p_full = p_full_candidate
+
+    # SL乖離率の計算
+    sl_pct = ((curr_price / sl_ma) - 1) * 100 if curr_price > 0 and sl_ma > 0 else 0.0
+    
+    return strategy, buy_target, p_half, p_full, sl_ma, is_aoteng, sl_pct
+
 
 # --- 関数群の統合: 新ロジックをget_stock_dataに組み込む ---
 
@@ -881,7 +1010,8 @@ def get_stock_data(ticker, current_run_count):
     
     try:
         csv_url = f"https://stooq.com/q/d/l/?s={stock_code}&i=d"
-        res = requests.get(csv_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
+        # 【改善要件 5. 適用】requests.get を fetch_with_retry に置き換え
+        res = fetch_with_retry(csv_url, max_retry=3)
         try:
             df_raw = pd.read_csv(io.BytesIO(res.content), parse_dates=True, index_col=0) 
             df_raw.index.name = 'Date' 
@@ -973,59 +1103,11 @@ def get_stock_data(ticker, current_run_count):
         rsi_val = last['RSI'] if not pd.isna(last['RSI']) else 50
         
         
-        # --- 【ロジック判定の優先順位付け】 ---
-        signals_bull = create_signals_pro_bull(df, info, vol_ratio)
-        signals_bear = create_signals_pro_bear(df, info, vol_ratio)
-        
-        # 1. 🚀順ロジの判定 (優位な順張り)
-        if signals_bull["signal_success"] and signals_bull["strategy"] == "🚀順ロジ":
-             signals = signals_bull
-             strategy, buy_target, p_half, p_full, sl_ma, is_aoteng = signals["strategy"], signals["buy"], signals["p_half"], signals["p_full"], signals["sl_ma"], False
-             # SL乖離率の計算
-             sl_pct = ((curr_price / sl_ma) - 1) * 100 if curr_price > 0 and sl_ma > 0 else 0.0
-             
-        # 2. 🚀逆ロジの判定 (優位な逆張り)
-        elif signals_bear["signal_success"] and signals_bear["strategy"] == "🚀逆ロジ":
-             signals = signals_bear
-             strategy, buy_target, p_half, p_full, sl_ma, is_aoteng = signals["strategy"], signals["buy"], signals["p_half"], signals["p_full"], signals["sl_ma"], False
-             # SL乖離率の計算
-             sl_pct = ((curr_price / sl_ma) - 1) * 100 if curr_price > 0 and sl_ma > 0 else 0.0
-
-        # 3. 既存のフォールバックロジック (🔥順張り, 🌊逆張り, 様子見)
-        else:
-             strategy, buy_target, p_half, p_full = "様子見", int(ma5), 0, 0
-             is_aoteng = False
-             sl_ma = atr_sl_price # ATRベースのSLを採用
-             sl_pct = ((curr_price / sl_ma) - 1) * 100 if curr_price > 0 and sl_ma > 0 else 0.0
-             
-             # 🔥順張り判定
-             if ma5 > ma25 > ma75 and ma5 > prev_ma5:
-                  strategy, buy_target = "🔥順張り", int(ma5)
-                  category_str = get_market_cap_category(info["cap"])
-                  half_pct = get_target_pct_new(category_str, is_half=True)
-                  full_pct = get_target_pct_new(category_str, is_half=False)
-                  p_half_candidate = int(np.floor(buy_target * (1 + half_pct))) 
-                  p_full_candidate = int(np.floor(buy_target * (1 + full_pct)))
-                  
-                  is_ath = high_250d > 0 and curr_price > high_250d
-                  is_rsi_ok = rsi_val < 80; is_volume_ok = vol_ratio >= 1.5
-                  
-                  if is_ath and is_rsi_ok and is_volume_ok:
-                       is_aoteng = True; max_high_today = df['High'].iloc[-1]; 
-                       atr_trailing_price = max_high_today - (atr_val * 2.5); atr_trailing_price = max(0, atr_trailing_price)
-                       p_full = int(np.floor(atr_trailing_price)); p_half = 0 
-                       sl_ma = p_full # 青天井時はp_fullをSLとして使用
-                       sl_pct = ((curr_price / sl_ma) - 1) * 100 if curr_price > 0 and sl_ma > 0 else 0.0
-                  else: 
-                       p_half = p_half_candidate; p_full = p_full_candidate
-                            
-             # 🌊逆張り判定
-             elif rsi_val <= 30 or (curr_price < ma25 * 0.9 if ma25 else False):
-                 strategy, buy_target = "🌊逆張り", int(curr_price)
-                 p_half_candidate = int(np.floor(ma5 - 1)) if ma5 else 0 
-                 p_full_candidate = int(np.floor(ma25 - 1)) if ma25 else 0 
-                 p_half = p_half_candidate; p_full = p_full_candidate
-
+        # --- 【改善要件 3. 適用: ロジック判定の関数化】 ---
+        strategy, buy_target, p_half, p_full, sl_ma, is_aoteng, sl_pct = evaluate_strategy_new(
+            df, info, vol_ratio, high_250d, atr_val, curr_price, ma5, ma25, ma75, prev_ma5, rsi_val, atr_sl_price
+        )
+        # --------------------------------------------------------
 
         # --- 共通の利益目標とR/R比の補正・計算 ---
         # 🎯 統一補正ロジックの適用 
@@ -1146,13 +1228,16 @@ def get_stock_data(ticker, current_run_count):
 
         vol_disp = f"🔥{vol_ratio:.1f}倍" if vol_ratio > 1.5 else f"{vol_ratio:.1f}倍"
         
-        # 🎯 修正: backtest_raw の格納を変更 (勝率 % のみ)
-        bt_raw = bt_str
+        # 🎯 修正: run_backtest の戻り値に追加
+        # 【改善要件 6. backtest_raw の HTML 除去ロジックの統一】
+        bt_raw = re.sub(r'<br\s*/?>', ' ', bt_str)
+        bt_raw = re.sub(r'</?.*?>', '', bt_raw)
 
         return {
             "code": ticker,
             "name": info["name"],
             "price": curr_price,
+            # ★ 修正: score_to_return は float/int なのでそのまま格納
             "cap_val": info["cap"],
             "cap_disp": fmt_market_cap(info["cap"]),
             "per": info["per"],
@@ -1248,8 +1333,10 @@ def batch_analyze_with_ai(data_list):
         
         # sl_ma はR/R計算に使用された実SL価格 (🚀時: -3%, 非🚀時: ATR SL)
         sl_ma_disp = f"採用SL:{sl_ma:,.0f}円" if sl_ma > 0 else "採用SL:不明" 
+        
+        # 【改善要件 4. ATR_SL の表示改善】
         atr_sl_price = d.get('atr_sl_price', 0)
-        atr_sl_disp = f"ATR_SL:{atr_sl_price:,.0f}円" if atr_sl_price > 0 else "ATR_SL:不明"
+        atr_sl_disp = f"ATR_SL:{atr_sl_price:,.0f}円" if (not d.get('is_aoteng') and atr_sl_price > 0) else "ATR_SL:-"
 
         gc_dc_status = ""
         if d.get("is_gc"): gc_dc_status = "GC:発生"
@@ -1259,7 +1346,7 @@ def batch_analyze_with_ai(data_list):
         atr_disp = f"ATR:{d.get('atr_val', 0.0):.1f}円" 
         
         # 🎯 過去実績の勝率を追加
-        win_rate = d.get('backtest', '-')
+        win_rate = d.get('backtest_raw', '-')
         win_rate_disp = f"過去勝率:{win_rate}"
 
         prompt_text += f"ID:{d['code']} | {d['name']} | 現在:{price:,.0f} | 分析戦略:{d['strategy']} | RSI:{d['rsi']:.1f} | 5MA乖離率:{ma_div:+.1f}%{rr_disp} | 出来高倍率:{d['vol_ratio']:.1f}倍 | リスク情報: MDD:{mdd:+.1f}%, SL乖離率:{sl_pct:+.1f}% | {sl_ma_disp} | {low_liquidity_status} | {liq_disp} | {atr_disp} | {gc_dc_status} | {atr_sl_disp} | {target_info} | {win_rate_disp} | 総合分析点:{d['score']}\n" 
@@ -1464,13 +1551,14 @@ if st.session_state.analyzed_data:
     watch_data = [d for d in data if not ("🚀" in d['strategy'] or d['strategy'] == "🔥順張り") or d['score'] < 50]
 
     def sort_data(lst, option):
-        if "スコア" in option: lst.sort(key=lambda x: x.get('score', 0), reverse=True)
-        elif "更新回数" in option: lst.sort(key=lambda x: (x.get('score', 0) < 50, x.get('update_count', 0) * -1, x.get('score', 0) * -1))
-        elif "時価総額" in option: lst.sort(key=lambda x: x.get('cap_val', 0), reverse=True)
-        elif "RSI順 (低い" in option: lst.sort(key=lambda x: x.get('rsi', 50))
-        elif "RSI順 (高い" in option: lst.sort(key=lambda x: x.get('rsi', 50), reverse=True)
-        elif "出来高倍率順 (高い順)" in option: lst.sort(key=lambda x: x.get('vol_ratio', 0), reverse=True) 
-        elif "勝率順 (高い順)" in option: lst.sort(key=lambda x: x.get('win_rate_pct', 0.0), reverse=True) 
+        # 【★ ソートバグ修正: 数値キーを明示的にキャスト】
+        if "スコア" in option: lst.sort(key=lambda x: int(x.get('score', 0)), reverse=True)
+        elif "更新回数" in option: lst.sort(key=lambda x: (x.get('score', 0) < 50, x.get('update_count', 0) * -1, int(x.get('score', 0)) * -1))
+        elif "時価総額" in option: lst.sort(key=lambda x: float(x.get('cap_val', 0)), reverse=True)
+        elif "RSI順 (低い" in option: lst.sort(key=lambda x: float(x.get('rsi', 50)))
+        elif "RSI順 (高い" in option: lst.sort(key=lambda x: float(x.get('rsi', 50)), reverse=True)
+        elif "出来高倍率順 (高い順)" in option: lst.sort(key=lambda x: float(x.get('vol_ratio', 0)), reverse=True) 
+        elif "勝率順 (高い順)" in option: lst.sort(key=lambda x: float(x.get('win_rate_pct', 0.0)), reverse=True) 
         else: lst.sort(key=lambda x: x.get('code', ''))
     
     current_sort_option = st.session_state['sort_option_key']
@@ -1588,16 +1676,24 @@ if st.session_state.analyzed_data:
             # 🎯 最終決定のヘッダーテキスト
             ("MA5実績", "70px", "過去75営業日での「MA5押し目買い」を仮定した同条件トレードの勝率、勝ち数、および時価総額分類別目標リターン率。勝利条件: 10営業日以内に時価総額別の全益目標値に到達。"), 
             ("PER\nPBR", "60px", "株価収益率/株価純資産倍率。株価の相対的な評価指標。"), ("直近\n勝率", "40px", "直近5日間の前日比プラスだった日数の割合。"), 
+            # 【★ 修正: min-width:350pxから固定幅指定へ変更。メディアクエリで調整。】
             ("アイの所感", "min-width:350px;", None),
         ]
         th_rows = ""
         for text, width, tooltip in headers:
             tooltip_class = " has-tooltip" if tooltip else ""
             tooltip_attr = f'data-tooltip="{tooltip}"' if tooltip else ''
-            if "企業名" in text or "アイの所感" in text:
-                 th_rows += f'<th class="th-left{tooltip_class}" style="width:{width}" {tooltip_attr}>{text.replace("\\n", "<br>")}</th>'
+            # 最後の列（アイの所感）には width を指定しない（min-widthのみに頼る）
+            # PCでの表示崩れを防ぐため、PC幅では min-width:350px のままにする
+            if "アイの所感" in text:
+                 th_rows += f'<th class="th-left{tooltip_class}" style="min-width:{width.replace("min-width:","")}" {tooltip_attr}>{text.replace("\\n", "<br>")}</th>'
+            elif "企業名" in text:
+                 # 企業名も可変幅を意識し min-width に変更
+                 th_rows += f'<th class="th-left{tooltip_class}" style="min-width:{width.replace("px","")}px" {tooltip_attr}>{text.replace("\\n", "<br>")}</th>'
             else:
+                 # 他の列は固定幅を維持
                  th_rows += f'<th class="thdt{tooltip_class}" style="width:{width}" {tooltip_attr}>{text.replace("\\n", "<br>")}</th>'
+
 
         return f'''
         <h4>{title}</h4>
@@ -1630,5 +1726,5 @@ if st.session_state.analyzed_data:
         columns_to_drop = ['risk_value', 'issued_shares', 'liquidity_ratio_pct', 'atr_val', 'is_gc', 'is_dc', 'atr_sl_price', 'score_diff', 'base_score', 'is_aoteng', 'is_updated_in_this_run', 'run_count', 'batch_order', 'update_count', 'bt_trade_count'] 
         for col in columns_to_drop:
              if col in df_raw.columns: df_raw = df_raw.drop(columns=[col]) 
-        st.dataframe(df_raw)
-
+        # 【改善要件 1. スマホ表示を改善（UI最適化）】
+        st.dataframe(df_raw, use_container_width=True)
