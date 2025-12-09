@@ -490,14 +490,15 @@ def get_target_pct_new(category, is_half):
         elif category == "小型": return 0.050
         else: return 0.070 
 
-def create_signals(df, info, jst_now_local):
+# 🎯 ② Vol_Ratio を引数に追加するシグネチャ変更
+def create_signals(df, info, jst_now_local, vol_ratio_in):
     last = df.iloc[-1]
     prev = df.iloc[-2] if len(df) >= 2 else last # 前日データを取得
     
     market_cap = info.get("cap", 0); category = get_market_cap_category(market_cap)
     ma5 = last.get('SMA5', 0); close = last.get('Close', 0); open_price = last.get('Open', 0)
     high = last.get('High', 0); low = last.get('Low', 0) # 当日高値・安値
-    vol_ratio = df.iloc[-1].get('Vol_Ratio', 0.0)
+    vol_ratio = vol_ratio_in # 🎯 ② 引数から取得
     rsi = last.get('RSI', 50)
     prev_close = prev.get('Close', 0) # 前日終値 (仕様 5-3のため)
     
@@ -569,10 +570,7 @@ def create_signals(df, info, jst_now_local):
     p_half = int(np.floor(entry_price * (1 + half_pct))) # 端数切り捨て (floor)
     p_full = int(np.floor(entry_price * (1 + full_pct))) # 端数切り捨て (floor)
     
-    if p_full < p_half: p_full = p_half # p_full < p_half の場合 → p_full = p_half
-    
-    # 安全策として、目標値がエントリー価格以下なら無効
-    if p_half <= entry_price or p_full <= entry_price: p_half, p_full = 0, 0 
+    # 🎯 ① 統一補正は get_stock_data で行うため、ここでは p_full < p_half の補正と、目標値がエントリー価格以下の時の無効化は行わない。
     
     strategy_name = "🚀ロジック" 
     
@@ -847,17 +845,22 @@ def get_stock_data(ticker, current_run_count):
         curr_price = info.get("close") 
         if status == "場中(進行中)" or curr_price is None: curr_price = info.get("price")
         
-        if info.get("open") and info.get("high") and info.get("low") and info.get("volume") and curr_price:
+        # 🎯 ④ Stooq と当日リアルタイム値のマージ条件を厳密化
+        if status == "場中(進行中)" and info.get("open") and info.get("high") and info.get("low") and info.get("volume") and curr_price:
               today_date_dt = pd.to_datetime(jst_now_local.strftime("%Y-%m-%d"))
+              
               if df.index[-1].date() < today_date_dt.date():
+                   # 当日データがない場合、新しい行として追加
                    new_row = pd.Series({'Open': info['open'], 'High': info['high'], 'Low': info['low'], 'Close': curr_price, 'Volume': info['volume']}, name=today_date_dt) 
                    df = pd.concat([df, new_row.to_frame().T])
               elif df.index[-1].date() == today_date_dt.date():
+                   # 当日データがある場合、OHLCVを上書き（場中なのでリアルタイム値で更新）
                    df.loc[df.index[-1], 'Open'] = info['open']
                    df.loc[df.index[-1], 'High'] = info['high']
                    df.loc[df.index[-1], 'Low'] = info['low']
                    df.loc[df.index[-1], 'Close'] = curr_price
                    df.loc[df.index[-1], 'Volume'] = info['volume']
+        # 場前(固定)と引け後(確定値)は、Stooqのデータ（当日分が含まれていないか、確定値が優先される）をそのまま使用。
 
         if curr_price is None or math.isnan(curr_price): curr_price = df.iloc[-1].get('Close', None)
         
@@ -891,21 +894,25 @@ def get_stock_data(ticker, current_run_count):
         if ma_diff_pct < 0.1: is_gc, is_dc = False, False
         atr_val = last['ATR'] if not pd.isna(last['ATR']) else 0
         
-        # 要件書 3-1-②: ATRベースの推奨SL (SL_ATR = 現在値 - ATR14 × 1.5)
+        # 🎯 ③ ATRベース SL が「ほぼ現在値」になる問題を防止 (最低 -1% 幅保証)
         atr_sl_price = 0
-        if curr_price > 0 and atr_val > 0: atr_sl_price = curr_price - (atr_val * 1.5); atr_sl_price = max(0, atr_sl_price)
+        if curr_price > 0 and atr_val > 0: 
+            sl_amount = max(atr_val * 1.5, curr_price * 0.01) # ATR * 1.5 または 1% の大きい方
+            atr_sl_price = curr_price - sl_amount
+            atr_sl_price = max(0, atr_sl_price)
         
-        # 出来高倍率の計算 (Vol_Ratio として df に格納)
+        # 出来高倍率の計算
         vol_ratio = 0; volume_weight = get_volume_weight(jst_now_local, info["cap"]) 
         if info.get("volume") and not pd.isna(last['Vol_SMA5']) and volume_weight > 0.0001: 
             adjusted_vol_avg = last['Vol_SMA5'] * volume_weight
             if adjusted_vol_avg > 0: vol_ratio = info["volume"] / adjusted_vol_avg
-        df['Vol_Ratio'] = vol_ratio # create_signalsで使用
+        # 🎯 ② df['Vol_Ratio'] = vol_ratio を削除
 
         rsi_val = last['RSI'] if not pd.isna(last['RSI']) else 50
         
         # --- 【新規ロジック適用】 ---
-        signals = create_signals(df, info, jst_now_local)
+        # 🎯 ② vol_ratio を引数として渡す
+        signals = create_signals(df, info, jst_now_local, vol_ratio)
         
         if signals["signal_success"] and signals["strategy"] == "🚀ロジック": # 新規順張りロジックに合致
              strategy = signals["strategy"]
@@ -914,6 +921,15 @@ def get_stock_data(ticker, current_run_count):
              p_full = signals["p_full"]
              sl_ma = signals["sl_ma"] # SL MAとして損切価格 (-3%) を使用
              is_aoteng = False
+             
+             # 🎯 ① 統一補正ロジックの適用 (🚀ロジック成功時)
+             if p_full < p_half:
+                 p_full = p_half
+            
+             if p_half <= buy_target:
+                 p_half = 0
+             if p_full <= buy_target:
+                 p_full = 0
              
              # 損切乖離率の計算
              sl_pct = 0.0
@@ -964,24 +980,28 @@ def get_stock_data(ticker, current_run_count):
                        p_half = 0 
                   else: 
                        # 青天井条件を満たさない場合、通常の順張りロジックを適用
-                       if p_half_candidate > curr_price: p_half, p_full = p_half_candidate, p_full_candidate if p_full_candidate > p_half else p_half + 1 
-                       elif p_half_candidate <= curr_price and p_full_candidate > curr_price: p_half, p_full = 0, p_full_candidate
-                       elif p_full_candidate <= curr_price:
-                            p_full_fallback_raw = curr_price * (1 + full_pct); p_full_fallback = int(np.floor(p_full_fallback_raw))
-                            if p_full_fallback > curr_price: p_full, p_half = p_full_fallback, 0
-                            else: p_full, p_half = 0, 0
+                       p_half = p_half_candidate
+                       p_full = p_full_candidate
                             
              # 要件書 1-3: 逆張り想定水準 = 現在値
              elif rsi_val <= 30 or (curr_price < ma25 * 0.9 if ma25 else False):
                  strategy, buy_target = "🌊逆張り", int(curr_price)
                  p_half_candidate = int(np.floor(ma5 - 1)) if ma5 else 0 
                  p_full_candidate = int(np.floor(ma25 - 1)) if ma25 else 0 
-                 p_half = p_half_candidate if p_half_candidate > curr_price else 0; p_full = p_full_candidate if p_full_candidate > curr_price else 0
-                 if p_half > 0 and p_full > 0 and p_half > p_full: p_half = p_full - 1 
+                 p_half = p_half_candidate; p_full = p_full_candidate
             
              # sl_ma の決定 (要件書 3-2: 🚀ロジック不成立時はATRベースを採用)
-             sl_ma = atr_sl_price # ATRベースのSL (現在値 - ATR14 * 1.5) を採用
+             sl_ma = atr_sl_price # ATRベースのSL (現在値 - max(ATR14 * 1.5, 1%)) を採用
              
+             # 🎯 ① 統一補正ロジックの適用 (フォールバック時)
+             if p_full < p_half:
+                 p_full = p_half
+            
+             if p_half <= buy_target:
+                 p_half = 0
+             if p_full <= buy_target:
+                 p_full = 0
+                 
              if curr_price > 0 and sl_ma > 0: sl_pct = ((curr_price / sl_ma) - 1) * 100 
                  
              # R/R比の計算 (既存ロジック)
@@ -1091,7 +1111,8 @@ def get_stock_data(ticker, current_run_count):
         history = st.session_state.score_history.get(ticker, {}); fixed_score_core = history.get('final_score') 
         fixed_market_ratio_score = history.get('market_ratio_score', 0)
         score_to_return = current_calculated_score; score_diff = 0
-        is_market_alert = market_25d_ratio >= 125.0; current_market_deduct = -20 if is_market_alert else 0
+        is_market_alert = (market_25d_ratio >= 125.0)
+        current_market_deduct = -20 if is_market_alert else 0
 
         if status != "場中(進行中)":
              if fixed_score_core is None:
@@ -1111,23 +1132,68 @@ def get_stock_data(ticker, current_run_count):
 
         vol_disp = f"🔥{vol_ratio:.1f}倍" if vol_ratio > 1.5 else f"{vol_ratio:.1f}倍"
         
-        # 【★ 修正: 表示用の戦略名調整（🚀ロジックはそのまま維持）】
-        
+        # --- backtest_raw の安全な HTMLタグ除去 ---
+        # 🎯 ⑤ backtest_raw のタグ除去を安全で統一した式に変更
+        bt_raw = re.sub(r'<br\s*/?>', ' ', bt_str)
+        bt_raw = re.sub(r'</?[^>]+>', '', bt_raw)
+        bt_raw = bt_raw.replace("(", "").replace(")", "").strip()
+
+
         return {
-            "code": ticker, "name": info["name"], "price": curr_price, "cap_val": info["cap"],
-            "cap_disp": fmt_market_cap(info["cap"]), "per": info["per"], "pbr": info["pbr"],
-            "rsi": rsi_val, "rsi_disp": f"{rsi_mark}{rsi_val:.1f}", "vol_ratio": vol_ratio,
-            "vol_disp": vol_disp, "momentum": momentum_str, "strategy": strategy, "score": score_to_return,
-            "buy": buy_target, "p_half": p_half, "p_full": p_full, 
-            "backtest": bt_str, "backtest_raw": re.sub(r'<[^>]+>', '', bt_str.replace("<br>", " ")).replace("(", "").replace(")", ""),
-            "max_dd_pct": max_dd_pct, "sl_pct": sl_pct, "sl_ma": sl_ma, "avg_volume_5d": avg_vol_5d, 
-            "is_low_liquidity": avg_vol_5d < 10000, "risk_reward": risk_reward_ratio, "risk_value": risk_value, 
-            "issued_shares": issued_shares, "liquidity_ratio_pct": liquidity_ratio_pct, "atr_val": atr_val, 
-            "is_gc": is_gc, "is_dc": is_dc, "atr_sl_price": atr_sl_price, "score_diff": score_diff, 
-            "base_score": base_score, "is_aoteng": is_aoteng, "run_count": current_run_count
+            "code": ticker,
+            "name": info["name"],
+            "price": curr_price,
+            "cap_val": info["cap"],
+            "cap_disp": fmt_market_cap(info["cap"]),
+            "per": info["per"],
+            "pbr": info["pbr"],
+
+            "rsi": rsi_val,
+            "rsi_disp": f"{rsi_mark}{rsi_val:.1f}",
+
+            "vol_ratio": vol_ratio,
+            "vol_disp": vol_disp,
+            "momentum": momentum_str,
+
+            "strategy": strategy,
+            "score": score_to_return,
+
+            "buy": buy_target,
+            "p_half": p_half,
+            "p_full": p_full,
+
+            "backtest": bt_str,
+            "backtest_raw": bt_raw,
+
+            "max_dd_pct": max_dd_pct,
+            "sl_pct": sl_pct,
+            "sl_ma": sl_ma,
+
+            "avg_volume_5d": avg_vol_5d,
+            "is_low_liquidity": avg_vol_5d < 1000, # 🎯 ⭐ is_low_liquidity を avg_vol_5d < 1000 に統一
+
+            "risk_reward": risk_reward_ratio,
+            "risk_value": risk_value,
+
+            "issued_shares": issued_shares,
+            "liquidity_ratio_pct": liquidity_ratio_pct,
+
+            "atr_val": atr_val,
+            "is_gc": is_gc,
+            "is_dc": is_dc,
+
+            "atr_sl_price": atr_sl_price,
+            "score_diff": score_diff,
+
+            "base_score": base_score,
+            "is_aoteng": is_aoteng,
+            "run_count": current_run_count,
         }
     except Exception as e:
-        st.session_state.error_messages.append(f"データ処理エラー (コード:{ticker}) (テクニカル計算フェーズ): 予期せぬエラーが発生しました。詳細: {e}")
+        st.session_state.error_messages.append(
+            f"データ処理エラー (コード:{ticker}) (テクニカル計算フェーズ): "
+            f"予期せぬエラーが発生しました。詳細: {e}"
+        )
         return None
 
 def batch_analyze_with_ai(data_list):
@@ -1160,7 +1226,10 @@ def batch_analyze_with_ai(data_list):
         elif p_half == 0 and d['strategy'] == "🔥順張り": target_info = "利確目標:目標超過/無効"
         buy_target = d.get('buy', 0); ma_div = (price/buy_target-1)*100 if buy_target > 0 and price > 0 else 0
         mdd = d.get('max_dd_pct', 0.0); sl_pct = d.get('sl_pct', 0.0); sl_ma = d.get('sl_ma', 0); avg_vol = d.get('avg_volume_5d', 0)
-        low_liquidity_status = "致命的低流動性:警告(1000株未満)" if avg_vol < 1000 else "流動性:問題なし"
+        # --- 流動性表示の統一 ---
+        avg_vol_5d = d.get('avg_volume_5d', 0)
+        low_liquidity_status = "致命的低流動性:警告(1000株未満)" if avg_vol_5d < 1000 else "流動性:問題なし"
+        is_low_liquidity = (avg_vol_5d < 1000)
         
         # sl_ma はR/R計算に使用された実SL価格 (🚀時: -3%, 非🚀時: ATR SL)
         sl_ma_disp = f"採用SL:{sl_ma:,.0f}円" if sl_ma > 0 else "採用SL:不明" 
