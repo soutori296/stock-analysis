@@ -918,29 +918,8 @@ def create_signals_pro_bear(df, info, vol_ratio_in):
 def evaluate_strategy_new(df, info, vol_ratio, high_250d, atr_val, curr_price, ma5, ma25, ma75, prev_ma5, rsi_val, atr_sl_price):
     """
     既存の優先順位付けロジックをカプセル化し、戦略と主要な取引水準を返す。
+    ※ get_market_cap_category と get_target_pct_new はグローバルスコープを参照
     """
-    # 既存ロジックで使用するヘルパー関数
-    def get_market_cap_category(market_cap):
-        if market_cap >= 10000: return "超大型"
-        elif market_cap >= 3000: return "大型"
-        elif market_cap >= 500: return "中型"
-        elif market_cap >= 100: return "小型"
-        else: return "超小型"
-    
-    def get_target_pct_new(category, is_half):
-        if is_half:
-            if category == "超大型": return 0.015
-            elif category == "大型": return 0.020
-            elif category == "中型": return 0.025
-            elif category == "小型": return 0.030
-            else: return 0.040 
-        else:
-            if category == "超大型": return 0.025
-            elif category == "大型": return 0.035
-            elif category == "中型": return 0.040
-            elif category == "小型": return 0.050
-            else: return 0.070 
-    
     # create_signals_pro_bull/bear はグローバルスコープで定義済み
     signals_bull = create_signals_pro_bull(df, info, vol_ratio)
     signals_bear = create_signals_pro_bear(df, info, vol_ratio)
@@ -964,6 +943,7 @@ def evaluate_strategy_new(df, info, vol_ratio, high_250d, atr_val, curr_price, m
          # 🔥順張り判定 (既存ロジックそのまま移植)
          if ma5 > ma25 > ma75 and ma5 > prev_ma5:
               strategy, buy_target = "🔥順張り", int(ma5)
+              # グローバルスコープの関数を参照
               category_str = get_market_cap_category(info["cap"])
               half_pct = get_target_pct_new(category_str, is_half=True)
               full_pct = get_target_pct_new(category_str, is_half=False)
