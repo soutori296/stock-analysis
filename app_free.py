@@ -1,5 +1,3 @@
---- START OF FILE stock_analyzer.py ---
-
 import streamlit as st
 import pandas as pd
 import google.generativeai as genai
@@ -1477,3 +1475,4 @@ if st.session_state.analyzed_data:
         for col in columns_to_drop:
              if col in df_raw.columns: df_raw = df_raw.drop(columns=[col]) 
         st.dataframe(df_raw)
+
