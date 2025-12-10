@@ -66,15 +66,16 @@ if 'authenticated' not in st.session_state:
     st.session_state.authenticated = IS_LOCAL_SKIP_AUTH # ローカルスキップモード時は自動でTrue
     
 # 【★ スコア変動の永続化用データ構造の初期化】
-# key: ticker, value: {'pre_market_score': int, 'current_score': int}
 if 'score_history' not in st.session_state:
     st.session_state.score_history = {} 
     
-# 【★ UIフィルター用のセッションステートを追加 (修正適用) 】
-if 'ui_filter_min_score' not in st.session_state: st.session_state.ui_filter_min_score = 75 # n1=75
-# 修正: float型に統一
-if 'ui_filter_min_liquid_man' not in st.session_state: st.session_state.ui_filter_min_liquid_man = 1.0 # n2=1.0
-if 'ui_filter_aoteng' not in st.session_state: st.session_state.ui_filter_aoteng = False
+# 【★ UIフィルター用のセッションステートを追加 (最終修正) 】
+# デフォルト値
+if 'ui_filter_min_score' not in st.session_state: st.session_state.ui_filter_min_score = 75 
+if 'ui_filter_min_liquid_man' not in st.session_state: st.session_state.ui_filter_min_liquid_man = 1.0 
+# チェックボックスの状態を保存する新しいステート
+if 'ui_filter_score_on' not in st.session_state: st.session_state.ui_filter_score_on = False
+if 'ui_filter_liquid_on' not in st.session_state: st.session_state.ui_filter_liquid_on = False
     
 # --- 分析上限定数 ---
 MAX_TICKERS = 10 
@@ -354,6 +355,9 @@ with st.expander("📘 取扱説明書 (データ仕様・判定基準)"):
 def clear_all_data_confirm():
     """全ての結果と入力をクリアし、確認ダイアログを表示する"""
     st.session_state.clear_confirmed = True
+    # フィルター適用状態もリセット
+    st.session_state.ui_filter_score_on = False
+    st.session_state.ui_filter_liquid_on = False
 
 def reanalyze_all_data_logic():
     """全分析銘柄をテキストボックスに再投入し、再分析の準備をする"""
@@ -367,6 +371,8 @@ def reanalyze_all_data_logic():
     new_hash_after_reload = hashlib.sha256(new_input_value.replace("\n", ",").encode()).hexdigest()
     st.session_state.current_input_hash = new_hash_after_reload
     st.session_state.analysis_index = 0
+    st.session_state.ui_filter_score_on = False 
+    st.session_state.ui_filter_liquid_on = False 
 # --- コールバック関数定義ここまで ---
 
 
@@ -444,37 +450,57 @@ with st.sidebar:
             key='sort_selectbox_ui_key' 
         )
         
-        # 【④ UIデザイン改善 B. 絞り込みフィルターの追加 (修正適用) 】
+        # 【④ UIデザイン改善 B. 絞り込みフィルターの追加 (最終修正) 】
         st.markdown("---")
         st.subheader("表示フィルター")
         
-        # スコア n1 以上 (デフォルト: 75)
-        st.session_state.ui_filter_min_score = st.number_input(
-            "総合点 n1 点以上", 
+        # フィルター入力とチェックボックスを横並びにする
+        col1_1, col1_2 = st.columns([0.65, 0.35])
+        col2_1, col2_2 = st.columns([0.65, 0.35])
+
+        # 総合点（n点以上）
+        st.session_state.ui_filter_min_score = col1_1.number_input(
+            "総合点（n点以上）", 
             min_value=0, max_value=100, 
             value=st.session_state.ui_filter_min_score, 
             step=5, 
             key='filter_min_score'
         )
+        st.session_state.ui_filter_score_on = col1_2.checkbox(
+            "適用", 
+            value=st.session_state.ui_filter_score_on, 
+            key='filter_score_on'
+        )
         
-        # 出来高 n2 万株以上 (デフォルト: 1.0)
-        # 修正: valueの型をfloatに統一
-        st.session_state.ui_filter_min_liquid_man = st.number_input(
-            "5日平均出来高 n2 万株以上", 
+        # 5日平均出来高（n万株以上）
+        st.session_state.ui_filter_min_liquid_man = col2_1.number_input(
+            "5日平均出来高（n万株以上）", 
             min_value=0.0, max_value=500.0, 
             value=st.session_state.ui_filter_min_liquid_man, 
             step=0.5, 
             key='filter_min_liquid_man'
         )
-        
-        st.session_state.ui_filter_aoteng = st.checkbox(
-            "青天井銘柄のみ", 
-            value=st.session_state.ui_filter_aoteng, 
-            key='filter_aoteng'
+        st.session_state.ui_filter_liquid_on = col2_2.checkbox(
+            "適用", 
+            value=st.session_state.ui_filter_liquid_on, 
+            key='filter_liquid_on'
         )
+        
+        # 適用状態のサマリー表示
+        filter_active_status = []
+        if st.session_state.ui_filter_score_on:
+             filter_active_status.append(f"スコア:{st.session_state.ui_filter_min_score}+")
+        if st.session_state.ui_filter_liquid_on:
+             filter_active_status.append(f"出来高:{st.session_state.ui_filter_min_liquid_man}+万株")
+
+        if filter_active_status:
+            st.info(f"✅ フィルター適用中: {', '.join(filter_active_status)}")
+        else:
+            st.info("💡 フィルターは適用されていません。")
 
 
         # 4. 銘柄コード入力エリア
+        st.markdown("---")
         tickers_input = st.text_area(
             f"銘柄コード（上限{MAX_TICKERS}銘柄/回）", 
             value=st.session_state.tickers_input_value, 
@@ -487,6 +513,7 @@ with st.sidebar:
             st.session_state.tickers_input_value = tickers_input
             st.session_state.analysis_index = 0
             st.session_state.current_input_hash = "" 
+            # 入力変更時はフィルターを解除しない (チェックボックスの状態で制御するため)
 
         # 5. ボタン類 
         
@@ -719,8 +746,6 @@ def run_backtest_precise(df, market_cap):
     """
     バックテストを実行し、時価総額別の全益率目標に基づく10日間の勝率を計算する。
     仕様: (1) 前日終値 vs MA5/MA25の条件分離, (2) 青天井専用TSL評価
-    
-    ★ 高速化対策: テスト期間を 75日 → 60日 に短縮。
     """
     try:
         if len(df) < 80: return "データ不足", 0.0, 0, 0.0, 0.0, 0 
@@ -729,8 +754,8 @@ def run_backtest_precise(df, market_cap):
         target_pct = get_target_pct_new(category, is_half=False) 
         
         wins, losses, max_dd_pct = 0, 0, 0.0 
-        # ★ 高速化対策: テスト期間を 75日 → 60日 に短縮
-        test_data = df.tail(60).copy() 
+        # ★ 修正: テスト期間を元の 75日 に戻す
+        test_data = df.tail(75).copy() 
         n = len(test_data)
         
         # 移動平均線とテクニカル指標の再計算
@@ -1119,7 +1144,8 @@ def evaluate_strategy_new(df, info, vol_ratio, high_250d, atr_val, curr_price, m
     return strategy, buy_target, p_half, p_full, sl_ma, is_aoteng, sl_pct
 
 
-# --- メインデータ取得関数（高速化のキャッシュ層を削除しロジックを統合） ---
+# --- メインデータ取得関数（キャッシュ層を削除しロジックを統合） ---
+# ttl=1 により、銘柄ごとに Kabutan/Stooq への再アクセスをほぼ保証
 @st.cache_data(ttl=1) 
 def get_stock_data(ticker, current_run_count):
     status, jst_now_local = get_market_status() 
@@ -1138,6 +1164,7 @@ def get_stock_data(ticker, current_run_count):
     bt_cnt = 0; bt_target_pct = 0.0; bt_win_count = 0
     current_calculated_score, score_diff, score_to_return = 0, 0, 50 
     base_score = 50 # Pylanceエラー対策
+    market_deduct = 0 # Pylanceエラー対策
     
     # 【⑥ スコア内訳表の生成】初期化
     score_factors = {"base": 50, "strategy_bonus": 0, "total_deduction": 0, "rr_score": 0, "rsi_penalty": 0, "vol_bonus": 0, "liquidity_penalty": 0, "atr_penalty": 0, "gc_dc": 0, "market_overheat": 0, "sl_risk_deduct": 0, "aoteng_bonus": 0, "dd_score": 0, "rsi_mid_bonus": 0, "momentum_bonus": 0}
@@ -1269,7 +1296,7 @@ def get_stock_data(ticker, current_run_count):
         if buy_target > 0 and sl_ma > 0 and (p_half > 0 or is_aoteng or p_full > 0): 
             if is_aoteng: 
                 risk_value_raw = buy_target - sl_ma
-                if risk_value_raw > 0: risk_reward_ratio = 50.0
+                if risk_value_raw > 0: risk_reward_ratio = 50.0; risk_value = risk_value_raw # risk_valueを再定義
             else:
                  avg_target = (p_half + p_full) / 2 if p_half > 0 and p_full > 0 else (p_full if p_full > 0 and p_half == 0 else 0)
                  reward_value = avg_target - buy_target; risk_value = buy_target - sl_ma 
@@ -1438,7 +1465,7 @@ def get_stock_data(ticker, current_run_count):
             "is_low_liquidity": avg_vol_5d < 1000, 
 
             "risk_reward": risk_reward_ratio,
-            "risk_value": risk_value, # risk_reward計算で使われたローカル変数
+            "risk_value": risk_value, 
             "issued_shares": issued_shares,
             "liquidity_ratio_pct": liquidity_ratio_pct,
 
@@ -1450,7 +1477,7 @@ def get_stock_data(ticker, current_run_count):
             "atr_sl_price": atr_sl_price,
             "score_diff": score_diff,
 
-            "base_score": base_score, # 定義済みのローカル変数を使用
+            "base_score": base_score, 
             "is_aoteng": is_aoteng,
             "run_count": current_run_count,
             
@@ -1766,36 +1793,51 @@ HEADER_MAP = [
 st.markdown("---")
 
 if st.session_state.analyzed_data:
-    # 【④ UIデザイン改善 B. 絞り込みフィルターの適用】
+    # --- フィルタリングロジック ---
     data = st.session_state.analyzed_data
     filtered_data = []
     
-    # フィルターの値を取得
-    min_score = st.session_state.ui_filter_min_score
-    min_liquid_man = st.session_state.ui_filter_min_liquid_man
-    filter_aoteng = st.session_state.ui_filter_aoteng
+    # フィルター適用フラグが立っている場合のみフィルタリングを実行
+    # チェックボックスの状態を見てフィルタリングを実行
+    is_filter_active = st.session_state.ui_filter_score_on or st.session_state.ui_filter_liquid_on
+    
+    if is_filter_active:
+        min_score = st.session_state.ui_filter_min_score
+        min_liquid_man = st.session_state.ui_filter_min_liquid_man
 
-    for d in data:
-        keep = True
-        
-        # 1. スコアフィルター
-        if d['score'] < min_score: keep = False
-        
-        # 2. 出来高フィルター (n2 万株以上)
-        if keep and d['avg_volume_5d'] < min_liquid_man * 10000: keep = False
-
-        # 3. 青天井フィルター
-        if keep and filter_aoteng and not d['is_aoteng']: keep = False
+        for d in data:
+            keep = True
             
-        if keep:
-            filtered_data.append(d)
+            # 1. スコアフィルター
+            if st.session_state.ui_filter_score_on:
+                 if d['score'] < min_score: keep = False
+            
+            # 2. 出来高フィルター (n万株以上)
+            if keep and st.session_state.ui_filter_liquid_on:
+                 if d['avg_volume_5d'] < min_liquid_man * 10000: keep = False
+                
+            if keep:
+                filtered_data.append(d)
+    else:
+        # フィルター非適用時は全データを使用
+        filtered_data = data
 
     # DataFrameの準備
     df = pd.DataFrame(filtered_data)
     
     # --- 【潜在的な問題点の修正】空のDataFrameチェックを追加 ---
     if df.empty:
-        st.info("⚠️ 該当する銘柄が見つかりませんでした。絞り込みフィルターを変更してください。")
+        # フィルター適用中かつデータがない場合のみメッセージを表示
+        if is_filter_active:
+             # どのフィルターが適用されているかを表示
+             filter_applied = []
+             if st.session_state.ui_filter_score_on: filter_applied.append(f"総合点:{st.session_state.ui_filter_min_score}+")
+             if st.session_state.ui_filter_liquid_on: filter_applied.append(f"出来高:{st.session_state.ui_filter_min_liquid_man}+万株")
+             
+             st.info(f"⚠️ 適用中のフィルター（{', '.join(filter_applied)}）に該当する銘柄が見つかりませんでした。条件を変更してください。")
+        else:
+             st.info("⚠️ 分析結果がありません。銘柄コードを入力し「🚀 分析開始」を押してください。")
+
         st.markdown("---")
         st.markdown(f"【アイの独り言】")
         st.markdown(st.session_state.ai_monologue) 
