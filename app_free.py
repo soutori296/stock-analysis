@@ -59,7 +59,7 @@ if 'sort_option_key' not in st.session_state:
     
 # 【★ モデル選択用の新規セッションステート】
 if 'selected_model_name' not in st.session_state:
-    st.session_state.selected_model_name = "gemini-2.5-flash" # 初期値
+    st.session_state.selected_model_name = "gemma-3-12b-it" # 初期値
 
 # 【★ パスワード認証用の新規セッションステート】 
 if 'authenticated' not in st.session_state:
@@ -151,7 +151,9 @@ def format_volume(volume):
 
 # --- CSSスタイル ---
 st.markdown(f"""
-<style>
+<style> 
+       
+    /* ------------------------------------- */
     /* ========== 【新規追加】サイドバーの幅調整 ========== */
     /* stSidebarV内の幅を調整 (現在のStreamlitバージョンで広く機能するセレクタ) */
     [data-testid="stSidebar"] > div:first-child {{
@@ -209,13 +211,11 @@ st.markdown(f"""
     .td-bold {{ font-weight: bold; }}
     .td-blue {{ color: #0056b3; font-weight: bold; }}
 
-    /* 背景色クラスをCSSで定義 */
-    .bg-aoteng {{ background-color: #FFF0CC !important; }} /* 青天井 */
-    .bg-pro-bull {{ background-color: #FFF7CC !important; }} /* 🚀順ロジ */
-    .bg-bull {{ background-color: #E6FFE6 !important; }} /* 🔥順張り */
-    .bg-pro-bear {{ background-color: #E6F0FF !important; }} /* 🚀逆ロジ */
-    .bg-bear {{ background-color: #E6F0FF !important; }} /* 🌊逆張り */
-    .bg-low-liquidity {{ background-color: #FFE6E6 !important; }} /* 致命的低流動性 */
+    /* 背景色クラスをCSSで定義 (最終決定) */
+    .bg-aoteng {{ background-color: #E6F0FF !important; }} /* 青天井 (薄い青へ) */
+    .bg-low-liquidity {{ background-color: #FFE6E6 !important; }} /* 致命的低流動性 (薄い赤へ変更なし) */
+    .bg-triage-high {{ background-color: #FFFFCC !important; }} /* 75点以上 (薄い黄へ) */
+
 
     /* AIコメントセル内のスクロールコンテナ */
     .comment-scroll-box {{
@@ -235,21 +235,21 @@ st.markdown(f"""
     /* カスタム列幅の再設定 (元の st.dataframe の挙動に近づける) */
     .ai-table th:nth-child(1), .ai-table td:nth-child(1) {{ width: 40px; min-width: 40px; }} /* No */
     .ai-table th:nth-child(2), .ai-table td:nth-child(2) {{ width: 70px; min-width: 70px; }} /* コード */
-    .ai-table th:nth-child(3), .ai-table td:nth-child(3) {{ width: 150px; min-width: 150px; }} /* 企業名 */
+    .ai-table th:nth-child(3), .ai-table td:nth-child(3) {{ width: 120px; min-width: 120px; }} /* 企業名 */
     .ai-table th:nth-child(4), .ai-table td:nth-child(4) {{ width: 100px; min-width: 100px; }} /* 時価総額 */
     .ai-table th:nth-child(5), .ai-table td:nth-child(5) {{ width: 50px; min-width: 50px; }} /* 点 */
     .ai-table th:nth-child(6), .ai-table td:nth-child(6) {{ width: 80px; min-width: 80px; }} /* 分析戦略 */
-    .ai-table th:nth-child(7), .ai-table td:nth-child(7) {{ width: 70px; min-width: 70px; }} /* 現在値 */
-    .ai-table th:nth-child(8), .ai-table td:nth-child(8) {{ width: 80px; min-width: 80px; }} /* 想定水準 */
+    .ai-table th:nth-child(7), .ai-table td:nth-child(7) {{ width: 50px; min-width: 50px; }} /* 現在値 */
+    .ai-table th:nth-child(8), .ai-table td:nth-child(8) {{ width: 50px; min-width: 50px; }} /* 想定水準 */
     .ai-table th:nth-child(9), .ai-table td:nth-child(9) {{ width: 50px; min-width: 50px; }} /* R/R比 */
-    .ai-table th:nth-child(10), .ai-table td:nth-child(10) {{ width: 90px; min-width: 90px; }} /* DD率/SL率 */
-    .ai-table th:nth-child(11), .ai-table td:nth-child(11) {{ width: 120px; min-width: 120px; }} /* 利益確定目標値 */
+    .ai-table th:nth-child(10), .ai-table td:nth-child(10) {{ width: 70px; min-width: 70px; }} /* DD率/SL率 */
+    .ai-table th:nth-child(11), .ai-table td:nth-child(11) {{ width: 100px; min-width: 100px; }} /* 利益確定目標値 */
     .ai-table th:nth-child(12), .ai-table td:nth-child(12) {{ width: 60px; min-width: 60px; }} /* RSI */
     .ai-table th:nth-child(13), .ai-table td:nth-child(13) {{ width: 70px; min-width: 70px; }} /* 出来高比 (MA5実績と同じ幅に修正) */
-    .ai-table th:nth-child(14), .ai-table td:nth-child(14) {{ width: 70px; min-width: 70px; }} /* MA5実績 */
-    .ai-table th:nth-child(15), .ai-table td:nth-child(15) {{ width: 80px; min-width: 80px; }} /* PER/PBR */
-    .ai-table th:nth-child(16), .ai-table td:nth-child(16) {{ width: 60px; min-width: 60px; }} /* 直近勝率 */
-    .ai-table th:nth-child(17), .ai-table td:nth-child(17) {{ width: 350px; min-width: 350px; }} /* アイの所感 */
+    .ai-table th:nth-child(14), .ai-table td:nth-child(14) {{ width: 60px; min-width: 60px; }} /* MA5実績 */
+    .ai-table th:nth-child(15), .ai-table td:nth-child(15) {{ width: 40px; min-width: 40px; }} /* PER/PBR */
+    .ai-table th:nth-child(16), .ai-table td:nth-child(16) {{ width: 40px; min-width: 40px; }} /* 直近勝率 */
+    .ai-table th:nth-child(17), .ai-table td:nth-child(17) {{ width: 480px; min-width: 480px; }} /* アイの所感 */
 
     /* --- ツールチップ表示用CSSの追加 (変更なし) --- */
     .ai-table th.has-tooltip:hover::after {{
@@ -419,12 +419,10 @@ with st.sidebar:
             # 🎯 修正: keyを追加してStreamlitDuplicateElementIdエラーを回避
             api_key = st.text_input("Gemini API Key", type="password", key='gemini_api_key_input') 
 
-        st.markdown("---") 
-
         # 2. AIモデル選択ボックス
         model_options = [
-            "gemini-2.5-flash", 
             "gemma-3-12b-it",
+            "gemini-2.5-flash", 
         ]
         st.session_state.selected_model_name = st.selectbox(
             "使用AIモデルを選択", 
@@ -451,56 +449,58 @@ with st.sidebar:
         )
         
         # 【④ UIデザイン改善 B. 絞り込みフィルターの追加 (最終修正) 】
-        st.markdown("---")
-        st.subheader("表示フィルター")
+
+        st.markdown("<h3 style='font-size: 1.17em; font-weight: bold; margin-top: 1rem; margin-bottom: 0;'>🔍 表示フィルター</h3>", unsafe_allow_html=True)
         
         # フィルター入力とチェックボックスを横並びにする
-        col1_1, col1_2 = st.columns([0.65, 0.35])
-        col2_1, col2_2 = st.columns([0.65, 0.35])
-
-        # 総合点（n点以上）
+        col1_1, col1_2 = st.columns([0.6, 0.4]) # 入力:60%, チェックボックス:40%
+        col2_1, col2_2 = st.columns([0.6, 0.4])
+        
+        # --- 総合点（n点以上） ---
+        # 1-1. 入力ボックスのラベルを「n点以上」に変更
         st.session_state.ui_filter_min_score = col1_1.number_input(
-            "総合点（n点以上）", 
+            "n点以上", 
             min_value=0, max_value=100, 
             value=st.session_state.ui_filter_min_score, 
             step=5, 
             key='filter_min_score'
         )
+        
+        # 1-2. チェックボックスとその「適用」ラベルを配置
+        # 画像のようにチェックボックスを上、ラベルを下にするのは困難なため、チェックボックス全体を下へずらす
         st.session_state.ui_filter_score_on = col1_2.checkbox(
             "適用", 
             value=st.session_state.ui_filter_score_on, 
-            key='filter_score_on'
+            key='filter_score_on',    
         )
+        # 外部CSSなしでチェックボックスの位置を調整する方法: 
+        # チェックボックスを含むカラムの直前にダミーのマークダウンを挿入して縦位置を調整する
+        col1_2.markdown(" ", unsafe_allow_html=True) 
+
         
-        # 5日平均出来高（n万株以上）
+        # --- 5日平均出来高（n万株以上） ---
+        # 2-1. 入力ボックスのラベルを「5日平均出来高」に変更
         st.session_state.ui_filter_min_liquid_man = col2_1.number_input(
-            "5日平均出来高（n万株以上）", 
+            "出来高(万株)", 
             min_value=0.0, max_value=500.0, 
             value=st.session_state.ui_filter_min_liquid_man, 
             step=0.5, 
             key='filter_min_liquid_man'
         )
+        
+        # 2-2. チェックボックスとその「適用」ラベルを配置
         st.session_state.ui_filter_liquid_on = col2_2.checkbox(
             "適用", 
             value=st.session_state.ui_filter_liquid_on, 
-            key='filter_liquid_on'
+            key='filter_liquid_on',
         )
+        col2_2.markdown(" ", unsafe_allow_html=True)
         
-        # 適用状態のサマリー表示
+        # 適用状態のサマリー表示 (元のコードを修正)
         filter_active_status = []
-        if st.session_state.ui_filter_score_on:
-             filter_active_status.append(f"スコア:{st.session_state.ui_filter_min_score}+")
-        if st.session_state.ui_filter_liquid_on:
-             filter_active_status.append(f"出来高:{st.session_state.ui_filter_min_liquid_man}+万株")
-
-        if filter_active_status:
-            st.info(f"✅ フィルター適用中: {', '.join(filter_active_status)}")
-        else:
-            st.info("💡 フィルターは適用されていません。")
 
 
         # 4. 銘柄コード入力エリア
-        st.markdown("---")
         tickers_input = st.text_area(
             f"銘柄コード（上限{MAX_TICKERS}銘柄/回）", 
             value=st.session_state.tickers_input_value, 
@@ -920,10 +920,13 @@ def get_base_score(ticker, df_base, info):
     # 既存のロジックを忠実に再現
     if "🔥順張り" in strategy_b:
         if info["cap"] >= 3000: 
-            if rsi_val_b >= 85: total_structural_deduction_b -= 15 
+            # 💡 修正: RSI過熱ペナルティを半減 (-15点 -> -8点)
+            if rsi_val_b >= 85: total_structural_deduction_b -= 8 
         else:
-            if rsi_val_b >= 80: total_structural_deduction_b -= 25 
+            # 💡 修正: RSI過熱ペナルティを半減 (-25点 -> -13点)
+            if rsi_val_b >= 80: total_structural_deduction_b -= 13 
     elif "🌊逆張り" in strategy_b:
+        # RSI底打ちペナルティは維持（-15点/-25点）
         if rsi_val_b <= 20: 
             if info["cap"] >= 3000: total_structural_deduction_b -= 15
             else: total_structural_deduction_b -= 25
@@ -1166,8 +1169,13 @@ def get_stock_data(ticker, current_run_count):
     base_score = 50 # Pylanceエラー対策
     market_deduct = 0 # Pylanceエラー対策
     
+    # 【DD/リカバリー解析用】
+    last_high_recovery_date = None
+    recovery_days = 999 
+    dd_75d_count = 0 
+    
     # 【⑥ スコア内訳表の生成】初期化
-    score_factors = {"base": 50, "strategy_bonus": 0, "total_deduction": 0, "rr_score": 0, "rsi_penalty": 0, "vol_bonus": 0, "liquidity_penalty": 0, "atr_penalty": 0, "gc_dc": 0, "market_overheat": 0, "sl_risk_deduct": 0, "aoteng_bonus": 0, "dd_score": 0, "rsi_mid_bonus": 0, "momentum_bonus": 0}
+    score_factors = {"base": 50, "strategy_bonus": 0, "total_deduction": 0, "rr_score": 0, "rsi_penalty": 0, "vol_bonus": 0, "liquidity_penalty": 0, "atr_penalty": 0, "gc_dc": 0, "market_overheat": 0, "sl_risk_deduct": 0, "aoteng_bonus": 0, "dd_score": 0, "rsi_mid_bonus": 0, "momentum_bonus": 0, "intraday_vol_deduct": 0, "intraday_ma_gap_deduct": 0, "dd_recovery_bonus": 0, "dd_continuous_penalty": 0}
 
     curr_price_for_check = info.get("price")
     if curr_price_for_check is not None and curr_price_for_check < 100:
@@ -1214,7 +1222,9 @@ def get_stock_data(ticker, current_run_count):
         if status == "場中(進行中)" or curr_price is None: curr_price = info.get("price")
         
         # 🎯 Stooq と当日リアルタイム値のマージ
+        is_intraday_active = False
         if status == "場中(進行中)" and info.get("open") and info.get("high") and info.get("low") and info.get("volume") and curr_price:
+              is_intraday_active = True
               today_date_dt = pd.to_datetime(jst_now_local.strftime("%Y-%m-%d"))
               
               if df.index[-1].date() < today_date_dt.date():
@@ -1284,6 +1294,55 @@ def get_stock_data(ticker, current_run_count):
         # ------------------ 4. バックテスト実行 ------------------
         bt_str, win_rate_pct, bt_cnt, max_dd_pct, bt_target_pct, bt_win_count = run_backtest(df, info["cap"]) 
         
+        # ------------------ DD/リカバリー解析 (新規) ------------------
+        dd_data = df.copy().tail(250) # 過去1年分でDDをチェック
+        dd_data['Peak'] = dd_data['Close'].cummax()
+        dd_data['DD'] = (dd_data['Close'] / dd_data['Peak']) - 1
+        
+        # MDD（最大ドローダウン）の検出と回復日の計算
+        max_dd_val = dd_data['DD'].min() # 最大下落率 (例: -0.20)
+        mdd_day_index = dd_data['DD'].idxmin()
+        mdd_peak_price = dd_data.loc[:mdd_day_index, 'Peak'].iloc[-1]
+        
+        # 95% 回復目標値
+        recovery_target = mdd_peak_price * 0.95
+        
+        # MDD発生日から現在までをスキャン
+        recovery_check_df = dd_data[dd_data.index >= mdd_day_index]
+        
+        recovery_days = 999 
+        for i, (date, row) in enumerate(recovery_check_df.iterrows()):
+            if row['Close'] >= recovery_target:
+                recovery_days = i # MDD発生日を i=0 とする
+                last_high_recovery_date = date
+                break
+        
+        # DD連続性のチェック (直近75日間のDDがMDDの50%以上である回数)
+        dd_75d_count = 0
+        threshold_dd = max_dd_val * 0.50 # MDDの50% (例: MDDが-20%なら -10%)
+        
+        recent_75d_dd = dd_data['DD'].tail(75)
+        # DDが連続して発生した日数をカウント (DD閾値以下かつ負の値が2日以上連続したら1回とカウント)
+        is_in_dd = False
+        dd_start_index = None
+        
+        for i, dd_val in enumerate(recent_75d_dd):
+            if dd_val <= threshold_dd and dd_val < 0: # DD閾値以下かつ負の値
+                if not is_in_dd:
+                    is_in_dd = True
+                    dd_start_index = i
+            else:
+                if is_in_dd:
+                    dd_end_index = i - 1
+                    # DDの発生期間が1日以上
+                    if dd_end_index >= dd_start_index:
+                        dd_75d_count += 1
+                    is_in_dd = False
+                    
+        # 75日期間の終了日でもDD中の場合
+        if is_in_dd and len(recent_75d_dd) - 1 >= dd_start_index:
+             dd_75d_count += 1
+             
         # ------------------ 5. スコア計算（内訳込み） ------------------
         score = 50; total_structural_deduction = 0
         avg_vol_5d = last['Vol_SMA5'] if not pd.isna(last['Vol_SMA5']) else 0
@@ -1293,56 +1352,88 @@ def get_stock_data(ticker, current_run_count):
         if p_full < p_half: p_full = p_half
         if p_half > 0 and p_half <= buy_target: p_half = 0
         if p_full > 0 and p_full <= buy_target: p_full = 0
-        if buy_target > 0 and sl_ma > 0 and (p_half > 0 or is_aoteng or p_full > 0): 
+        
+        # 💡 R/R比の計算基準を「想定水準(buy_target)」に固定
+        entry_price_for_rr = buy_target
+        
+        if entry_price_for_rr > 0 and sl_ma > 0 and (p_half > 0 or is_aoteng or p_full > 0): 
             if is_aoteng: 
-                risk_value_raw = buy_target - sl_ma
+                risk_value_raw = entry_price_for_rr - sl_ma
                 if risk_value_raw > 0: risk_reward_ratio = 50.0; risk_value = risk_value_raw # risk_valueを再定義
             else:
                  avg_target = (p_half + p_full) / 2 if p_half > 0 and p_full > 0 else (p_full if p_full > 0 and p_half == 0 else 0)
-                 reward_value = avg_target - buy_target; risk_value = buy_target - sl_ma 
+                 reward_value = avg_target - entry_price_for_rr; risk_value = entry_price_for_rr - sl_ma 
                  if risk_value > 0 and reward_value > 0: risk_reward_ratio = min(reward_value / risk_value, 50.0)
-                 min_risk_threshold = buy_target * 0.01 
+                 min_risk_threshold = entry_price_for_rr * 0.01 
                  is_rr_buffer_zone = (0.95 <= risk_reward_ratio <= 1.05)
                  if not is_rr_buffer_zone and risk_value >= min_risk_threshold:
-                     if risk_reward_ratio >= 2.0: rr_score_value = 15
-                     elif risk_reward_ratio >= 1.5: rr_score_value = 5
+                     if risk_reward_ratio >= 2.0: rr_score_value = 20 # 💡 修正: +20点
+                     elif risk_reward_ratio >= 1.5: rr_score_value = 10 # 💡 修正: +10点
                  if risk_reward_ratio < 1.0 and not is_rr_buffer_zone: 
                      rr_score_value -= 25
 
         # (スコアリング処理 - 既存のスコアリングロジックを忠実に再現)
         score_factors_inner = copy.deepcopy(score_factors) # 初期化された辞書をコピーして使用
         
+        # RSI過熱ペナルティ (💡 修正後の半減値を使用)
+        rsi_penalty_value = 0
         if "順ロジ" in strategy or "順張り" in strategy:
             if info["cap"] >= 3000:
-                if rsi_val >= 85: total_structural_deduction -= 15; score_factors_inner["rsi_penalty"] = -15
+                if rsi_val >= 85: rsi_penalty_value = -8; # 💡 修正: 半減
             else:
-                if rsi_val >= 80: total_structural_deduction -= 25; score_factors_inner["rsi_penalty"] = -25
+                if rsi_val >= 80: rsi_penalty_value = -13; # 💡 修正: 半減
         elif "逆ロジ" in strategy or "逆張り" in strategy:
             if rsi_val <= 20: 
-                if info["cap"] >= 3000: total_structural_deduction -= 15; score_factors_inner["rsi_penalty"] = -15
-                else: total_structural_deduction -= 25; score_factors_inner["rsi_penalty"] = -25
+                if info["cap"] >= 3000: rsi_penalty_value = -15; # 維持
+                else: rsi_penalty_value = -25; # 維持
+        
+        # 💡 🚀逆ロジック成立時はペナルティを無効化（0点）
+        if "🚀逆ロジ" in strategy:
+             rsi_penalty_value = 0
+             score_factors_inner["rsi_penalty"] = 0
+        else:
+             total_structural_deduction += rsi_penalty_value
+             score_factors_inner["rsi_penalty"] = rsi_penalty_value
                 
+        # その他の構造的減点（流動性、ボラティリティ）
         if avg_vol_5d < 1000: total_structural_deduction -= 30; score_factors_inner["liquidity_penalty"] = -30
         liquidity_ratio_pct = (avg_vol_5d / issued_shares) * 100 if issued_shares > 0 else 0.0
         if liquidity_ratio_pct < 0.05: total_structural_deduction -= 10; score_factors_inner["liquidity_penalty"] -= 10
         
+        atr_pct = (atr_smoothed / curr_price) * 100 if curr_price > 0 and atr_smoothed > 0 else 0
+        is_low_vol_buffer_zone = (0.45 <= atr_pct <= 0.55)
+        atr_penalty = 0
+        if atr_pct < 0.5 and not is_low_vol_buffer_zone: atr_penalty = -10 
+        total_structural_deduction += atr_penalty; score_factors_inner["atr_penalty"] = atr_penalty
+        
         score += total_structural_deduction
         score_factors_inner["total_deduction"] += total_structural_deduction
 
+        # 戦略ボーナス
         strategy_bonus = 0
         if "順ロジ" in strategy or "順張り" in strategy: strategy_bonus = 15 
         if "逆ロジ" in strategy or "逆張り" in strategy: strategy_bonus = 10
         score += strategy_bonus; score_factors_inner["strategy_bonus"] = strategy_bonus
         
+        # RSI中立ボーナス
         rsi_mid_bonus = 0
         if 55 <= rsi_val <= 65: rsi_mid_bonus = 10
         score += rsi_mid_bonus; score_factors_inner["rsi_mid_bonus"] = rsi_mid_bonus
 
-        vol_bonus = 0
-        if vol_ratio > 1.5: vol_bonus += 10;
-        if vol_ratio > 3.0: vol_bonus += 5;
-        score += vol_bonus; score_factors_inner["vol_bonus"] = vol_bonus
+        # 出来高ボーナス (💡 場中限定で半減ペナルティを適用)
+        vol_bonus_raw = 0
+        if vol_ratio > 1.5: vol_bonus_raw += 10;
+        if vol_ratio > 3.0: vol_bonus_raw += 5;
         
+        intraday_vol_deduct = 0
+        if is_intraday_active: 
+             intraday_vol_deduct = -int(np.ceil(vol_bonus_raw / 2)) # 場中であれば、加点の半分を場中限定ペナルティとして差し引く（切り上げ）
+             score_factors_inner["intraday_vol_deduct"] = intraday_vol_deduct
+        
+        vol_bonus = vol_bonus_raw + intraday_vol_deduct # 実質的な加点
+        score += vol_bonus; score_factors_inner["vol_bonus"] = vol_bonus_raw # 内訳表示用に修正（純粋な加点）
+
+        # モメンタムボーナス
         momentum_bonus = 0
         if up_days >= 4: momentum_bonus = 5
         score += momentum_bonus; score_factors_inner["momentum_bonus"] = momentum_bonus
@@ -1350,10 +1441,12 @@ def get_stock_data(ticker, current_run_count):
         score += rr_score_value; 
         score_factors_inner["rr_score"] += rr_score_value
         
+        # 青天井ボーナス
         aoteng_bonus = 0
         if is_aoteng and rsi_val < 80 and vol_ratio > 1.5: aoteng_bonus = 15 
         score += aoteng_bonus; score_factors_inner["aoteng_bonus"] = aoteng_bonus
         
+        # GC/DC評価
         is_final_cross = (status != "場中(進行中)") 
         gc_dc_score = 0
         if is_final_cross:
@@ -1361,13 +1454,33 @@ def get_stock_data(ticker, current_run_count):
             elif is_dc: gc_dc_score = -10
         score += gc_dc_score; score_factors_inner["gc_dc"] = gc_dc_score
             
+        # DD評価（MDD一律ペナルティは削除）
         dd_abs = abs(max_dd_pct); dd_score = 0
+        # 2.0% < DD <= 10.0% の連続減点は維持
         if dd_abs < 1.0: dd_score = 5
         elif 1.0 <= dd_abs <= 2.0: dd_score = 0
-        elif 2.0 < dd_abs <= 10.0: dd_score = -int(np.floor(dd_abs - 2.0)) * 2 
-        elif dd_abs > 10.0: dd_score = -20
+        elif 2.0 < dd_abs: dd_score = -int(np.floor(dd_abs - 2.0)) * 2 
+        
+        # ただし、DD連続性ペナルティのロジックと重なるため、最大で-20点に抑制
+        dd_score = max(-20, dd_score) 
+
         score += dd_score; score_factors_inner["dd_score"] = dd_score
         
+        # 💡 リカバリー速度と連続性ペナルティの適用
+        dd_recovery_bonus = 0
+        if recovery_days <= 20: dd_recovery_bonus = 10 # 💡 20日以内の回復で+10点
+        elif recovery_days >= 101: dd_recovery_bonus = -10 
+        
+        if recovery_days == 999: dd_recovery_bonus = -10 # 未回復も-10点
+        
+        score += dd_recovery_bonus; score_factors_inner["dd_recovery_bonus"] = dd_recovery_bonus
+        
+        dd_continuous_penalty = 0
+        if dd_75d_count >= 2: dd_continuous_penalty = -20 # 💡 75日間に2回以上のDDで-20点
+        
+        score += dd_continuous_penalty; score_factors_inner["dd_continuous_penalty"] = dd_continuous_penalty
+        
+        # SL浅さリスク減点
         sl_risk_deduct = 0
         is_market_alert = market_25d_ratio >= 125.0
         if not is_aoteng: 
@@ -1376,12 +1489,14 @@ def get_stock_data(ticker, current_run_count):
                      if is_market_alert: sl_risk_deduct = -20 
         score += sl_risk_deduct; score_factors_inner["sl_risk_deduct"] = sl_risk_deduct
         
-        atr_pct = (atr_smoothed / curr_price) * 100 if curr_price > 0 and atr_smoothed > 0 else 0
-        is_low_vol_buffer_zone = (0.45 <= atr_pct <= 0.55)
-        atr_penalty = 0
-        if atr_pct < 0.5 and not is_low_vol_buffer_zone: atr_penalty = -10 
-        score += atr_penalty; score_factors_inner["atr_penalty"] = atr_penalty
-        
+        # 💡 場中限定：MA乖離率ペナルティ (場中高騰抑制)
+        intraday_ma_gap_deduct = 0
+        ma_gap_pct = ((curr_price / ma5) - 1) * 100 if ma5 > 0 and ("順張り" in strategy or "順ロジ" in strategy) else 0.0
+        if is_intraday_active and ma_gap_pct >= 1.0: # MA5から+1%以上の乖離でペナルティ
+             intraday_ma_gap_deduct = -int(min(15, (ma_gap_pct - 1.0) * 5)) # 1%超の乖離1%ごとに-5点（最大-15点程度）
+             score += intraday_ma_gap_deduct
+             score_factors_inner["intraday_ma_gap_deduct"] = intraday_ma_gap_deduct
+
         current_calculated_score = max(0, min(100, score)) 
         score_factors_inner["market_overheat"] = -20 if is_market_alert else 0
         market_deduct = -20 if is_market_alert else 0 # ローカル変数として定義
@@ -1406,6 +1521,7 @@ def get_stock_data(ticker, current_run_count):
                   
         elif status == "場中(進行中)":
              if pre_market_score is None:
+                  # 場中ペナルティが適用される前のベーススコアを比較に使用
                   score_for_comparison = get_base_score(ticker, df_base_score, info) + market_deduct
                   new_pre_market_score = max(0, min(100, score_for_comparison)) 
                   
@@ -1436,18 +1552,23 @@ def get_stock_data(ticker, current_run_count):
             "基礎点": score_factors_inner["base"],
             "戦略優位性ボーナス": score_factors_inner["strategy_bonus"],
             "RSI中立ゾーンボーナス": score_factors_inner["rsi_mid_bonus"],
-            "出来高急増ボーナス": score_factors_inner["vol_bonus"],
+            "出来高急増ボーナス": score_factors_inner["vol_bonus"], # 実質加点
             "直近モメンタムボーナス": score_factors_inner["momentum_bonus"],
             "GC/DC評価": score_factors_inner["gc_dc"],
             "青天井ボーナス": score_factors_inner["aoteng_bonus"],
             "リスクリワード評価": score_factors_inner["rr_score"],
             "過去最大DD評価": score_factors_inner["dd_score"],
+            "DDリカバリー速度評価": score_factors_inner["dd_recovery_bonus"], # リカバリーボーナス/ペナルティ
+            "DD連続性リスク評価": score_factors_inner["dd_continuous_penalty"], # DD連続性ペナルティ
             "RSI過熱/底打ちペナルティ": score_factors_inner["rsi_penalty"],
             "流動性ペナルティ": score_factors_inner["liquidity_penalty"],
             "ボラティリティペナルティ": score_factors_inner["atr_penalty"],
             "SL浅さリスク減点": score_factors_inner["sl_risk_deduct"],
             "市場過熱ペナルティ": score_factors_inner["market_overheat"],
-            "構造的減点（合計）": score_factors_inner["total_deduction"],
+            # 場中限定ペナルティ
+            "場中・出来高過大評価減点": score_factors_inner["intraday_vol_deduct"],
+            "場中・MA乖離リスク減点": score_factors_inner["intraday_ma_gap_deduct"],
+            "構造的減点（合計）": total_structural_deduction, # 修正後の合計を格納
         }
         
         # 0点の項目を削除 (表示の簡素化のため)
@@ -1574,6 +1695,8 @@ def batch_analyze_with_ai(data_list):
 
         prompt_text += f"ID:{d['code']} | {d['name']} | 現在:{price:,.0f} | 分析戦略:{d['strategy']} | RSI:{d['rsi']:.1f} | 5MA乖離率:{ma_div:+.1f}%{rr_disp} | 出来高倍率:{d['vol_ratio']:.1f}倍 | リスク情報: MDD:{mdd:+.1f}%, SL乖離率:{sl_pct:+.1f}% | {sl_ma_disp} | {low_liquidity_status} | {liq_disp} | {atr_disp} | {gc_dc_status} | {atr_sl_disp} | {target_info} | {win_rate_disp} | 総合分析点:{d['score']}\n" 
 
+    prompt_text += f"ID:{d['code']} | {d['name']} | 現在:{price:,.0f} | 分析戦略:{d['strategy']} | RSI:{d['rsi']:.1f} | 5MA乖離率:{ma_div:+.1f}%{rr_disp} | 出来高倍率:{d['vol_ratio']:.1f}倍 | リスク情報: MDD:{mdd:+.1f}%, SL乖離率:{sl_pct:+.1f}% | {sl_ma_disp} | {low_liquidity_status} | {liq_disp} | {atr_disp} | {gc_dc_status} | {atr_sl_disp} | {target_info} | {win_rate_disp} | 総合分析点:{d['score']}\n" 
+
     r25 = market_25d_ratio
     market_alert_info = f"市場25日騰落レシオ: {r25:.2f}%。"
     if r25 >= 125.0: market_alert_info += "市場は【明確な過熱ゾーン】にあり、全体的な調整リスクが非常に高いです。"
@@ -1582,7 +1705,7 @@ def batch_analyze_with_ai(data_list):
     
     prompt = f"""あなたは「アイ」という名前のプロトレーダー（30代女性、冷静・理知的）。以下の【市場環境】と【銘柄リスト】に基づき、それぞれの「所感コメント（丁寧語）」を【生成コメントの原則】に従って作成してください。
 【市場環境】{market_alert_info}
-【生成コメントの原則（厳守）】1. <b>Markdownの太字（**）は絶対に使用せず、HTMLの太字（<b>）のみをコメント内で使用してください。</b>2. <b>表現の多様性を最重視してください。</b>紋切り型な文章は厳禁です。3. <b>コメントの先頭に、必ず「<b>[銘柄名]</b>｜」というプレフィックスを挿入してください。</b>4. <b>最大文字数の厳守：全てのコメント（プレフィックス含む）は最大でも150文字とします。この150文字制限は、プレフィックスを含めた全体の文字数です。</b>投資助言と誤解される表現、特に「最終的な売買判断は、ご自身の分析とリスク許容度に基づいて行うことが重要です。」という定型文は、<b>全てのコメントから完全に削除してください。</b>具体的な行動（「買い」「売り」など）を促す表現は厳禁です。5. <b>総合分析点に応じた文章量とトーンを厳格に調整してください。</b>（プレフィックスの文字数も考慮し、制限を厳しくします）- 総合分析点 85点以上 (超高評価): 80文字〜145文字程度。客観的な事実と技術的な評価のみに言及し、期待感を示す言葉や断定的な表現は厳禁とする。- 総合分析点 75点 (高評価): 70文字〜110文字程度。分析上の結果と客観的なデータ提示に留める。- 総合分析点 65点以下 (中立/様子見): 50文字〜70文字程度。リスクと慎重な姿勢を強調してください。6. 市場環境が【明確な過熱ゾーン】の場合、全てのコメントのトーンを控えめにし、「市場全体が過熱しているため、この銘柄にも調整が入るリスクがある」といった<b>強い警戒感</b>を盛り込んでください。7. 戦略の根拠、RSIの状態（極端な減点があったか否か）、出来高倍率（1.5倍超）、およびR/R比（1.0未満の不利、2.0超の有利など）を必ず具体的に盛り込んでください。8. <b>GC:発生またはDC:発生の銘柄については、コメント内で必ずその事実に言及し、トレンド転換の可能性を慎重に伝えてください。</b>9. 【リスク情報と撤退基準】- リスク情報（MDD、SL乖離率）を参照し、リスク管理の重要性に言及してください。MDDが-8.0%を超える場合は、「過去の最大下落リスクが高いデータ」がある旨を明確に伝えてください。- 流動性: 致命的低流動性:警告(1000株未満)の銘柄については、コメントの冒頭（プレフィックスの次）で「平均出来高が1,000株未満と極めて低く、希望価格での売買が困難な<b>流動性リスク</b>を伴います。ご自身の資金規模に応じたロット調整をご検討ください。」といった<b>明確な警告</b>を必ず含めてください。- 新規追加: 極端な低流動性 (流動性比率 < 0.05% や ATR < 0.5% の場合) についても、同様に<b>明確な警告</b>を盛り込んでください。- 撤退基準: コメントの末尾で、**構造的崩壊の支持線MA**を終値で明確に割り込む場合と、**ATRに基づくボラティリティ水準**を終値で明確に下回る場合を、**両方とも**、具体的な価格を付記して言及してください。（例: 撤退基準はMA支持線（X円）またはATR水準（Y円）です。）- **青天井領域の追記:** ターゲット情報が「青天井追従」または「追従目標」の場合、**「利益目標は固定目標ではなく、動的なATRトレーリング・ストップ（X円）に切り替わっています。この価格を終値で下回った場合は、利益を確保するための撤退を検討します。」**という趣旨を、コメントの適切な位置に含めてください。- 強調表現の制限: 総合分析点85点以上の銘柄コメントに限り、全体の5%の割合（例: 20銘柄中1つ程度）で、特に重要な部分（例：出来高増加の事実、高い整合性）を1箇所（10文字以内）に限り、<b>赤太字のHTMLタグ（<span style="color:red;">...</span>）</b>を使用して強調しても良い。それ以外のコメントでは赤太字を絶対に使用しないでください。
+【生成コメントの原則（厳守）】1. <b>Markdownの太字（**）は絶対に使用せず、HTMLの太字（<b>）のみをコメント内で使用してください。</b>2. <b>表現の多様性は最小限に抑えてください。</b>定型的な文章構造を維持してください。3. <b>コメントの先頭に、必ず「<b>[銘柄名]</b>｜」というプレフィックスを挿入してください。</b>4. <b>最大文字数の厳守：全てのコメント（プレフィックス含む）は最大でも100文字とします。この100文字制限は、プレフィックスを含めた全体の文字数です。これを厳格に守ってください。</b>投資助言と誤解される表現、特に「最終的な売買判断は、ご自身の分析とリスク許容度に基づいて行うことが重要です。」という定型文は、<b>全てのコメントから完全に削除してください。</b>5. <b>総合分析点に応じた文章量を厳格に調整してください。</b>（プレフィックスの文字数も考慮し、制限を厳しくします）- 総合分析点 85点以上 (超高評価): 85文字以下。- 総合分析点 75点 (高評価): 75文字以下。- 総合分析点 65点以下 (中立/様子見): 65文字以下。6. 市場環境が【明確な過熱ゾーン】の場合、全てのコメントのトーンを控えめにし、「市場全体が過熱しているため、この銘柄にも調整が入るリスクがある」といった<b>強い警戒感</b>を盛り込んでください。7. 戦略の根拠、RSIの状態（極端な減点があったか否か）、出来高倍率（1.5倍超）、およびR/R比（1.0未満の不利、2.0超の有利など）を必ず具体的に盛り込んでください。<b>特に、RSIが55.0から65.0の範囲にある場合（スイートスポット）、コメントでは「トレンドの勢いが継続しやすい中立的な水準」といった、積極的かつ客観的な評価を用いてください。</b>8. <b>GC:発生またはDC:発生の銘柄については、コメント内で必ずその事実に言及し、トレンド転換の可能性を慎重に伝えてください。</b>9. 【リスク情報と撤退基準】- リスク情報（MDD、SL乖離率）を参照し、リスク管理の重要性に言及してください。MDDが-8.0%を超える場合は、「過去の最大下落リスクが高いデータ」がある旨を明確に伝えてください。- 流動性: 致命的低流動性:警告(1000株未満)の銘柄については、コメントの冒頭（プレフィックスの次）で「平均出来高が1,000株未満と極めて低く、希望価格での売買が困難な<b>流動性リスク</b>を伴います。ご自身の資金規模に応じたロット調整をご検討ください。」といった<b>明確な警告</b>を必ず含めてください。- 新規追加: 極端な低流動性 (流動性比率 < 0.05% や ATR < 0.5% の場合) についても、同様に<b>明確な警告</b>を盛り込んでください。- 撤退基準: コメントの末尾で、**構造的崩壊の支持線MA**を終値で明確に割り込む場合と、**ATRに基づくボラティリティ水準**を終値で明確に下回る場合を、**両方とも**、具体的な価格を付記して言及してください。（例: 撤退基準はMA支持線（X円）またはATR水準（Y円）です。）- **青天井領域の追記:** ターゲット情報が「青天井追従」または「追従目標」の場合、**「利益目標は固定目標ではなく、動的なATRトレーリング・ストップ（X円）に切り替わっています。この価格を終値で下回った場合は、利益を確保するための撤退を検討します。」**という趣旨を、コメントの適切な位置に含めてください。- 強調表現の制限: 総合分析点85点以上の銘柄コメントに限り、全体の5%の割合（例: 20銘柄中1つ程度）で、特に重要な部分（例：出来高増加の事実、高い整合性）を1箇所（10文字以内）に限り、<b>赤太字のHTMLタグ（<span style="color:red;">...</span>）</b>を使用して強調しても良い。それ以外のコメントでは赤太字を絶対に使用しないでください。
 【出力形式】ID:コード | コメント
 {prompt_text}
 【最後に】リストの最後に「END_OF_LIST」と書き、その後に続けて「アイの独り言（常体・独白調）」を1行で書いてください。語尾に「ね」や「だわ」などはしないこと。※見出し不要。独り言は、市場25日騰落レシオ({r25:.2f}%)を総括し、規律ある撤退の重要性に言及する。
@@ -1598,7 +1721,6 @@ def batch_analyze_with_ai(data_list):
         parts = text.split("END_OF_LIST", 1)
         comment_lines = parts[0].strip().split("\n")
         monologue_raw = parts[1].strip()
-        monologue = re.sub(r'<[^>]+>', '', monologue_raw) 
         monologue = re.sub(r'\*\*(.*?)\*\*', r'\1', monologue) 
         monologue = monologue.replace('**', '').strip() 
         for line in comment_lines:
@@ -1611,6 +1733,16 @@ def batch_analyze_with_ai(data_list):
                     c_com_cleaned = re.sub(r'\*\*(.*?)\*\*', r'\1', c_com_cleaned) 
                     c_com_cleaned = c_com_cleaned.replace('**', '').strip() 
                     c_com_cleaned = c_com_cleaned.lstrip('・-')
+                    
+                    # ★★★ 修正 B: 文字数制限の「...」トリミングを削除し、警告メッセージに置き換える ★★★
+                    WARNING_THRESHOLD = 105 
+                    if len(c_com_cleaned) > WARNING_THRESHOLD:
+                         # コメントが長すぎる場合、スクロールを促す警告メッセージを冒頭に追加
+                         # HTML内なので、<br>で改行し、スクロールバー内に収める
+                         c_com_cleaned = f'<span style="color:orange; font-size:11px;"><b>⚠️長文注意/全文はスクロール</b></span><br>' + c_com_cleaned
+                         
+                    # ★★★ 修正 B ここまで ★★★
+                        
                     comments[c_code] = c_com_cleaned
                 except: pass
             elif "|" not in line and line.strip().startswith('総合分析点'): continue
@@ -1766,45 +1898,38 @@ if analyze_start_clicked:
 
 # 【④ UIデザイン改善 A. 行ごとの背景色を追加】
 def highlight_rows(row):
-    color = ''
-    # is_aoteng, strategy, is_low_liquidity のキーが存在することを期待
-    # .get()を使用して、万が一キーがない場合も安全にNoneを返すようにする
-    if row.get('is_aoteng'): color = '#FFF0CC' # 青天井
-    elif row.get('strategy') == '🚀順ロジ': color = '#FFF7CC' # 薄い黄色
-    elif row.get('strategy') == '🔥順張り': color = '#E6FFE6' # 薄い緑
-    elif row.get('strategy') == '🚀逆ロジ': color = '#E6F0FF' # 薄い青
-    elif row.get('strategy') == '🌊逆張り': color = '#E6F0FF' # 薄い青
+    # 色付けを「最優先リスク」と「青天井」に限定
     
-    # 致命的低流動性（1000株未満）は他の色より優先度が高い
-    if row.get('is_low_liquidity'): color = '#FFE6E6' # 薄い赤
-    
-    # Stylerの代わりにHTMLクラス名として返す
-    if color == '#FFF0CC': return 'bg-aoteng'
-    if color == '#FFF7CC': return 'bg-pro-bull'
-    if color == '#E6FFE6': return 'bg-bull'
-    if color == '#E6F0FF': return 'bg-pro-bear'
-    if color == '#FFE6E6': return 'bg-low-liquidity'
-    return '' # デフォルトは空文字列
+    # 1. 最優先リスク: 致命的低流動性（1000株未満）
+    if row.get('is_low_liquidity'): return 'bg-low-liquidity' 
+
+    # 2. 最高優位: 青天井
+    if row.get('is_aoteng'): return 'bg-aoteng'
+
+    # 3. 中優位: 75点以上 (青天井でなければ、最優位層の薄い黄色)
+    if row.get('score', 0) >= 75: return 'bg-triage-high'
+
+    return '' # デフォルトは白 (色なし)
 
 
 # 【st.dataframeのcolumn_config定義 (Styler不使用のため削除、代わりにヘッダー定義として使用)】
 # [元のキー, 表示名, テキストアライメント, 最小幅(px), 幅(px)]
 HEADER_MAP = [
     ('No', 'No', 'center', '40px', '40px'), 
-    ('code_disp', 'コード(更新)', 'center', '70px', '70px'), 
+    ('code_disp', 'コード', 'center', '70px', '70px'), 
     ('name', '企業名', 'left', '150px', '150px'), 
-    ('cap_disp', '時価総額', 'right', '100px', '100px'), 
-    ('score_disp', '点(差分)', 'center', '50px', '50px'), 
+    ('cap_disp', '時価総額', 'center', '100px', '100px'), 
+    ('score_disp', '点', 'center', '50px', '50px'), 
     ('strategy', '分析戦略', 'center', '80px', '80px'), 
-    ('price_disp', '現在値', 'right', '70px', '70px'), # price_dispに変更
-    ('buy_disp', '想定水準(乖離)', 'right', '80px', '80px'), 
+    ('price_disp', '現在値', 'center', '70px', '70px'), # price_dispに変更
+    ('buy_disp', '想定水準\n（乖離）', 'center', '80px', '80px'), 
     ('rr_disp', 'R/R比', 'center', '50px', '50px'), 
     ('dd_sl_disp', 'DD率/SL率', 'center', '90px', '90px'), 
     ('target_txt', '利益確定目標値', 'left', '120px', '120px'), 
     ('rsi_disp', 'RSI', 'center', '60px', '60px'), 
-    ('vol_disp_html', '出来高比(5日平均)', 'center', '70px', '70px'), # MA5実績と同じ幅に修正
+    ('vol_disp_html', '出来高比\n（5日平均）', 'center', '80px', '80px'), # MA5実績と同じ幅に修正
     ('bt_cell_content', 'MA5実績', 'center', '70px', '70px'), 
-    ('per_pbr_disp', 'PER/PBR', 'center', '80px', '80px'), 
+    ('per_pbr_disp', 'PER\nPBR', 'center', '60px', '60px'), 
     ('momentum', '直近勝率', 'center', '60px', '60px'), 
     ('comment', 'アイの所感', 'left', '350px', '350px')
 ]
@@ -1902,6 +2027,7 @@ if st.session_state.analyzed_data:
     def format_target_txt(row):
         kabu_price = row['price']; p_half = row['p_half']; p_full = row['p_full']
         
+        # 1. 青天井追従（SL表示）は例外としてそのまま表示
         if row['is_aoteng']:
             full_pct = ((p_full / kabu_price) - 1) * 100 if kabu_price > 0 and p_full > 0 else 0
             return f'<span style="color:green;font-weight:bold;">青天井追従</span><br>SL:{p_full:,} ({full_pct:+.1f}%)'
@@ -1909,22 +2035,54 @@ if st.session_state.analyzed_data:
         is_bull_or_pro = "順張り" in row['strategy'] or "順ロジ" in row['strategy']
         is_bear_or_pro = "逆張り" in row['strategy'] or "逆ロジ" in row['strategy']
         
-        if is_bull_or_pro:
-             if p_half == 0 and p_full > 0: return f'<span style="color:green;font-weight:bold;">目標追従</span><br>全:{p_full:,} ({((p_full / kabu_price) - 1) * 100:+.1f}%)'
-             if p_half == 0 and p_full == 0: return "目標超過/無効"
-             if p_half > 0 and p_full > 0:
-                 half_pct = ((p_half / kabu_price) - 1) * 100 if kabu_price > 0 else 0
-                 full_pct = ((p_full / kabu_price) - 1) * 100 if kabu_price > 0 else 0
-                 return f"半:{p_half:,} ({half_pct:+.1f}%)<br>全:{p_full:,} ({full_pct:+.1f}%)" 
+        output_lines = []
         
-        if is_bear_or_pro:
-            if p_half > 0 and p_full > 0:
+        # 2. 順張り/順ロジックの場合
+        if is_bull_or_pro:
+             # 目標価格が現在値より高い（プラス乖離）場合のみ表示
+             
+             # p_half が現在値より高く、かつ有効な値である場合のみ表示
+             if p_half > 0 and p_half > kabu_price:
                  half_pct = ((p_half / kabu_price) - 1) * 100 if kabu_price > 0 else 0
+                 output_lines.append(f"半:{p_half:,} ({half_pct:+.1f}%)")
+                 
+             # p_full が現在値より高く、かつ有効な値である場合のみ表示
+             if p_full > 0 and p_full > kabu_price:
                  full_pct = ((p_full / kabu_price) - 1) * 100 if kabu_price > 0 else 0
-                 return f'<span style="color:#0056b3;font-weight:bold;">MA回帰目標</span><br>半:{p_half:,} ({half_pct:+.1f}%)<br>全:{p_full:,} ({full_pct:+.1f}%)'
-            if p_half > 0:
+                 output_lines.append(f"全:{p_full:,} ({full_pct:+.1f}%)")
+             
+             if not output_lines:
+                  # 目標値自体は設定されているが、現在値より高くない場合
+                  if row['p_half'] > 0 or row['p_full'] > 0:
+                      return "目標超過/無効" 
+                  return "-"
+             
+             # 目標追従の形式で表示する（半益目標がゼロでない場合は通常の半/全表示）
+             if row['p_half'] == 0:
+                 if len(output_lines) == 1 and output_lines[0].startswith("全:"):
+                      return f'<span style="color:green;font-weight:bold;">目標追従</span><br>{output_lines[0]}'
+                 
+             return "<br>".join(output_lines)
+
+        # 3. 逆張り/逆ロジックの場合
+        if is_bear_or_pro:
+            # 逆張りでも現在値より高い目標（プラス乖離）のみを表示
+            
+            if p_half > 0 and p_half > kabu_price:
                  half_pct = ((p_half / kabu_price) - 1) * 100 if kabu_price > 0 else 0
-                 return f'<span style="color:#0056b3;font-weight:bold;">MA回帰目標</span><br>半:{p_half:,} ({half_pct:+.1f}%)'
+                 output_lines.append(f"半:{p_half:,} ({half_pct:+.1f}%)")
+            
+            if p_full > 0 and p_full > kabu_price:
+                 full_pct = ((p_full / kabu_price) - 1) * 100 if kabu_price > 0 else 0
+                 output_lines.append(f"全:{p_full:,} ({full_pct:+.1f}%)")
+            
+            if output_lines:
+                 return f'<span style="color:#0056b3;font-weight:bold;">MA回帰目標</span><br>{"<br>".join(output_lines)}'
+            
+            # 目標値自体は設定されているが、現在値より高くない場合
+            if row['p_half'] > 0 or row['p_full'] > 0:
+                 return "MA回帰目標:超過/無効"
+
             return "MA回帰目標:なし"
             
         return "-"
@@ -1982,39 +2140,48 @@ if st.session_state.analyzed_data:
     # ----------------------------------------------------------------------
     
     
-    # 表示に使用する列キーを HEADER_MAP から抽出
-    col_keys = [h[0] for h in HEADER_MAP]
-    
-    # --- 【修正】スコアによるリスト分離 ---
-    df_above_50 = df[df['score'] >= 50].copy()
+    # --- 【トリアージによるテーブル分割】 ---
+    df_above_75 = df[df['score'] >= 75].copy()
+    df_50_to_74 = df[(df['score'] >= 50) & (df['score'] <= 74)].copy()
     df_below_50 = df[df['score'] < 50].copy()
 
     
-    def generate_html_table(data_frame, title):
+    def generate_html_table(data_frame, title, score_range):
         if data_frame.empty:
             return ""
 
         # ヘッダー行のHTMLを生成
         header_html = "".join([
             # width/min-width/text-align は HEADER_MAPの定義から取得
-            f'<th class-="has-tooltip" style="width:{h[4]}; min-width:{h[3]}; text-align:{h[2]};">{h[1]}</th>'
+            f'<th class-="has-tooltip" data-tooltip="{h[1]}" style="width:{h[4]}; min-width:{h[3]}; text-align:{h[2]};">{h[1]}</th>'
             for h in HEADER_MAP
         ])
         
         # データ行のHTMLを生成
         rows_html = []
         for index, row in data_frame.iterrows():
-            # 行の背景色クラスを決定 (highlight_rows関数を使用)
-            bg_class = highlight_rows(row)
+            
+            # 1. 最優先リスク: 致命的低流動性（1000株未満）
+            if row.get('is_low_liquidity'): 
+                 bg_class = 'bg-low-liquidity'
+            # 2. 最高優位: 青天井
+            elif row.get('is_aoteng'): 
+                 bg_class = 'bg-aoteng'
+            # 3. 中優位: 75点以上 (青天井でなければ、最優位層の薄い黄色)
+            elif row.get('score', 0) >= 75: 
+                 bg_class = 'bg-triage-high'
+            # 4. デフォルト（その他戦略、50～74点、50点未満）は白
+            else:
+                 bg_class = ''
             
             row_cells = []
-            for col_key, _, col_align, min_w, w in HEADER_MAP:
+            for col_key, _, col_align, _, _ in HEADER_MAP:
                 cell_data = row[col_key]
                 
                 # AI所感のセルは特殊なスクロールボックスを適用
                 if col_key == 'comment':
                     cell_html = f'<td class="{bg_class} td-{col_align}"><div class="comment-scroll-box">{cell_data}</div></td>'
-                # スコアは強調表示を適用 (既にscore_disp内でHTMLが埋め込まれているため、tdのスタイルは基本クラスのみ)
+                # スコアは強調表示を適用
                 else:
                     cell_html = f'<td class="{bg_class} td-{col_align}">{cell_data}</td>'
                 
@@ -2045,13 +2212,17 @@ if st.session_state.analyzed_data:
     ratio_color = "#d32f2f" if r25 >= 125.0 else ("#1976d2" if r25 <= 80.0 else "#4A4A4A")
     st.markdown(f'<p class="big-font"><b>市場環境（25日騰落レシオ）：<span style="color:{ratio_color};">{r25:.2f}%</span></b></p>', unsafe_allow_html=True)
     
-    # 50点以上のテーブル表示
-    table_above = generate_html_table(df_above_50, "✅ 総合点 50点以上（積極的な検討推奨）")
-    st.markdown(table_above, unsafe_allow_html=True)
+    # 1. 75点以上のテーブル表示
+    table_high = generate_html_table(df_above_75, "【🥇 最優位】75点以上（積極的な検討推奨）", "75+")
+    st.markdown(table_high, unsafe_allow_html=True)
     
-    # 50点未満のテーブル表示
-    table_below = generate_html_table(df_below_50, "⚠️ 総合点 50点未満（慎重な検討が必要）")
-    st.markdown(table_below, unsafe_allow_html=True)
+    # 2. 50点～74点のテーブル表示
+    table_mid = generate_html_table(df_50_to_74, "【✅ 分析推奨】50点以上75点未満（ロジック上の優位性を確認）", "50-74")
+    st.markdown(table_mid, unsafe_allow_html=True)
+    
+    # 3. 50点未満のテーブル表示
+    table_low = generate_html_table(df_below_50, "【⚠️ リスク高】50点未満（慎重な検討が必要）", "0-49")
+    st.markdown(table_low, unsafe_allow_html=True)
     
     # 3. スコア内訳の表示
     with st.expander("詳細なスコア内訳（透明性向上）"):
@@ -2096,15 +2267,17 @@ if st.session_state.analyzed_data:
                 return f'<p style="color:{color}; margin: 0; padding: 0 0 0 15px; font-weight: bold;">{key}: {value:+.0f}点</p>'
             
             # 加点要因（ボーナス系）の表示
-            plus_items = ["基礎点", "戦略優位性ボーナス", "RSI中立ゾーンボーナス", "出来高急増ボーナス", "直近モメンタムボーナス", "青天井ボーナス", "リスクリワード評価"]
+            plus_items = ["基礎点", "戦略優位性ボーナス", "RSI中立ゾーンボーナス", "出来高急増ボーナス", "直近モメンタムボーナス", "青天井ボーナス", "リスクリワード評価", "DDリカバリー速度評価"]
             for key in plus_items:
                 if key in item['内訳'] and item['内訳'][key] > 0:
                      st.markdown(format_score_html(key, item['内訳'][key]), unsafe_allow_html=True)
                      
             st.markdown("##### ➖ 減点要因")
             # 減点要因（ペナルティ系）の表示
-            minus_items = ["構造的減点（合計）", "RSI過熱/底打ちペナルティ", "流動性ペナルティ", "ボラティリティペナルティ", "SL浅さリスク減点", "市場過熱ペナルティ", "過去最大DD評価", "GC/DC評価"]
+            minus_items = ["構造的減点（合計）", "RSI過熱/底打ちペナルティ", "DD連続性リスク評価", "流動性ペナルティ", "ボラティリティペナルティ", "SL浅さリスク減点", "市場過熱ペナルティ", "過去最大DD評価", "GC/DC評価", "場中・出来高過大評価減点", "場中・MA乖離リスク減点", "DDリカバリー速度評価"]
             for key in minus_items:
+                # 減点要因リストを順番に表示。リカバリー速度評価はマイナスの場合のみここで表示。
+                if key == "DDリカバリー速度評価" and item['内訳'].get(key, 0) >= 0: continue
                 if key in item['内訳'] and item['内訳'][key] < 0:
                      st.markdown(format_score_html(key, item['内訳'][key]), unsafe_allow_html=True)
 
