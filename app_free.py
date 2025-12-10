@@ -1431,6 +1431,29 @@ def get_stock_data(ticker, current_run_count):
         bt_raw = re.sub(r'<br\s*/?>', ' ', bt_str)
         bt_raw = re.sub(r'</?.*?>', '', bt_raw)
         
+        # ★ スコア内訳の日本語化マッピング
+        japanese_score_factors = {
+            "基礎点": score_factors_inner["base"],
+            "戦略優位性ボーナス": score_factors_inner["strategy_bonus"],
+            "RSI中立ゾーンボーナス": score_factors_inner["rsi_mid_bonus"],
+            "出来高急増ボーナス": score_factors_inner["vol_bonus"],
+            "直近モメンタムボーナス": score_factors_inner["momentum_bonus"],
+            "GC/DC評価": score_factors_inner["gc_dc"],
+            "青天井ボーナス": score_factors_inner["aoteng_bonus"],
+            "リスクリワード評価": score_factors_inner["rr_score"],
+            "過去最大DD評価": score_factors_inner["dd_score"],
+            "RSI過熱/底打ちペナルティ": score_factors_inner["rsi_penalty"],
+            "流動性ペナルティ": score_factors_inner["liquidity_penalty"],
+            "ボラティリティペナルティ": score_factors_inner["atr_penalty"],
+            "SL浅さリスク減点": score_factors_inner["sl_risk_deduct"],
+            "市場過熱ペナルティ": score_factors_inner["market_overheat"],
+            "構造的減点（合計）": score_factors_inner["total_deduction"],
+        }
+        
+        # 0点の項目を削除 (表示の簡素化のため)
+        japanese_score_factors = {k: v for k, v in japanese_score_factors.items() if v != 0}
+
+
         return {
             "code": ticker,
             "name": info["name"],
@@ -1485,7 +1508,7 @@ def get_stock_data(ticker, current_run_count):
             "bt_trade_count": bt_cnt, 
             "bt_target_pct": bt_target_pct, 
             "bt_win_count": bt_win_count,
-            "score_factors": score_factors_inner, 
+            "score_factors": japanese_score_factors, # 日本語化された内訳を格納
         }
         
     except Exception as e:
@@ -1797,7 +1820,6 @@ if st.session_state.analyzed_data:
     data = st.session_state.analyzed_data
     filtered_data = []
     
-    # フィルター適用フラグが立っている場合のみフィルタリングを実行
     # チェックボックスの状態を見てフィルタリングを実行
     is_filter_active = st.session_state.ui_filter_score_on or st.session_state.ui_filter_liquid_on
     
@@ -2065,8 +2087,27 @@ if st.session_state.analyzed_data:
 
         for item in details:
             st.markdown(f"**No.{item['No']} - {item['企業名']} ({item['コード']}) - 総合点: {item['総合点']:.0f}**")
-            # 内訳をJSONまたはDictとして表示
-            st.json(item['内訳'])
+            
+            # 内訳を整形して表示
+            st.markdown("##### ➕ 加点要因")
+            
+            def format_score_html(key, value):
+                color = 'green' if value > 0 else ('red' if value < 0 else 'black')
+                return f'<p style="color:{color}; margin: 0; padding: 0 0 0 15px; font-weight: bold;">{key}: {value:+.0f}点</p>'
+            
+            # 加点要因（ボーナス系）の表示
+            plus_items = ["基礎点", "戦略優位性ボーナス", "RSI中立ゾーンボーナス", "出来高急増ボーナス", "直近モメンタムボーナス", "青天井ボーナス", "リスクリワード評価"]
+            for key in plus_items:
+                if key in item['内訳'] and item['内訳'][key] > 0:
+                     st.markdown(format_score_html(key, item['内訳'][key]), unsafe_allow_html=True)
+                     
+            st.markdown("##### ➖ 減点要因")
+            # 減点要因（ペナルティ系）の表示
+            minus_items = ["構造的減点（合計）", "RSI過熱/底打ちペナルティ", "流動性ペナルティ", "ボラティリティペナルティ", "SL浅さリスク減点", "市場過熱ペナルティ", "過去最大DD評価", "GC/DC評価"]
+            for key in minus_items:
+                if key in item['内訳'] and item['内訳'][key] < 0:
+                     st.markdown(format_score_html(key, item['内訳'][key]), unsafe_allow_html=True)
+
             st.markdown("---")
 
     
