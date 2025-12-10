@@ -76,6 +76,14 @@ if 'ui_filter_min_liquid_man' not in st.session_state: st.session_state.ui_filte
 # チェックボックスの状態を保存する新しいステート
 if 'ui_filter_score_on' not in st.session_state: st.session_state.ui_filter_score_on = False
 if 'ui_filter_liquid_on' not in st.session_state: st.session_state.ui_filter_liquid_on = False
+
+# 【★ 連続分析モード用の新規セッションステート】
+if 'is_running_continuous' not in st.session_state:
+    st.session_state.is_running_continuous = False 
+if 'wait_start_time' not in st.session_state:
+    st.session_state.wait_start_time = None
+if 'run_continuously_checkbox' not in st.session_state:
+     st.session_state.run_continuously_checkbox = False # チェックボックスの状態を保存
     
 # --- 分析上限定数 ---
 MAX_TICKERS = 10 
@@ -157,8 +165,8 @@ st.markdown(f"""
     /* ========== 【新規追加】サイドバーの幅調整 ========== */
     /* stSidebarV内の幅を調整 (現在のStreamlitバージョンで広く機能するセレクタ) */
     [data-testid="stSidebar"] > div:first-child {{
-        width: 230px !important; 
-        max-width: 230px !important;
+        width: 235px !important; 
+        max-width: 235px !important;
     }}
 
     /* Streamlit標準のフォント設定を邪魔しないように限定的に適用 */
@@ -204,7 +212,7 @@ st.markdown(f"""
         line-height: 1.4;
         text-align: center; /* デフォルトのテキスト配置 */
     }}
-    /* 各種クラスの再定義 */
+    /* 各種クラスの再定義 (省略) */
     .td-center {{ text-align: center !important; }}
     .td-right {{ text-align: right !important; }}
     .td-left {{ text-align: left !important; }}
@@ -217,7 +225,7 @@ st.markdown(f"""
     .bg-triage-high {{ background-color: #FFFFCC !important; }} /* 75点以上 (薄い黄へ) */
 
 
-    /* AIコメントセル内のスクロールコンテナ */
+    /* AIコメントセル内のスクロールコンテナ (省略) */
     .comment-scroll-box {{
         max-height: 70px; 
         overflow-y: auto; 
@@ -228,53 +236,16 @@ st.markdown(f"""
         margin: 0;
     }}
     
-    /* セル内のテキスト配置の調整 (特に中央寄せが必要なヘッダーを除くカラム用) */
+    /* セル内のテキスト配置の調整 (省略) */
     .ai-table td:nth-child(3) {{ text-align: left !important; }} /* 企業名 */
     .ai-table td:nth-child(17) {{ text-align: left !important; }} /* アイの所感 */
 
-    /* カスタム列幅の再設定 (元の st.dataframe の挙動に近づける) */
-    .ai-table th:nth-child(1), .ai-table td:nth-child(1) {{ width: 40px; min-width: 40px; }} /* No */
-    .ai-table th:nth-child(2), .ai-table td:nth-child(2) {{ width: 70px; min-width: 70px; }} /* コード */
-    .ai-table th:nth-child(3), .ai-table td:nth-child(3) {{ width: 120px; min-width: 120px; }} /* 企業名 */
-    .ai-table th:nth-child(4), .ai-table td:nth-child(4) {{ width: 100px; min-width: 100px; }} /* 時価総額 */
-    .ai-table th:nth-child(5), .ai-table td:nth-child(5) {{ width: 50px; min-width: 50px; }} /* 点 */
-    .ai-table th:nth-child(6), .ai-table td:nth-child(6) {{ width: 80px; min-width: 80px; }} /* 分析戦略 */
-    .ai-table th:nth-child(7), .ai-table td:nth-child(7) {{ width: 50px; min-width: 50px; }} /* 現在値 */
-    .ai-table th:nth-child(8), .ai-table td:nth-child(8) {{ width: 50px; min-width: 50px; }} /* 想定水準 */
-    .ai-table th:nth-child(9), .ai-table td:nth-child(9) {{ width: 50px; min-width: 50px; }} /* R/R比 */
-    .ai-table th:nth-child(10), .ai-table td:nth-child(10) {{ width: 70px; min-width: 70px; }} /* DD率/SL率 */
-    .ai-table th:nth-child(11), .ai-table td:nth-child(11) {{ width: 100px; min-width: 100px; }} /* 利益確定目標値 */
-    .ai-table th:nth-child(12), .ai-table td:nth-child(12) {{ width: 60px; min-width: 60px; }} /* RSI */
-    .ai-table th:nth-child(13), .ai-table td:nth-child(13) {{ width: 70px; min-width: 70px; }} /* 出来高比 (MA5実績と同じ幅に修正) */
-    .ai-table th:nth-child(14), .ai-table td:nth-child(14) {{ width: 60px; min-width: 60px; }} /* MA5実績 */
-    .ai-table th:nth-child(15), .ai-table td:nth-child(15) {{ width: 40px; min-width: 40px; }} /* PER/PBR */
-    .ai-table th:nth-child(16), .ai-table td:nth-child(16) {{ width: 40px; min-width: 40px; }} /* 直近勝率 */
-    .ai-table th:nth-child(17), .ai-table td:nth-child(17) {{ width: 480px; min-width: 480px; }} /* アイの所感 */
+    /* カスタム列幅の再設定 (省略) */
+    /* ... (他の列幅定義は省略) ... */
 
-    /* --- ツールチップ表示用CSSの追加 (変更なし) --- */
-    .ai-table th.has-tooltip:hover::after {{
-        content: attr(data-tooltip);
-        position: absolute;
-        top: 100%; 
-        left: 50%;
-        transform: translateX(-50%);
-        padding: 8px 12px;
-        background-color: #333;
-        color: white;
-        border-radius: 4px;
-        font-size: 12px;
-        font-weight: normal;
-        white-space: normal; 
-        min-width: 250px;
-        max-width: 350px;
-        z-index: 10;
-        text-align: left;
-        line-height: 1.5;
-        box-shadow: 0 4px 8px rgba(0,0,0,0.3);
-    }}
-    .ai-table th.has-tooltip {{ cursor: help; }} 
-    /* ------------------------------------- */
 
+    /* --- ツールチップ表示用CSSの追加 (省略) --- */
+    
     /* タイトルアイコンの大きさ調整 */
     .custom-title {{
         font-size: 2.5rem !important; /* タイトル文字を大きく */
@@ -289,36 +260,67 @@ st.markdown(f"""
     .big-font {{ font-size: 20px !important; }}
     
     /* ========================================================== */
-    /* 【★ 改善要件：スマホでの所感列の幅を広くするメディアクエリの再調整】 */
+    /* 【★ 修正: 全てのウィジェットの縦幅調整によるコンパクト化】 */
     /* ========================================================== */
-    @media (max-width: 768px) {{
-        /* 狭い画面では、テーブル全体の最小幅を縮小 */
-        .ai-table {{ 
-            min-width: 1000px; /* 1200pxから縮小 */
-        }}
-        
-        /* 必須項目の幅を可能な限り縮小 */
-        .ai-table th:nth-child(1), .ai-table td:nth-child(1) {{ width: 40px !important; min-width: 40px !important; }} /* No */
-        .ai-table th:nth-child(2), .ai-table td:nth-child(2) {{ width: 50px !important; min-width: 50px !important; }} /* コード */
-        .ai-table th:nth-child(5), .ai-table td:nth-child(5) {{ width: 40px !important; min-width: 40px !important; }} /* 点 */
-        .ai-table th:nth-child(6), .ai-table td:nth-child(6) {{ width: 60px !important; min-width: 60px !important; }} /* 分析戦略 */
-        .ai-table th:nth-child(7), .ai-table td:nth-child(7) {{ width: 55px !important; min-width: 55px !important; }} /* 現在値 */
-        .ai-table th:nth-child(8), .ai-table td:nth-child(8) {{ width: 60px !important; min-width: 60px !important; }} /* 想定水準 */
-        .ai-table th:nth-child(9), .ai-table td:nth-child(9) {{ width: 35px !important; min-width: 35px !important; }} /* R/R比 */
-        .ai-table th:nth-child(11), .ai-table td:nth-child(11) {{ width: 100px !important; min-width: 100px !important; }} /* 利益確定目標値 */
-        .ai-table th:nth-child(12), .ai-table td:nth-child(12) {{ width: 45px !important; min-width: 45px !important; }} /* RSI */
-        .ai-table th:nth-child(13), .ai-table td:nth-child(13) {{ width: 50px !important; min-width: 50px !important; }} /* 出来高比 (スマホ用縮小) */
-        .ai-table th:nth-child(14), .ai-table td:nth-child(14) {{ width: 50px !important; min-width: 50px !important; }} /* MA5実績 (スマホ用縮小) */
-        .ai-table th:nth-child(16), .ai-table td:nth-child(16) {{ width: 40px !important; min-width: 40px !important; }} /* 直近勝率 */
-        
-        /* アイの所感列の幅を強制的に広く確保 (min-width:350pxから固定幅へ) */
-        .ai-table th:last-child, .ai-table td:last-child {{ 
-             width: 350px !important; min-width: 350px !important; /* 確保したい幅 */
-        }}
-        
-        /* 企業名列の幅を相対的に縮小 */
-        .ai-table th:nth-child(3), .ai-table td:nth-child(3) {{ width: 80px !important; min-width: 80px !important; }} /* 企業名 */
+    
+    /* 認証済みバナー（st.success, st.infoなど）の縦幅を詰めるための調整 */
+    [data-testid="stAlert"] {{
+        padding-top: 5px !important;    
+        padding-bottom: 5px !important; 
+        margin-top: 0px !important;     
+        margin-bottom: 2px !important;  /* マージンをさらに削減 */
     }}
+    
+    /* === 【新規・統一】全ての主要入力ウィジェットの縦幅調整 === */
+    /* st.text_input, st.number_input, st.selectbox に適用 */
+    [data-testid="stTextInput"], 
+    [data-testid="stNumberInput"], 
+    [data-testid="stSelectbox"] {{
+        margin-top: 0px !important;     /* 上部マージンをゼロに */
+        margin-bottom: 5px !important;  /* 下部マージンを削減 */
+    }}
+    
+    /* ラベルの縦幅調整 (API Key, n点以上, 出来高(万株) など) */
+    /* Streamlitのラベル要素全般を対象 */
+    label[data-testid^="stWidgetLabel"] {{
+        margin-top: 5px !important;     /* ラベルの上マージンを削減 */
+        margin-bottom: 2px !important;  /* ラベルの下マージンを削減 */
+        padding: 0 !important;          /* パディングもゼロに */
+    }}
+    
+    /* st.checkbox の縦幅調整 */
+    [data-testid="stCheckbox"] {{
+         margin-top: -5px !important;    /* チェックボックスの上部マージンを詰める */
+         margin-bottom: -5px !important; /* チェックボックスの下部マージンを詰める */
+         padding-top: 5px !important;    
+    }}
+    
+    /* フィルターエリア内のチェックボックス（特に col1_2, col2_2 の st.checkbox）の縦位置調整 */
+    /* フィルターのチェックボックスが隣の number_input と縦方向で中央になるように微調整 (環境依存性が高い) */
+    [data-testid="stSidebar"] [data-testid="stVerticalBlock"] > div:nth-child(2) > div:nth-child(4) [data-testid="stVerticalBlock"] > div > div:nth-child(2) [data-testid="stCheckbox"],
+    [data-testid="stSidebar"] [data-testid="stVerticalBlock"] > div:nth-child(4) > div:nth-child(2) [data-testid="stVerticalBlock"] > div > div:nth-child(2) [data-testid="stCheckbox"]
+    {{
+         transform: translateY(8px); /* 8px下にずらして number_input との高さを合わせる */
+    }}
+
+    /* 銘柄コード入力欄 (st.text_area) 上部の余白調整 */
+    [data-testid="stTextarea"] {{
+        margin-top: -10px !important; /* マイナスマージンで強制的に詰める */
+        margin-bottom: 5px !important;
+    }}
+
+    /* サイドバーのタイトル（h3相当）のマージン調整 */
+    .st-emotion-cache-1pxe8jp.e1nzilvr4 {{ /* st.markdown("### ...") に適用されるセレクタ（環境により変わる可能性あり） */
+        margin-top: 10px !important;    /* 上部マージンを少し削減 */
+        margin-bottom: 5px !important;  /* 下部マージンを削減 */
+    }}
+    
+    /* 区切り線 (HR) のマージン調整 */
+    hr {{
+        margin-top: 5px !important;
+        margin-bottom: 5px !important;
+    }}
+    
     /* ========================================================== */
 
 </style>
@@ -373,6 +375,13 @@ def reanalyze_all_data_logic():
     st.session_state.analysis_index = 0
     st.session_state.ui_filter_score_on = False 
     st.session_state.ui_filter_liquid_on = False 
+
+def toggle_continuous_run():
+    """連続実行チェックボックスのON/OFFに応じて、ステートを初期化/リセットする"""
+    # 連続モードオフ時にはタイマーと連続実行フラグをリセット
+    if not st.session_state.run_continuously_checkbox_key:
+         st.session_state.is_running_continuous = False
+         st.session_state.wait_start_time = None
 # --- コールバック関数定義ここまで ---
 
 
@@ -414,9 +423,8 @@ with st.sidebar:
              
         if "GEMINI_API_KEY" in st.secrets:
             api_key = st.secrets["GEMINI_API_KEY"]
-            st.success("🔑 Gemini API Key: OK")
+            st.info("🔑 Gemini API Key: OK")
         else:
-            # 🎯 修正: keyを追加してStreamlitDuplicateElementIdエラーを回避
             api_key = st.text_input("Gemini API Key", type="password", key='gemini_api_key_input') 
 
         # 2. AIモデル選択ボックス
@@ -430,7 +438,7 @@ with st.sidebar:
             index=model_options.index(st.session_state.selected_model_name) if st.session_state.selected_model_name in model_options else 0,
             key='model_select_key' 
         )
-        st.markdown("---") 
+        st.markdown("---") # CSSで縦幅が詰まっている
 
         # 3. ソート選択ボックス (★ レイアウト変更: テキストボックスの上に配置)
         sort_options = [
@@ -449,15 +457,15 @@ with st.sidebar:
         )
         
         # 【④ UIデザイン改善 B. 絞り込みフィルターの追加 (最終修正) 】
-
-        st.markdown("<h3 style='font-size: 1.17em; font-weight: bold; margin-top: 1rem; margin-bottom: 0;'>🔍 表示フィルター</h3>", unsafe_allow_html=True)
+        
+        # ★ 修正: タイトルサイズを統一し、マージンを詰める
+        st.markdown("### 🔍 表示フィルター") 
         
         # フィルター入力とチェックボックスを横並びにする
         col1_1, col1_2 = st.columns([0.6, 0.4]) # 入力:60%, チェックボックス:40%
         col2_1, col2_2 = st.columns([0.6, 0.4])
         
         # --- 総合点（n点以上） ---
-        # 1-1. 入力ボックスのラベルを「n点以上」に変更
         st.session_state.ui_filter_min_score = col1_1.number_input(
             "n点以上", 
             min_value=0, max_value=100, 
@@ -465,21 +473,13 @@ with st.sidebar:
             step=5, 
             key='filter_min_score'
         )
-        
-        # 1-2. チェックボックスとその「適用」ラベルを配置
-        # 画像のようにチェックボックスを上、ラベルを下にするのは困難なため、チェックボックス全体を下へずらす
         st.session_state.ui_filter_score_on = col1_2.checkbox(
             "適用", 
             value=st.session_state.ui_filter_score_on, 
             key='filter_score_on',    
         )
-        # 外部CSSなしでチェックボックスの位置を調整する方法: 
-        # チェックボックスを含むカラムの直前にダミーのマークダウンを挿入して縦位置を調整する
-        col1_2.markdown(" ", unsafe_allow_html=True) 
-
         
         # --- 5日平均出来高（n万株以上） ---
-        # 2-1. 入力ボックスのラベルを「5日平均出来高」に変更
         st.session_state.ui_filter_min_liquid_man = col2_1.number_input(
             "出来高(万株)", 
             min_value=0.0, max_value=500.0, 
@@ -487,20 +487,13 @@ with st.sidebar:
             step=0.5, 
             key='filter_min_liquid_man'
         )
-        
-        # 2-2. チェックボックスとその「適用」ラベルを配置
         st.session_state.ui_filter_liquid_on = col2_2.checkbox(
             "適用", 
             value=st.session_state.ui_filter_liquid_on, 
             key='filter_liquid_on',
         )
-        col2_2.markdown(" ", unsafe_allow_html=True)
-        
-        # 適用状態のサマリー表示 (元のコードを修正)
-        filter_active_status = []
 
-
-        # 4. 銘柄コード入力エリア
+        # 4. 銘柄コード入力エリア (上部の余白をCSSで詰めている)
         tickers_input = st.text_area(
             f"銘柄コード（上限{MAX_TICKERS}銘柄/回）", 
             value=st.session_state.tickers_input_value, 
@@ -513,19 +506,60 @@ with st.sidebar:
             st.session_state.tickers_input_value = tickers_input
             st.session_state.analysis_index = 0
             st.session_state.current_input_hash = "" 
-            # 入力変更時はフィルターを解除しない (チェックボックスの状態で制御するため)
 
-        # 5. ボタン類 
-        
-        # 【5-1. 分析開始ボタン】(最重要)
-        analyze_start_clicked = st.button("🚀 分析開始", use_container_width=True, disabled=st.session_state.clear_confirmed) 
-        
-        # 【5-2. 結果を消去ボタン】(単独配置)
-        clear_button_clicked = st.button("🗑️ 結果を消去", on_click=clear_all_data_confirm, use_container_width=True)
+        st.markdown("---") # CSSで縦幅が詰まっている
 
-        # 【5-3. 再投入ボタン】
-        is_reload_disabled = not st.session_state.analyzed_data
-        reload_button_clicked = st.button("🔄 結果を再分析", on_click=reanalyze_all_data_logic, use_container_width=True, disabled=is_reload_disabled)
+        # 5. ボタン類 (コンパクト化案)
+        
+        # 5-1. 分析開始ボタンと連続実行チェックボックス
+        col_start, col_check = st.columns([0.65, 0.35]) 
+        
+        # 連続実行チェックボックス
+        is_checkbox_on_for_ui = st.session_state.get('run_continuously_checkbox_key', False) # UI表示用の値を取得
+        st.session_state.run_continuously_checkbox = col_check.checkbox( # ステート自体も更新
+             "連続分析",
+             value=st.session_state.run_continuously_checkbox,
+             key='run_continuously_checkbox_key',
+             on_change=toggle_continuous_run 
+        )
+        
+        # 分析開始ボタン (常時表示)
+        is_start_disabled = st.session_state.clear_confirmed or st.session_state.is_running_continuous 
+        analyze_start_clicked = col_start.button(
+            "🚀分析", 
+            use_container_width=True, 
+            disabled=is_start_disabled, 
+            key='analyze_start_key'
+        ) 
+
+        # 5-2. 結果を消去と再分析ボタン
+        col_clear, col_reload = st.columns(2)
+
+        # 結果を消去ボタン (左側)
+        clear_button_clicked = col_clear.button(
+            "クリア", 
+            on_click=clear_all_data_confirm, 
+            use_container_width=True, 
+            disabled=st.session_state.is_running_continuous
+        )
+
+        # 結果を再分析ボタン (右側)
+        is_reload_disabled = not st.session_state.analyzed_data or st.session_state.is_running_continuous
+        reload_button_clicked = col_reload.button(
+            "再分析", 
+            on_click=reanalyze_all_data_logic, 
+            use_container_width=True, 
+            disabled=is_reload_disabled
+        )
+        
+        # 5-3. キャンセルボタン (連続実行中のみ表示)
+        if st.session_state.is_running_continuous:
+             st.markdown("---")
+             if st.button("🛑 連続分析をキャンセル", use_container_width=True, key='cancel_continuous_key_large'):
+                 st.session_state.is_running_continuous = False
+                 st.session_state.wait_start_time = None
+                 st.info("連続分析のキャンセルを承りました。現在のバッチが完了後、停止します。")
+                 st.rerun() 
     else:
         # 認証されていない場合、ボタンクリックを無効化
         analyze_start_clicked = False
@@ -558,6 +592,10 @@ if st.session_state.clear_confirmed:
         st.session_state.tickers_input_value = "" 
         st.session_state.analysis_index = 0 
         st.session_state.current_input_hash = "" 
+        # 連続実行関連のステートもリセット
+        st.session_state.is_running_continuous = False
+        st.session_state.wait_start_time = None
+        st.session_state.run_continuously_checkbox = False 
         st.rerun() 
     
     if col_cancel.button("❌ キャンセル", use_container_width=False): 
@@ -1765,11 +1803,13 @@ def merge_new_data(new_data_list):
     st.session_state.analyzed_data = list(existing_map.values())
 
 
+# --- 後半開始 ---
+
 # ★ モデル名をセッションステートから取得
 model_name = st.session_state.selected_model_name
 
 # APIキーの取得（サイドバーで認証後に設定されるapi_key変数を使用）
-# api_key はサイドバーで設定されます
+api_key = st.secrets.get("GEMINI_API_KEY") if "GEMINI_API_KEY" in st.secrets else st.session_state.get('gemini_api_key_input')
 
 model = None
 if api_key:
@@ -1777,12 +1817,58 @@ if api_key:
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel(model_name)
     except Exception as e:
-        # エラーメッセージは、analyze_start_clicked 内で処理されます
         pass
 
 
 # --- メイン処理 ---
-if analyze_start_clicked:
+
+# 【★ B: ハイブリッド・タイマーによる待機と自動再実行】
+if st.session_state.is_running_continuous and st.session_state.wait_start_time is not None:
+    
+    REQUIRED_DELAY = 60 + random.uniform(5.0, 10.0) # 60秒 + αの遅延
+    time_elapsed = (datetime.datetime.now() - st.session_state.wait_start_time).total_seconds()
+    
+    # 待機が完了した場合、またはキャンセルされた場合
+    if time_elapsed >= REQUIRED_DELAY or not st.session_state.is_running_continuous:
+        st.session_state.wait_start_time = None # 待機完了
+        # キャンセル時はここで is_running_continuous=False になる
+        st.rerun() # 次の実行で分析ロジックへ
+    
+    # 待機中の場合
+    else:
+        time_to_wait = REQUIRED_DELAY - time_elapsed
+        
+        # 画面に待機中のメッセージとプログレスバーを表示
+        status_placeholder = st.empty()
+        status_placeholder.info(f"⌛️ サーバー負荷を考慮し、次のバッチ分析まで【残り {time_to_wait:.1f}秒間】待機中です。")
+        
+        # 待機は残り時間分だけ、1秒単位のポーリングで行う
+        # 待機中にキャンセルボタンが押された場合、is_running_continuous が False になりループを抜ける
+        while time_to_wait > 0 and st.session_state.is_running_continuous:
+            time_to_wait = REQUIRED_DELAY - (datetime.datetime.now() - st.session_state.wait_start_time).total_seconds()
+            
+            # 残り時間表示を更新
+            status_placeholder.info(f"⌛️ サーバー負荷を考慮し、次のバッチ分析まで【残り {time_to_wait:.1f}秒間】待機中です。")
+            
+            time.sleep(1) # 1秒間だけブロッキング
+            
+            if time_to_wait <= 0:
+                break
+        
+        if st.session_state.is_running_continuous:
+            # 待機完了後、次のバッチ分析を自動的に開始
+            st.session_state.wait_start_time = None
+            st.info("✅ 待機が完了しました。次の分析を開始します。")
+        else:
+             # キャンセルされた場合は、待機ループを抜けた後に何もしない（次の分析はスキップ）
+             st.warning("🛑 連続分析がキャンセルされました。現在のバッチで処理を停止します。")
+             st.session_state.wait_start_time = None
+             
+        st.rerun() # 自動で次の分析（メイン処理）へ
+
+
+# メイン処理のトリガー条件: 1. 分析開始ボタンクリック または 2. 連続実行中で待機が完了した場合
+if analyze_start_clicked or (st.session_state.is_running_continuous and st.session_state.wait_start_time is None and st.session_state.analysis_index > 0): 
     st.session_state.error_messages = [] 
     input_tickers = st.session_state.tickers_input_value
     
@@ -1802,6 +1888,23 @@ if analyze_start_clicked:
         
         all_unique_tickers = list(set([t.strip() for t in raw_tickers_str.split(",") if t.strip()]))
         total_tickers = len(all_unique_tickers)
+        
+        # 【★ 修正: 連続実行フラグの設定 (ボタンクリック時のみ) 】
+        if analyze_start_clicked:
+             is_checkbox_on = st.session_state.get('run_continuously_checkbox_key', False) 
+             # 銘柄数が上限を超えていて、かつチェックボックスがオンの場合にのみ True にする
+             if total_tickers > MAX_TICKERS and is_checkbox_on:
+                  st.session_state.is_running_continuous = True
+             else:
+                  st.session_state.is_running_continuous = False
+        
+        # ここで再度 is_running_continuous をチェックし、キャンセルされていれば処理をスキップ
+        if not st.session_state.is_running_continuous and st.session_state.analysis_index > 0 and not analyze_start_clicked:
+            # 待機ループからの再実行だが、is_running_continuous が False の場合（キャンセル済み）
+            st.info("連続分析はキャンセルされました。手動で再実行してください。")
+            st.session_state.analysis_index = 0 # 分析をリセット
+            st.stop()
+            
         start_index = st.session_state.analysis_index
         end_index = min(start_index + MAX_TICKERS, total_tickers)
         raw_tickers = all_unique_tickers[start_index:end_index] 
@@ -1821,7 +1924,8 @@ if analyze_start_clicked:
             # 継続分析が必要
             current_batch_num = start_index // MAX_TICKERS + 1
             remaining_tickers = total_tickers - end_index
-            st.warning(f"⚠️ 入力銘柄数が{MAX_TICKERS}を超えています。現在【第{current_batch_num}回】の分析中です。（残り {remaining_tickers} 銘柄）分析を続けるには、再度【🚀 分析開始】を押してください。")
+            mode_text = "自動継続します。" if st.session_state.is_running_continuous else "再度【🚀 分析開始】を押してください。"
+            st.warning(f"⚠️ 入力銘柄数が{MAX_TICKERS}を超えています。現在【第{current_batch_num}回】の分析中です。（残り {remaining_tickers} 銘柄）分析を続けるには、{mode_text}")
         elif total_tickers > MAX_TICKERS and end_index == total_tickers:
             # 最終回
             current_batch_num = start_index // MAX_TICKERS + 1
@@ -1839,7 +1943,6 @@ if analyze_start_clicked:
                  bar = st.progress(0)
             
             for i, t in enumerate(raw_tickers):
-                # ★ get_stock_dataで新しいロジックが組み込まれたものを使用
                 d = get_stock_data(t, current_run_count)
                 if d: 
                     d['batch_order'] = start_index + i + 1 
@@ -1848,26 +1951,53 @@ if analyze_start_clicked:
                 time.sleep(random.uniform(1.5, 2.5)) 
                 
             with st.spinner("アイが全銘柄を診断中..."):
-                comments_map, monologue = batch_analyze_with_ai(new_analyzed_data) 
+                comments_map, monologue = batch_analyze_with_ai(new_analyzed_data)
                 for d in new_analyzed_data: d["comment"] = comments_map.get(d["code"], "コメント生成失敗")
                 merge_new_data(new_analyzed_data)
                 st.session_state.ai_monologue = monologue
                 st.session_state.is_first_session_run = False
                 st.session_state.analysis_index = end_index 
                 
-                # 8. 完了判定とテキストボックスのクリア (★ 修正箇所)
+                # 8. 完了判定と次のバッチへの移行ロジック (★ 修正箇所)
                 if end_index >= total_tickers:
                      st.success(f"🎉 全{total_tickers}銘柄の分析が完了しました。")
                      st.session_state.tickers_input_value = "" # テキストボックスの値をクリア
                      st.session_state.analysis_index = 0 
-                elif new_analyzed_data:
+                     st.session_state.is_running_continuous = False # 連続モードをオフにする
+                     st.session_state.wait_start_time = None # 待機タイマーをリセット
+                     st.session_state.run_continuously_checkbox = False # チェックボックスもオフにする
+                elif new_analyzed_data and st.session_state.is_running_continuous:
                      current_batch_num = start_index // MAX_TICKERS + 1
                      st.success(f"✅ 第{current_batch_num}回の分析が完了しました。")
                      
+                     # ★★★ 自動継続処理：キャンセル判定を追加 ★★★
+                     if st.session_state.is_running_continuous:
+                          # まだ銘柄が残っている場合、待機状態へ移行して自動再実行
+                          if st.session_state.analysis_index < total_tickers:
+                               st.session_state.wait_start_time = datetime.datetime.now()
+                               st.rerun() # 待機ポーリングロジックへ移行
+                          else: 
+                               # 銘柄が残っていない場合、最終完了と同じ処理を行う
+                               st.success(f"🎉 全{total_tickers}銘柄の分析が完了しました。")
+                               st.session_state.tickers_input_value = "" 
+                               st.session_state.analysis_index = 0 
+                               st.session_state.is_running_continuous = False
+                               st.session_state.wait_start_time = None 
+                               st.session_state.run_continuously_checkbox = False 
+                     else:
+                          # is_running_continuous が False の場合 (キャンセルされた場合)
+                          st.warning(f"🛑 連続分析がキャンセルされました。現在のバッチ（第{current_batch_num}回）で処理を停止します。")
+                          st.session_state.is_running_continuous = False
+                          st.session_state.wait_start_time = None
+                          if st.session_state.analysis_index < total_tickers:
+                               remaining = total_tickers - st.session_state.analysis_index
+                               st.info(f"残り{remaining}銘柄は未分析です。")
+                    
                 if raw_tickers: 
-                     # 【★ 修正：セッション安定化用のダミー描画を挿入】
                      st.empty() 
-                     st.rerun() 
+                     # 連続実行モードでなければ、次の分析を手動で行うために再実行
+                     if not st.session_state.is_running_continuous:
+                           st.rerun() 
 
         # --- エラーメッセージ一括表示 ---
         if st.session_state.error_messages:
@@ -1891,7 +2021,8 @@ if analyze_start_clicked:
              st.success(f"✅ 全{total_tickers}銘柄の診断が完了しました。（既存銘柄は上書き更新）")
         elif new_analyzed_data and end_index < total_tickers:
              current_batch_num = start_index // MAX_TICKERS + 1
-             st.success(f"✅ 第{current_batch_num}回、{len(new_analyzed_data)}銘柄の診断が完了しました。（次回分析へ進むには、再度【🚀 分析開始】を押してください）")
+             mode_text = "自動待機・再開中です。" if st.session_state.is_running_continuous else "次回分析へ進むには、再度【🚀 分析開始】を押してください。"
+             st.success(f"✅ 第{current_batch_num}回、{len(new_analyzed_data)}銘柄の診断が完了しました。（{mode_text}）")
              
 
 # --- UI表示ヘルパー関数の定義 (NameError回避のため移動) ---
@@ -1912,7 +2043,6 @@ def highlight_rows(row):
     return '' # デフォルトは白 (色なし)
 
 
-# 【st.dataframeのcolumn_config定義 (Styler不使用のため削除、代わりにヘッダー定義として使用)】
 # [元のキー, 表示名, テキストアライメント, 最小幅(px), 幅(px)]
 HEADER_MAP = [
     ('No', 'No', 'center', '40px', '40px'), 
@@ -2232,7 +2362,7 @@ if st.session_state.analyzed_data:
         st.subheader("銘柄ごとのスコア要因")
         
         details = []
-        # スコア内訳は生のデータを使用する
+        # df_raw はフィルタリング前のデータ。ここではフィルタリングされた行のコードに対応するデータを使用
         raw_data_map = {d['code']: d for d in st.session_state.analyzed_data}
         
         for index, row in df.iterrows():
