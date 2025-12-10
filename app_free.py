@@ -11,6 +11,7 @@ import numpy as np
 import random 
 import hashlib 
 import os 
+import copy 
 
 # --- 環境変数チェックで認証のON/OFFを決定 ---
 # ローカルで 'SKIP_AUTH=true streamlit run your_app.py' のように実行すると認証をスキップ
@@ -65,16 +66,14 @@ if 'authenticated' not in st.session_state:
     st.session_state.authenticated = IS_LOCAL_SKIP_AUTH # ローカルスキップモード時は自動でTrue
     
 # 【★ スコア変動の永続化用データ構造の初期化】
+# key: ticker, value: {'pre_market_score': int, 'current_score': int}
 if 'score_history' not in st.session_state:
     st.session_state.score_history = {} 
     
-# 【★ UIフィルター用のセッションステートを追加】
-if 'ui_filter_pro_bull' not in st.session_state: st.session_state.ui_filter_pro_bull = False
-if 'ui_filter_pro_bear' not in st.session_state: st.session_state.ui_filter_pro_bear = False
-if 'ui_filter_bull' not in st.session_state: st.session_state.ui_filter_bull = False
-if 'ui_filter_bear' not in st.session_state: st.session_state.ui_filter_bear = False
-if 'ui_filter_score_80' not in st.session_state: st.session_state.ui_filter_score_80 = False
-if 'ui_filter_liquid_10k' not in st.session_state: st.session_state.ui_filter_liquid_10k = False
+# 【★ UIフィルター用のセッションステートを追加 (修正適用) 】
+if 'ui_filter_min_score' not in st.session_state: st.session_state.ui_filter_min_score = 75 # n1=75
+# 修正: float型に統一
+if 'ui_filter_min_liquid_man' not in st.session_state: st.session_state.ui_filter_min_liquid_man = 1.0 # n2=1.0
 if 'ui_filter_aoteng' not in st.session_state: st.session_state.ui_filter_aoteng = False
     
 # --- 分析上限定数 ---
@@ -84,18 +83,20 @@ MAX_TICKERS = 10
 # --- 時間管理 (JST) ---
 def get_market_status():
     """市場状態を返す"""
-# ... (get_market_status関数は変更なし) ...
     jst_now = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=9)
     current_time = jst_now.time()
     
     if jst_now.weekday() >= 5: return "休日(固定)", jst_now
     
+    # 9:00:01より前
     if datetime.time(15, 50, 1) <= current_time or current_time < datetime.time(9, 0, 1):
          return "場前(固定)", jst_now
     
+    # 9:00:01 から 15:50:00 の間
     if datetime.time(9, 0, 1) <= current_time <= datetime.time(15, 50, 0):
         return "場中(進行中)", jst_now
         
+    # それ以外は引け後
     return "引け後(確定値)", jst_now
 
 
@@ -103,7 +104,6 @@ status_label, jst_now = get_market_status()
 status_color = "#d32f2f" if "進行中" in status_label else "#1976d2"
 
 # --- 出来高調整ウェイト（時価総額別ロジック） ---
-# ... (WEIGHT_MODELS, get_volume_weight関数は変更なし) ...
 WEIGHT_MODELS = {
     "large": {
         (9 * 60 + 0): 0.00, (9 * 60 + 30): 0.25, (10 * 60 + 0): 0.30, (11 * 60 + 30): 0.50, 
@@ -149,7 +149,6 @@ def format_volume(volume):
         return f'{vol_man:,.0f}万株'
 
 # --- CSSスタイル ---
-# スタイラー不使用のため、CSSはカスタムテーブルの見た目を再現するように調整
 st.markdown(f"""
 <style>
     /* ========== 【新規追加】サイドバーの幅調整 ========== */
@@ -352,7 +351,6 @@ with st.expander("📘 取扱説明書 (データ仕様・判定基準)"):
 
 
 # --- コールバック関数定義 ---
-# ... (コールバック関数は変更なし) ...
 def clear_all_data_confirm():
     """全ての結果と入力をクリアし、確認ダイアログを表示する"""
     st.session_state.clear_confirmed = True
@@ -374,7 +372,6 @@ def reanalyze_all_data_logic():
 
 # --- サイドバー (UIのコアを移動) ---
 with st.sidebar:
-    # st.title("設定と操作")
     
     # 【新規追加】パスワード認証ロジック
     if 'security' not in st.secrets or 'secret_password_hash' not in st.secrets.get('security', {}):
@@ -447,21 +444,34 @@ with st.sidebar:
             key='sort_selectbox_ui_key' 
         )
         
-        # 【④ UIデザイン改善 B. 絞り込みフィルターの追加】
+        # 【④ UIデザイン改善 B. 絞り込みフィルターの追加 (修正適用) 】
         st.markdown("---")
         st.subheader("表示フィルター")
-        col1, col2 = st.columns(2)
-        st.session_state.ui_filter_score_80 = col1.checkbox("スコア80以上", value=st.session_state.ui_filter_score_80)
-        st.session_state.ui_filter_liquid_10k = col2.checkbox("出来高1万株以上", value=st.session_state.ui_filter_liquid_10k)
         
-        col3, col4 = st.columns(2)
-        st.session_state.ui_filter_pro_bull = col3.checkbox("🚀順ロジック", value=st.session_state.ui_filter_pro_bull)
-        st.session_state.ui_filter_pro_bear = col4.checkbox("🚀逆ロジック", value=st.session_state.ui_filter_pro_bear)
+        # スコア n1 以上 (デフォルト: 75)
+        st.session_state.ui_filter_min_score = st.number_input(
+            "総合点 n1 点以上", 
+            min_value=0, max_value=100, 
+            value=st.session_state.ui_filter_min_score, 
+            step=5, 
+            key='filter_min_score'
+        )
         
-        col5, col6 = st.columns(2)
-        st.session_state.ui_filter_bull = col5.checkbox("🔥順張りロジック", value=st.session_state.ui_filter_bull)
-        st.session_state.ui_filter_bear = col6.checkbox("🌊逆張りロジック", value=st.session_state.ui_filter_bear)
-        st.session_state.ui_filter_aoteng = st.checkbox("青天井銘柄のみ", value=st.session_state.ui_filter_aoteng)
+        # 出来高 n2 万株以上 (デフォルト: 1.0)
+        # 修正: valueの型をfloatに統一
+        st.session_state.ui_filter_min_liquid_man = st.number_input(
+            "5日平均出来高 n2 万株以上", 
+            min_value=0.0, max_value=500.0, 
+            value=st.session_state.ui_filter_min_liquid_man, 
+            step=0.5, 
+            key='filter_min_liquid_man'
+        )
+        
+        st.session_state.ui_filter_aoteng = st.checkbox(
+            "青天井銘柄のみ", 
+            value=st.session_state.ui_filter_aoteng, 
+            key='filter_aoteng'
+        )
 
 
         # 4. 銘柄コード入力エリア
@@ -709,6 +719,8 @@ def run_backtest_precise(df, market_cap):
     """
     バックテストを実行し、時価総額別の全益率目標に基づく10日間の勝率を計算する。
     仕様: (1) 前日終値 vs MA5/MA25の条件分離, (2) 青天井専用TSL評価
+    
+    ★ 高速化対策: テスト期間を 75日 → 60日 に短縮。
     """
     try:
         if len(df) < 80: return "データ不足", 0.0, 0, 0.0, 0.0, 0 
@@ -717,7 +729,8 @@ def run_backtest_precise(df, market_cap):
         target_pct = get_target_pct_new(category, is_half=False) 
         
         wins, losses, max_dd_pct = 0, 0, 0.0 
-        test_data = df.tail(75).copy() 
+        # ★ 高速化対策: テスト期間を 75日 → 60日 に短縮
+        test_data = df.tail(60).copy() 
         n = len(test_data)
         
         # 移動平均線とテクニカル指標の再計算
@@ -731,6 +744,9 @@ def run_backtest_precise(df, market_cap):
         test_data['Low_PrevClose'] = abs(test_data['Low'] - test_data['Close'].shift(1))
         test_data['TR'] = test_data[['High_Low', 'High_PrevClose', 'Low_PrevClose']].max(axis=1)
         test_data['ATR'] = test_data['TR'].rolling(14).mean()
+        
+        # Vol_SMA5 もテストデータ内で計算
+        test_data['Vol_SMA5'] = test_data['Volume'].rolling(5).mean()
         
         i = 1 # 評価は2日目から (i-1 = 前日)
         while i < n - 10: 
@@ -749,7 +765,8 @@ def run_backtest_precise(df, market_cap):
 
             # (2) 当日エントリーシグナル（戻し陽線 or 高値ブレイク）
             open_price, close_price, high_price = curr_row.get('Open', 0), curr_row.get('Close', 0), curr_row.get('High', 0)
-            is_gap_down = open_price < prev_close * 0.99 # 【①-A ギャップダウン補正】
+            # 【①-A ギャップダウン補正】: 前日終値から-1%未満のギャップダウン
+            is_gap_down = open_price < prev_close * 0.99 
             
             is_ma5_signal = False
             if is_prev_bull_trend and is_prev_ma5_touch and not is_gap_down:
@@ -757,15 +774,20 @@ def run_backtest_precise(df, market_cap):
                  if close_price > open_price or high_price >= prev_row.get('High', 0):
                       is_ma5_signal = True
 
-            # (3) 青天井シグナル
+            # (3) 青天井シグナル (高値ブレイクと出来高増加)
             is_aoteng_signal = False
+            # 250日最高値更新
             is_ath = curr_row.get('High', 0) >= curr_row.get('High_250d', 0) and curr_row.get('High_250d', 0) > 0
-            if is_ath and curr_row.get('Volume', 0) >= curr_row.get('Vol_SMA5', 0) * 1.5:
+            
+            curr_vol_sma5 = curr_row.get('Vol_SMA5', 0)
+            
+            if is_ath and curr_row.get('Volume', 0) >= curr_vol_sma5 * 1.5:
                  is_aoteng_signal = True
 
             # エントリー実行
             if is_ma5_signal or is_aoteng_signal:
-                entry_price = prev_sma5 if is_ma5_signal else close_price # MA5シグナルはMA5を、青天井は当日終値をエントリーとする
+                # MA5シグナルはMA5を、青天井は当日終値をエントリーとする
+                entry_price = prev_sma5 if is_ma5_signal and not is_aoteng_signal else close_price 
                 
                 if entry_price == 0: i += 1; continue
                 
@@ -825,6 +847,7 @@ def run_backtest_precise(df, market_cap):
         return bt_str_new, win_rate_pct, total_trades, max_dd_pct, target_pct, wins
         
     except Exception as e:
+        # print(f"Backtest Error: {e}") # デバッグ用
         return f"計算エラー: {e}", 0.0, 0, 0.0, 0.0, 0
 
 # 既存の run_backtest を新しい精密版に置き換える（旧 run_backtest は使用しない）
@@ -868,6 +891,8 @@ def get_base_score(ticker, df_base, info):
     elif rsi_val_b <= 30 or (curr_price_b < ma25_b * 0.9 if ma25_b else False): strategy_b = "🌊逆張り"
 
     score_b = 50; total_structural_deduction_b = 0
+    
+    # 既存のロジックを忠実に再現
     if "🔥順張り" in strategy_b:
         if info["cap"] >= 3000: 
             if rsi_val_b >= 85: total_structural_deduction_b -= 15 
@@ -877,6 +902,7 @@ def get_base_score(ticker, df_base, info):
         if rsi_val_b <= 20: 
             if info["cap"] >= 3000: total_structural_deduction_b -= 15
             else: total_structural_deduction_b -= 25
+            
     if avg_vol_5d_b < 1000: total_structural_deduction_b -= 30 
     liquidity_ratio_pct_b = (avg_vol_5d_b / info.get("issued_shares", 1.0)) * 100 if info.get("issued_shares", 0.0) > 0 else 0.0
     if liquidity_ratio_pct_b < 0.05: total_structural_deduction_b -= 10
@@ -891,6 +917,7 @@ def get_base_score(ticker, df_base, info):
     elif is_dc_b: score_b -= 10
     
     score_b = max(0, min(100, score_b)) 
+    
     return score_b
 
 # ------------------------------------------------------------
@@ -901,13 +928,14 @@ def get_base_score(ticker, df_base, info):
 # 【① ロジックの強化 A. 寄付ギャップ補正ロジックの追加】
 # 【② 出来高の質判定】
 def create_signals_pro_bull(df, info, vol_ratio_in):
+    # 最新のデータポイント
     last = df.iloc[-1]; prev = df.iloc[-2] if len(df) >= 2 else last
     market_cap = info.get("cap", 0); category = get_market_cap_category(market_cap)
     ma5 = last.get('SMA5', 0); close = last.get('Close', 0); open_price = last.get('Open', 0)
     high = last.get('High', 0); low = last.get('Low', 0); prev_close = prev.get('Close', 0)
     rsi = last.get('RSI', 50); vol_ratio = vol_ratio_in
     
-    # ② 出来高の質判定のための SMA3 を計算
+    # ② 出来高の質判定のための SMA3/SMA5 を計算 (df全体で計算済み)
     vol_sma3 = df['Volume'].rolling(3).mean().iloc[-1] if len(df) >= 3 else 0
     vol_sma5 = df['Volume'].rolling(5).mean().iloc[-1] if len(df) >= 5 else 0
 
@@ -915,8 +943,9 @@ def create_signals_pro_bull(df, info, vol_ratio_in):
         return {"strategy": "様子見", "buy": 0, "p_half": 0, "p_full": 0, "sl_ma": 0, "signal_success": False}
         
     # --- 早期除外フィルター (順張りトレンド崩壊の兆候) ---
-    is_gap_up = open_price > prev_close * 1.01 # +1%以上のギャップアップ
-    if is_gap_up or high >= ma5 * 1.01 or close > ma5 * 1.01 or close < prev_close * 0.995: # ①-A. 寄付ギャップ補正
+    # 【①-A ギャップアップ補正】: +1%以上のギャップアップは無効
+    is_gap_up = open_price > prev_close * 1.01 
+    if is_gap_up or high >= ma5 * 1.01 or close > ma5 * 1.01 or close < prev_close * 0.995: 
         return {"strategy": "様子見", "buy": 0, "p_half": 0, "p_full": 0, "sl_ma": 0, "signal_success": False}
         
     # --- 1-1. MA5 接触条件 ---
@@ -933,7 +962,8 @@ def create_signals_pro_bull(df, info, vol_ratio_in):
     is_volume_spike = vol_ratio >= required_vol_ratio
     
     # 【② 出来高の質判定】: 出来高が瞬間的でなく、継続して増えているか？
-    is_volume_quality_ok = (vol_sma3 > vol_sma5 * 1.05) if vol_sma5 > 0 else True
+    # SMA5を基準に、SMA3が1.05倍以上でないと無効
+    is_volume_quality_ok = (vol_sma5 > 0) and (vol_sma3 >= vol_sma5 * 1.05)
     
     if not is_volume_quality_ok:
         return {"strategy": "様子見", "buy": 0, "p_half": 0, "p_full": 0, "sl_ma": 0, "signal_success": False} # 出来高の質が悪ければ無効
@@ -969,7 +999,7 @@ def create_signals_pro_bear(df, info, vol_ratio_in):
     ma5 = last.get('SMA5', 0); ma25 = last.get('SMA25', 0); vol_ratio = vol_ratio_in
     prev_close = prev.get('Close', 0)
     
-    # ② 出来高の質判定のための SMA3 を計算
+    # ② 出来高の質判定のための SMA3/SMA5 を計算 (df全体で計算済み)
     vol_sma3 = df['Volume'].rolling(3).mean().iloc[-1] if len(df) >= 3 else 0
     vol_sma5 = df['Volume'].rolling(5).mean().iloc[-1] if len(df) >= 5 else 0
 
@@ -977,9 +1007,10 @@ def create_signals_pro_bear(df, info, vol_ratio_in):
         return {"strategy": "様子見", "buy": 0, "p_half": 0, "p_full": 0, "sl_ma": 0, "signal_success": False}
         
     # --- 早期除外フィルター (ギャップダウン補正) ---
-    is_gap_down = open_price < prev_close * 0.99 # -1%以上のギャップダウンは逆張りシグナルを無効化
-    if is_gap_down: # ①-A. 寄付ギャップ補正
-        return {"strategy": "様子見", "buy": 0, "p_half": 0, "p_full": 0, "sl_ma": 0, "signal_success": False}
+    # 【①-A ギャップダウン補正】: -1%以上のギャップダウンは無効
+    is_gap_down = open_price < prev_close * 0.99 
+    if is_gap_down: 
+        return {"strategy": "様子見", "signal_success": False, "buy": 0, "p_half": 0, "p_full": 0, "sl_ma": 0}
 
     # --- 1. 低位/乖離条件（いずれかを満たす） ---
     is_low_rsi = rsi <= 30
@@ -1000,7 +1031,7 @@ def create_signals_pro_bear(df, info, vol_ratio_in):
     is_volume_spike = vol_ratio >= 1.3 # 逆張り時の出来高は1.3倍を基準とする
     
     # 【② 出来高の質判定】: 出来高が瞬間的でなく、継続して増えているか？
-    is_volume_quality_ok = (vol_sma3 > vol_sma5 * 1.05) if vol_sma5 > 0 else True
+    is_volume_quality_ok = (vol_sma5 > 0) and (vol_sma3 >= vol_sma5 * 1.05) 
     
     if not is_volume_spike or not is_volume_quality_ok:
         return {"strategy": "様子見", "signal_success": False, "buy": 0, "p_half": 0, "p_full": 0, "sl_ma": 0}
@@ -1030,14 +1061,13 @@ def create_signals_pro_bear(df, info, vol_ratio_in):
 def evaluate_strategy_new(df, info, vol_ratio, high_250d, atr_val, curr_price, ma5, ma25, ma75, prev_ma5, rsi_val, atr_sl_price):
     """
     既存の優先順位付けロジックをカプセル化し、戦略と主要な取引水準を返す。
-    ※ get_market_cap_category と get_target_pct_new はグローバルスコープを参照
     """
     
     # create_signals_pro_bull/bear はグローバルスコープで定義済み
     signals_bull = create_signals_pro_bull(df, info, vol_ratio)
     signals_bear = create_signals_pro_bear(df, info, vol_ratio)
     
-    strategy, buy_target, p_half, p_full, sl_ma, is_aoteng = "様子見", int(ma5), 0, 0, atr_sl_price, False
+    strategy, buy_target, p_half, p_full, sl_ma, is_aoteng = "様子見", int(ma5) if ma5 > 0 else 0, 0, 0, atr_sl_price, False
 
     # 1. 🚀順ロジの判定 (優位な順張り)
     if signals_bull["signal_success"] and signals_bull["strategy"] == "🚀順ロジ":
@@ -1052,6 +1082,7 @@ def evaluate_strategy_new(df, info, vol_ratio, high_250d, atr_val, curr_price, m
     # 3. 既存のフォールバックロジック (🔥順張り, 🌊逆張り, 様子見)
     else:
          # sl_ma は初期値の atr_sl_price をそのまま使用
+         sl_ma = atr_sl_price
          
          # 🔥順張り判定 (既存ロジックそのまま移植)
          if ma5 > ma25 > ma75 and ma5 > prev_ma5:
@@ -1066,6 +1097,7 @@ def evaluate_strategy_new(df, info, vol_ratio, high_250d, atr_val, curr_price, m
               is_ath = high_250d > 0 and curr_price > high_250d
               is_rsi_ok = rsi_val < 80; is_volume_ok = vol_ratio >= 1.5
               
+              # 【⑤ B. 青天井専用バックテスト】の判定基準
               if is_ath and is_rsi_ok and is_volume_ok:
                    is_aoteng = True; max_high_today = df['High'].iloc[-1]; 
                    atr_trailing_price = max_high_today - (atr_val * 2.5); atr_trailing_price = max(0, atr_trailing_price)
@@ -1080,380 +1112,367 @@ def evaluate_strategy_new(df, info, vol_ratio, high_250d, atr_val, curr_price, m
              p_half_candidate = int(np.floor(ma5 - 1)) if ma5 else 0 
              p_full_candidate = int(np.floor(ma25 - 1)) if ma25 else 0 
              p_half = p_half_candidate; p_full = p_full_candidate
-
+             
     # SL乖離率の計算
     sl_pct = ((curr_price / sl_ma) - 1) * 100 if curr_price > 0 and sl_ma > 0 else 0.0
     
     return strategy, buy_target, p_half, p_full, sl_ma, is_aoteng, sl_pct
 
 
-# --- 関数群の統合: 新ロジックをget_stock_dataに組み込む ---
+# --- 【新規追加】キャッシュ化されたコア計算関数 ---
+# データフレームのハッシュを利用して、同じ入力であれば再計算をスキップ
+@st.cache_data(ttl=30, show_spinner="銘柄のテクニカル分析を実行中...")
+def calculate_stock_metrics(ticker, df_raw, info, jst_now_local, current_run_count, market_25d_ratio):
+    
+    status = get_market_status()[0]
+    
+    # df_raw をコピーして操作
+    df = df_raw.copy()
+    
+    # ------------------ 1. 当日リアルタイム値の反映 ------------------
+    curr_price = info.get("close") 
+    if status == "場中(進行中)" or curr_price is None: curr_price = info.get("price")
+    
+    if curr_price is None or math.isnan(curr_price):
+         raise ValueError("価格情報が見つかりませんでした。")
+         
+    if status == "場中(進行中)" and info.get("open") and info.get("high") and info.get("low") and info.get("volume") and curr_price:
+          today_date_dt = pd.to_datetime(jst_now_local.strftime("%Y-%m-%d"))
+          
+          if df.index[-1].date() < today_date_dt.date():
+               df = pd.concat([df, pd.Series({'Open': info['open'], 'High': info['high'], 'Low': info['low'], 'Close': curr_price, 'Volume': info['volume']}, name=today_date_dt).to_frame().T])
+          elif df.index[-1].date() == today_date_dt.date():
+               df.loc[df.index[-1], 'Open'] = info['open']
+               df.loc[df.index[-1], 'High'] = info['high']
+               df.loc[df.index[-1], 'Low'] = info['low']
+               df.loc[df.index[-1], 'Close'] = curr_price
+               df.loc[df.index[-1], 'Volume'] = info['volume']
 
-# ★ 修正: ttl を 1秒 に一時的に変更してキャッシュをクリア
+    # ------------------ 2. テクニカル指標の計算 ------------------
+    df['SMA5'] = df['Close'].rolling(5).mean(); df['SMA25'] = df['Close'].rolling(25).mean()
+    df['SMA75'] = df['Close'].rolling(75).mean(); df['Vol_SMA5'] = df['Volume'].rolling(5).mean() 
+    
+    if 'High' in df.columns and 'Low' in df.columns:
+        df['High_Low'] = df['High'] - df['Low']
+    else:
+        df['High_Low'] = 0.0
+    
+    df['High_PrevClose'] = abs(df['High'] - df['Close'].shift(1))
+    df['Low_PrevClose'] = abs(df['Low'] - df['Close'].shift(1)); df['TR'] = df[['High_Low', 'High_PrevClose', 'Low_PrevClose']].max(axis=1)
+    df['ATR'] = df['TR'].rolling(14).mean()
+    df['ATR_SMA3'] = df['ATR'].rolling(3).mean() # ③ ATRスムージング
+
+    delta = df['Close'].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(14).mean(); loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
+    rs = gain / loss; df['RSI'] = 100 - (100 / (1 + rs))
+    recent = df['Close'].diff().tail(5); up_days = (recent > 0).sum(); win_rate_pct_momentum = (up_days / 5) * 100
+    momentum_str = f"{win_rate_pct_momentum:.0f}%"; last = df.iloc[-1]; prev = df.iloc[-2] if len(df) >= 2 else last
+    ma5 = last['SMA5'] if not pd.isna(last['SMA5']) else 0; ma25 = last['SMA25'] if not pd.isna(last['SMA25']) else 0
+    ma75 = last['SMA75'] if not pd.isna(last['SMA75']) else 0; prev_ma5 = prev['SMA5'] if not pd.isna(prev['SMA5']) else ma5
+    prev_ma25 = prev['SMA25'] if not pd.isna(prev['SMA25']) else ma25
+    high_250d = df['High'].tail(250).max() if len(df) >= 250 else 0
+    is_gc_raw = (ma5 > ma25) and (prev_ma5 <= prev_ma25); is_dc_raw = (ma5 < ma25) and (prev_ma5 >= prev_ma25)
+    ma_diff_pct = abs((ma5 - ma25) / ma25) * 100 if ma25 > 0 else 100
+    is_gc, is_dc = is_gc_raw, is_dc_raw
+    if ma_diff_pct < 0.1: is_gc, is_dc = False, False
+    atr_val = last['ATR'] if not pd.isna(last['ATR']) else 0
+    atr_smoothed = last['ATR_SMA3'] if not pd.isna(last['ATR_SMA3']) else atr_val 
+    
+    # 🎯 ATRベース SL の計算
+    atr_sl_price = 0
+    if curr_price > 0 and atr_smoothed > 0: 
+        sl_amount = max(atr_smoothed * 1.5, curr_price * 0.01) # ATR_SMA3を採用
+        atr_sl_price = curr_price - sl_amount
+        atr_sl_price = max(0, atr_sl_price)
+    
+    # 出来高倍率の計算
+    vol_ratio = 0; volume_weight = get_volume_weight(jst_now_local, info["cap"]) 
+    if info.get("volume") and not pd.isna(last['Vol_SMA5']) and volume_weight > 0.0001: 
+        adjusted_vol_avg = last['Vol_SMA5'] * volume_weight
+        if adjusted_vol_avg > 0: vol_ratio = info["volume"] / adjusted_vol_avg
+
+    rsi_val = last['RSI'] if not pd.isna(last['RSI']) else 50
+    
+    # ------------------ 3. 戦略判定 ------------------
+    strategy, buy_target, p_half, p_full, sl_ma, is_aoteng, sl_pct = evaluate_strategy_new(
+        df, info, vol_ratio, high_250d, atr_smoothed, curr_price, ma5, ma25, ma75, prev_ma5, rsi_val, atr_sl_price
+    )
+    
+    # ------------------ 4. バックテスト実行 ------------------
+    bt_str, win_rate_pct, bt_cnt, max_dd_pct, bt_target_pct, bt_win_count = run_backtest(df, info["cap"]) 
+    
+    # ------------------ 5. スコア計算（内訳込み） ------------------
+    score = 50; total_structural_deduction = 0
+    avg_vol_5d = last['Vol_SMA5'] if not pd.isna(last['Vol_SMA5']) else 0
+    
+    # 利益確定目標とR/Rの再計算 (後のスコアリングに必要)
+    rr_score_value = 0; risk_reward_ratio = 0.0; risk_value = 0.0
+    if p_full < p_half: p_full = p_half
+    if p_half > 0 and p_half <= buy_target: p_half = 0
+    if p_full > 0 and p_full <= buy_target: p_full = 0
+    if buy_target > 0 and sl_ma > 0 and (p_half > 0 or is_aoteng or p_full > 0): 
+        if is_aoteng: 
+            risk_value_raw = buy_target - sl_ma
+            if risk_value_raw > 0: risk_reward_ratio = 50.0; risk_value = risk_value_raw
+        else:
+             avg_target = (p_half + p_full) / 2 if p_half > 0 and p_full > 0 else (p_full if p_full > 0 and p_half == 0 else 0)
+             reward_value = avg_target - buy_target; risk_value = buy_target - sl_ma 
+             if risk_value > 0 and reward_value > 0: risk_reward_ratio = min(reward_value / risk_value, 50.0)
+             min_risk_threshold = buy_target * 0.01 
+             is_rr_buffer_zone = (0.95 <= risk_reward_ratio <= 1.05)
+             if not is_rr_buffer_zone and risk_value >= min_risk_threshold:
+                 if risk_reward_ratio >= 2.0: rr_score_value = 15
+                 elif risk_reward_ratio >= 1.5: rr_score_value = 5
+             if risk_reward_ratio < 1.0 and not is_rr_buffer_zone: 
+                 rr_score_value -= 25
+
+
+    # (スコアリング処理は長いため省略 - 既存のスコアリングロジックを忠実に再現)
+    # 1. 構造的減点（RSI, 流動性）
+    score_factors_inner = {"base": 50, "strategy_bonus": 0, "total_deduction": 0, "rr_score": 0, "rsi_penalty": 0, "vol_bonus": 0, "liquidity_penalty": 0, "atr_penalty": 0, "gc_dc": 0, "market_overheat": 0, "sl_risk_deduct": 0, "aoteng_bonus": 0, "dd_score": 0, "rsi_mid_bonus": 0, "momentum_bonus": 0}
+    
+    if "順ロジ" in strategy or "順張り" in strategy:
+        if info["cap"] >= 3000:
+            if rsi_val >= 85: total_structural_deduction -= 15; score_factors_inner["rsi_penalty"] = -15
+        else:
+            if rsi_val >= 80: total_structural_deduction -= 25; score_factors_inner["rsi_penalty"] = -25
+    elif "逆ロジ" in strategy or "逆張り" in strategy:
+        if rsi_val <= 20: 
+            if info["cap"] >= 3000: total_structural_deduction -= 15; score_factors_inner["rsi_penalty"] = -15
+            else: total_structural_deduction -= 25; score_factors_inner["rsi_penalty"] = -25
+            
+    if avg_vol_5d < 1000: total_structural_deduction -= 30; score_factors_inner["liquidity_penalty"] = -30
+    liquidity_ratio_pct = (avg_vol_5d / info.get("issued_shares", 1.0)) * 100 if info.get("issued_shares", 0.0) > 0 else 0.0
+    if liquidity_ratio_pct < 0.05: total_structural_deduction -= 10; score_factors_inner["liquidity_penalty"] -= 10
+    
+    score += total_structural_deduction
+    score_factors_inner["total_deduction"] += total_structural_deduction
+
+    # 2. ポジティブ要素加点
+    strategy_bonus = 0
+    if "順ロジ" in strategy or "順張り" in strategy: strategy_bonus = 15 
+    if "逆ロジ" in strategy or "逆張り" in strategy: strategy_bonus = 10
+    score += strategy_bonus; score_factors_inner["strategy_bonus"] = strategy_bonus
+    
+    rsi_mid_bonus = 0
+    if 55 <= rsi_val <= 65: rsi_mid_bonus = 10
+    score += rsi_mid_bonus; score_factors_inner["rsi_mid_bonus"] = rsi_mid_bonus
+
+    vol_bonus = 0
+    if vol_ratio > 1.5: vol_bonus += 10;
+    if vol_ratio > 3.0: vol_bonus += 5;
+    score += vol_bonus; score_factors_inner["vol_bonus"] = vol_bonus
+    
+    momentum_bonus = 0
+    if up_days >= 4: momentum_bonus = 5
+    score += momentum_bonus; score_factors_inner["momentum_bonus"] = momentum_bonus
+
+    score += rr_score_value; 
+    score_factors_inner["rr_score"] += rr_score_value
+    
+    aoteng_bonus = 0
+    if is_aoteng and rsi_val < 80 and vol_ratio > 1.5: aoteng_bonus = 15 
+    score += aoteng_bonus; score_factors_inner["aoteng_bonus"] = aoteng_bonus
+    
+    is_final_cross = (status != "場中(進行中)") 
+    gc_dc_score = 0
+    if is_final_cross:
+        if is_gc: gc_dc_score = 15 
+        elif is_dc: gc_dc_score = -10
+    score += gc_dc_score; score_factors_inner["gc_dc"] = gc_dc_score
+        
+    dd_abs = abs(max_dd_pct); dd_score = 0
+    if dd_abs < 1.0: dd_score = 5
+    elif 1.0 <= dd_abs <= 2.0: dd_score = 0
+    elif 2.0 < dd_abs <= 10.0: dd_score = -int(np.floor(dd_abs - 2.0)) * 2 
+    elif dd_abs > 10.0: dd_score = -20
+    score += dd_score; score_factors_inner["dd_score"] = dd_score
+    
+    sl_risk_deduct = 0
+    is_market_alert = market_25d_ratio >= 125.0
+    if not is_aoteng: 
+         if sl_ma > 0 and abs(sl_pct) < 3.0: 
+             if "順ロジ" in strategy or "順張り" in strategy:
+                 if is_market_alert: sl_risk_deduct = -20 
+    score += sl_risk_deduct; score_factors_inner["sl_risk_deduct"] = sl_risk_deduct
+    
+    atr_pct = (atr_smoothed / curr_price) * 100 if curr_price > 0 and atr_smoothed > 0 else 0
+    is_low_vol_buffer_zone = (0.45 <= atr_pct <= 0.55)
+    atr_penalty = 0
+    if atr_pct < 0.5 and not is_low_vol_buffer_zone: atr_penalty = -10 
+    score += atr_penalty; score_factors_inner["atr_penalty"] = atr_penalty
+    
+    current_calculated_score = max(0, min(100, score)) 
+    score_factors_inner["market_overheat"] = -20 if is_market_alert else 0
+
+    return {
+        "score": current_calculated_score, 
+        "strategy": strategy,
+        "buy": buy_target, "p_half": p_half, "p_full": p_full, "sl_ma": sl_ma,
+        "rsi": rsi_val, "vol_ratio": vol_ratio, "momentum": momentum_str,
+        "backtest": bt_str, "backtest_raw": re.sub(r'<br\s*/?>', ' ', re.sub(r'</?.*?>', '', bt_str)),
+        "max_dd_pct": max_dd_pct, "sl_pct": sl_pct, "avg_volume_5d": avg_vol_5d,
+        "risk_reward": risk_reward_ratio, "issued_shares": info.get("issued_shares", 0.0),
+        "liquidity_ratio_pct": liquidity_ratio_pct, "atr_val": atr_val,
+        "atr_smoothed": atr_smoothed, "is_gc": is_gc, "is_dc": is_dc,
+        "atr_sl_price": atr_sl_price, "base_score": base_score, "is_aoteng": is_aoteng,
+        "win_rate_pct": win_rate_pct, "bt_trade_count": bt_cnt, 
+        "bt_target_pct": bt_target_pct, "bt_win_count": bt_win_count,
+        "score_factors": score_factors_inner,
+        "market_deduct": -20 if is_market_alert else 0 # 市場影響度による固定減点
+    }
+
+# --- メインデータ取得関数 ---
 @st.cache_data(ttl=1) 
 def get_stock_data(ticker, current_run_count):
     status, jst_now_local = get_market_status() 
     ticker = str(ticker).strip().replace(".T", "").upper()
     stock_code = f"{ticker}.JP" 
     info = get_stock_info(ticker) 
-    issued_shares = info.get("issued_shares", 0.0)
-    ma5, ma25, ma75, atr_val, rsi_val = 0, 0, 0, 0, 0
-    risk_reward_ratio, risk_value, avg_vol_5d = 0.0, 0.0, 0
-    sl_pct, atr_sl_price, vol_ratio, liquidity_ratio_pct = 0, 0, 0.0, 0.0
-    strategy, is_gc, is_dc, is_aoteng = "様子見", False, False, False
-    rsi_mark, momentum_str, p_half, p_full = "⚪", "0%", 0, 0
-    # 🎯 修正: バックテスト関連の初期値に目標リターン率と勝ち数を追加
-    buy_target, bt_str, max_dd_pct, win_rate_pct, sl_ma = 0, "計算エラー", 0.0, 0.0, 0 
-    bt_cnt = 0; bt_target_pct = 0.0; bt_win_count = 0
-    current_calculated_score, score_diff, score_to_return = 0, 0, 50 
     
-    # 【⑥ スコア内訳表の生成】初期化
-    score_factors = {"base": 50, "strategy_bonus": 0, "total_deduction": 0, "rr_score": 0, "rsi_penalty": 0, "vol_bonus": 0, "liquidity_penalty": 0, "atr_penalty": 0, "gc_dc": 0, "market_overheat": 0, "sl_risk_deduct": 0, "aoteng_bonus": 0, "dd_score": 0, "rsi_mid_bonus": 0, "momentum_bonus": 0}
-
-
+    # ... データチェック ...
     curr_price_for_check = info.get("price")
     if curr_price_for_check is not None and curr_price_for_check < 100:
          st.session_state.error_messages.append(f"データ処理エラー (コード:{ticker}): 株価が100円未満のため、分析をスキップしました (高リスク銘柄)。")
          return None
     
+    # ------------------ 1. データ取得 ------------------
+    df_raw = None
     try:
         csv_url = f"https://stooq.com/q/d/l/?s={stock_code}&i=d"
-        # 【改善要件 5. 適用】requests.get を fetch_with_retry に置き換え
         res = fetch_with_retry(csv_url, max_retry=3)
-        try:
-            df_raw = pd.read_csv(io.BytesIO(res.content), parse_dates=True, index_col=0) 
-            df_raw.index.name = 'Date' 
-            df_raw.columns = df_raw.columns.str.strip() 
-            if 'Adj Close' in df_raw.columns and 'Close' not in df_raw.columns:
-                 df_raw.rename(columns={'Adj Close': 'Close'}, inplace=True) 
-        except Exception as csv_e:
-            st.session_state.error_messages.append(f"データ不足エラー (コード:{ticker}): Stooq CSV解析失敗。詳細: {csv_e}。データがないか、ファイル形式が不正です。")
-            return None
-        
+        df_raw = pd.read_csv(io.BytesIO(res.content), parse_dates=True, index_col=0) 
+        df_raw.index.name = 'Date' 
+        df_raw.columns = df_raw.columns.str.strip() 
+        if 'Adj Close' in df_raw.columns and 'Close' not in df_raw.columns:
+             df_raw.rename(columns={'Adj Close': 'Close'}, inplace=True) 
+        required_cols = ['Close', 'High', 'Low', 'Volume', 'Open']
+        if not all(col in df_raw.columns for col in required_cols): raise ValueError("CSVに必須カラムが不足")
+        if df_raw.empty or len(df_raw) < 80: raise ValueError("データ期間が短すぎます (80日未満)")
         df_raw = df_raw.sort_index()
-        required_cols = ['Close', 'High', 'Low', 'Volume', 'Open'] # Openも必要なので追加
-        if not all(col in df_raw.columns for col in required_cols):
-             st.session_state.error_messages.append(f"データ不足エラー (コード:{ticker}): CSVに必須カラム（{', '.join(required_cols)}）が不足しています。")
-             return None
-        if df_raw.empty or len(df_raw) < 80: 
-            st.session_state.error_messages.append(f"データ不足エラー (コード:{ticker}): データ期間が短すぎます (80日未満) またはデータが空です。")
-            return None
-            
-        df_base_score = df_raw.copy()
-        if df_base_score.index[-1].date() == (jst_now_local.date() - datetime.timedelta(days=0)) and status != "場前(固定)":
-             df_base_score = df_base_score.iloc[:-1] 
-
-        base_score = get_base_score(ticker, df_base_score, info) 
-        
-        df = df_raw.copy()
-        curr_price = info.get("close") 
-        if status == "場中(進行中)" or curr_price is None: curr_price = info.get("price")
-        
-        # 🎯 Stooq と当日リアルタイム値のマージ
-        if status == "場中(進行中)" and info.get("open") and info.get("high") and info.get("low") and info.get("volume") and curr_price:
-              today_date_dt = pd.to_datetime(jst_now_local.strftime("%Y-%m-%d"))
-              
-              if df.index[-1].date() < today_date_dt.date():
-                   # SettingWithCopyWarning回避のため、dfを明示的にコピー
-                   df = pd.concat([df, pd.Series({'Open': info['open'], 'High': info['high'], 'Low': info['low'], 'Close': curr_price, 'Volume': info['volume']}, name=today_date_dt).to_frame().T])
-              elif df.index[-1].date() == today_date_dt.date():
-                   df.loc[df.index[-1], 'Open'] = info['open']
-                   df.loc[df.index[-1], 'High'] = info['high']
-                   df.loc[df.index[-1], 'Low'] = info['low']
-                   df.loc[df.index[-1], 'Close'] = curr_price
-                   df.loc[df.index[-1], 'Volume'] = info['volume']
-
-        if curr_price is None or math.isnan(curr_price): curr_price = df.iloc[-1].get('Close', None)
-        
-        if curr_price is None or math.isnan(curr_price):
-             st.session_state.error_messages.append(f"価格データ取得エラー (コード:{ticker}): 価格情報が見つかりませんでした。")
-             return None
-
-        # SettingWithCopyWarning回避のため、dfのコピーに対して操作
-        df = df.copy() 
-        df['SMA5'] = df['Close'].rolling(5).mean(); df['SMA25'] = df['Close'].rolling(25).mean()
-        df['SMA75'] = df['Close'].rolling(75).mean(); df['Vol_SMA5'] = df['Volume'].rolling(5).mean() 
-        
-        # ★★★ 修正箇所: High_Low の計算を安全化（get_base_score と同様） ★★★
-        if 'High' in df.columns and 'Low' in df.columns:
-            df['High_Low'] = df['High'] - df['Low']
-        else:
-            df['High_Low'] = 0.0
-        
-        df['High_PrevClose'] = abs(df['High'] - df['Close'].shift(1))
-        df['Low_PrevClose'] = abs(df['Low'] - df['Close'].shift(1)); df['TR'] = df[['High_Low', 'High_PrevClose', 'Low_PrevClose']].max(axis=1)
-        df['ATR'] = df['TR'].rolling(14).mean()
-        
-        # 【③ ATRのノイズ除去（ATRスムージング）】
-        df['ATR_SMA3'] = df['ATR'].rolling(3).mean()
-
-
-        delta = df['Close'].diff()
-        gain = (delta.where(delta > 0, 0)).rolling(14).mean(); loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
-        rs = gain / loss; df['RSI'] = 100 - (100 / (1 + rs))
-        recent = df['Close'].diff().tail(5); up_days = (recent > 0).sum(); win_rate_pct_momentum = (up_days / 5) * 100
-        momentum_str = f"{win_rate_pct_momentum:.0f}%"; last = df.iloc[-1]; prev = df.iloc[-2] if len(df) >= 2 else last
-        ma5 = last['SMA5'] if not pd.isna(last['SMA5']) else 0; ma25 = last['SMA25'] if not pd.isna(last['SMA25']) else 0
-        ma75 = last['SMA75'] if not pd.isna(last['SMA75']) else 0; prev_ma5 = prev['SMA5'] if not pd.isna(prev['SMA5']) else ma5
-        prev_ma25 = prev['SMA25'] if not pd.isna(prev['SMA25']) else ma25
-        high_250d = df['High'].tail(250).max() if len(df) >= 250 else 0
-        is_gc_raw = (ma5 > ma25) and (prev_ma5 <= prev_ma25); is_dc_raw = (ma5 < ma25) and (prev_ma5 >= prev_ma25)
-        ma_diff_pct = abs((ma5 - ma25) / ma25) * 100 if ma25 > 0 else 100
-        is_gc, is_dc = is_gc_raw, is_dc_raw
-        if ma_diff_pct < 0.1: is_gc, is_dc = False, False
-        atr_val = last['ATR'] if not pd.isna(last['ATR']) else 0
-        
-        # 【③ ATRのノイズ除去（ATRスムージング）】
-        atr_smoothed = last['ATR_SMA3'] if not pd.isna(last['ATR_SMA3']) else atr_val 
-        
-        # 🎯 ATRベース SL の計算
-        atr_sl_price = 0
-        if curr_price > 0 and atr_smoothed > 0: 
-            sl_amount = max(atr_smoothed * 1.5, curr_price * 0.01) # ATR_SMA3を採用
-            atr_sl_price = curr_price - sl_amount
-            atr_sl_price = max(0, atr_sl_price)
-        
-        # 出来高倍率の計算
-        vol_ratio = 0; volume_weight = get_volume_weight(jst_now_local, info["cap"]) 
-        if info.get("volume") and not pd.isna(last['Vol_SMA5']) and volume_weight > 0.0001: 
-            adjusted_vol_avg = last['Vol_SMA5'] * volume_weight
-            if adjusted_vol_avg > 0: vol_ratio = info["volume"] / adjusted_vol_avg
-
-        rsi_val = last['RSI'] if not pd.isna(last['RSI']) else 50
-        
-        
-        # --- 【改善要件 3. 適用: ロジック判定の関数化】 ---
-        strategy, buy_target, p_half, p_full, sl_ma, is_aoteng, sl_pct = evaluate_strategy_new(
-            df, info, vol_ratio, high_250d, atr_smoothed, curr_price, ma5, ma25, ma75, prev_ma5, rsi_val, atr_sl_price
-        )
-        # --------------------------------------------------------
-
-        # --- 共通の利益目標とR/R比の補正・計算 ---
-        # 🎯 統一補正ロジックの適用 
-        if p_full < p_half: p_full = p_half
-        if p_half > 0 and p_half <= buy_target: p_half = 0
-        if p_full > 0 and p_full <= buy_target: p_full = 0
-                 
-        # R/R比の計算
-        rr_score_value, risk_reward_ratio, risk_value = 0, 0.0, 0.0
-        if buy_target > 0 and sl_ma > 0 and (p_half > 0 or is_aoteng or p_full > 0): 
-            if is_aoteng: 
-                risk_value_raw = buy_target - sl_ma
-                if risk_value_raw > 0: risk_reward_ratio = 50.0; risk_value = risk_value_raw
-            else:
-                 avg_target = (p_half + p_full) / 2 if p_half > 0 and p_full > 0 else (p_full if p_full > 0 and p_half == 0 else 0)
-                 reward_value = avg_target - buy_target; risk_value = buy_target - sl_ma 
-                 if risk_value > 0 and reward_value > 0: risk_reward_ratio = min(reward_value / risk_value, 50.0)
-                 
-                 # 【⑥ スコア内訳表の生成】R/Rスコア計算
-                 min_risk_threshold = buy_target * 0.01 
-                 is_rr_buffer_zone = (0.95 <= risk_reward_ratio <= 1.05)
-                 if not is_rr_buffer_zone and risk_value >= min_risk_threshold:
-                     if risk_reward_ratio >= 2.0: rr_score_value = 15
-                     elif risk_reward_ratio >= 1.5: rr_score_value = 5
-                     
-                 # 【⑥ スコア内訳表の生成】R/R < 1 減点
-                 if risk_reward_ratio < 1.0 and not is_rr_buffer_zone: 
-                     score_factors["rr_score"] = -25
-                     rr_score_value -= 25
-
-        # --- 共通のテクニカル計算、過去実績、スコア計算 ---
-        
-        # 🎯 修正: run_backtest の戻り値に追加
-        bt_str, win_rate_pct, bt_cnt, max_dd_pct, bt_target_pct, bt_win_count = run_backtest(df, info["cap"]) 
-        
-        # --- スコアリング内訳の計算と格納 ---
-        score = 50; total_structural_deduction = 0
-        avg_vol_5d = last['Vol_SMA5'] if not pd.isna(last['Vol_SMA5']) else 0
-        
-        # 1. 構造的減点（RSI, 流動性）
-        if "順ロジ" in strategy or "順張り" in strategy:
-            if info["cap"] >= 3000:
-                if rsi_val >= 85: total_structural_deduction -= 15; score_factors["rsi_penalty"] = -15
-            else:
-                if rsi_val >= 80: total_structural_deduction -= 25; score_factors["rsi_penalty"] = -25
-        elif "逆ロジ" in strategy or "逆張り" in strategy:
-            if rsi_val <= 20: 
-                if info["cap"] >= 3000: total_structural_deduction -= 15; score_factors["rsi_penalty"] = -15
-                else: total_structural_deduction -= 25; score_factors["rsi_penalty"] = -25
-                
-        if avg_vol_5d < 1000: total_structural_deduction -= 30; score_factors["liquidity_penalty"] = -30
-        liquidity_ratio_pct = (avg_vol_5d / issued_shares) * 100 if issued_shares > 0 else 0.0
-        if liquidity_ratio_pct < 0.05: total_structural_deduction -= 10; score_factors["liquidity_penalty"] -= 10
-        
-        score += total_structural_deduction
-        score_factors["total_deduction"] += total_structural_deduction
-
-        # 2. ポジティブ要素加点
-        strategy_bonus = 0
-        if "順ロジ" in strategy or "順張り" in strategy: strategy_bonus = 15 
-        if "逆ロジ" in strategy or "逆張り" in strategy: strategy_bonus = 10
-        score += strategy_bonus; score_factors["strategy_bonus"] = strategy_bonus
-        
-        # RSI 55-65 ボーナス
-        rsi_mid_bonus = 0
-        if 55 <= rsi_val <= 65: rsi_mid_bonus = 10
-        score += rsi_mid_bonus; score_factors["rsi_mid_bonus"] = rsi_mid_bonus
-
-        # 出来高ボーナス
-        vol_bonus = 0
-        if vol_ratio > 1.5: vol_bonus += 10;
-        if vol_ratio > 3.0: vol_bonus += 5;
-        score += vol_bonus; score_factors["vol_bonus"] = vol_bonus
-        
-        # モメンタムボーナス
-        momentum_bonus = 0
-        if up_days >= 4: momentum_bonus = 5
-        score += momentum_bonus; score_factors["momentum_bonus"] = momentum_bonus
-
-        # R/R ボーナス/ペナルティ
-        score += rr_score_value; 
-        score_factors["rr_score"] += rr_score_value
-        
-        # 青天井ボーナス
-        aoteng_bonus = 0
-        if is_aoteng and rsi_val < 80 and vol_ratio > 1.5: aoteng_bonus = 15 
-        score += aoteng_bonus; score_factors["aoteng_bonus"] = aoteng_bonus
-        
-        # GC/DC 
-        is_final_cross = (status != "場中(進行中)") 
-        gc_dc_score = 0
-        if is_final_cross:
-            if is_gc: gc_dc_score = 15 
-            elif is_dc: gc_dc_score = -10
-        score += gc_dc_score; score_factors["gc_dc"] = gc_dc_score
-            
-        # DD スコア
-        dd_abs = abs(max_dd_pct); dd_score = 0
-        if dd_abs < 1.0: dd_score = 5
-        elif 1.0 <= dd_abs <= 2.0: dd_score = 0
-        elif 2.0 < dd_abs <= 10.0: dd_score = -int(np.floor(dd_abs - 2.0)) * 2 
-        elif dd_abs > 10.0: dd_score = -20
-        score += dd_score; score_factors["dd_score"] = dd_score
-        
-        # SL リスク減点
-        sl_risk_deduct = 0
-        is_market_alert = market_25d_ratio >= 125.0
-        if not is_aoteng: 
-             if sl_ma > 0 and abs(sl_pct) < 3.0: 
-                 if "順ロジ" in strategy or "順張り" in strategy:
-                     if is_market_alert: sl_risk_deduct = -20 
-        score += sl_risk_deduct; score_factors["sl_risk_deduct"] = sl_risk_deduct
-        
-        # ATR 減点
-        atr_pct = (atr_smoothed / curr_price) * 100 if curr_price > 0 and atr_smoothed > 0 else 0
-        is_low_vol_buffer_zone = (0.45 <= atr_pct <= 0.55)
-        atr_penalty = 0
-        if atr_pct < 0.5 and not is_low_vol_buffer_zone: atr_penalty = -10 
-        score += atr_penalty; score_factors["atr_penalty"] = atr_penalty
-        
-        current_calculated_score = max(0, min(100, score)) 
-        
-        # --- スコア変動の永続化ロジック (スコア差分バグ修正) ---
-        history = st.session_state.score_history.get(ticker, {}); fixed_score_core = history.get('final_score') 
-        fixed_market_ratio_score = history.get('market_ratio_score', 0)
-        score_to_return = current_calculated_score; score_diff = 0
-        
-        # 当日の市場影響度（市場過熱時の固定減点）
-        current_market_deduct = -20 if is_market_alert else 0
-        score_factors["market_overheat"] = current_market_deduct
-
-        if status != "場中(進行中)":
-             if fixed_score_core is None:
-                  # 初回実行時（場中以外）
-                  st.session_state.score_history[ticker] = {'final_score': current_calculated_score - current_market_deduct, 'market_ratio_score': current_market_deduct}
-                  score_to_return, score_diff = current_calculated_score, 0 
-             else:
-                  # 場中以外で再実行時（前日の固定コアに当日の市場影響度を足す）
-                  score_to_return = fixed_score_core + current_market_deduct 
-                  # score_diff は市場影響度の日々の変動分
-                  score_diff = current_market_deduct - fixed_market_ratio_score 
-        else:
-             if fixed_score_core is None:
-                  # 初回実行時（場中）
-                  st.session_state.score_history[ticker] = {'final_score': current_calculated_score - current_market_deduct, 'market_ratio_score': current_market_deduct}
-                  score_to_return, score_diff = current_calculated_score, 0
-             else:
-                  # 場中再実行時（前日のスコア合計と当日のリアルタイムスコアの差）
-                  start_score = fixed_score_core + fixed_market_ratio_score 
-                  score_diff = current_calculated_score - start_score
-                  score_to_return = current_calculated_score
-        # --- スコア変動の永続化ロジックここまで ---
-
-        if rsi_val <= 30: rsi_mark = "🔵"
-        elif 55 <= rsi_val <= 65: rsi_mark = "🟢"
-        elif rsi_val >= 70: rsi_mark = "🔴"
-        else: rsi_mark = "⚪"
-            
-        vol_disp = f"🔥{vol_ratio:.1f}倍" if vol_ratio > 1.5 else f"{vol_ratio:.1f}倍"
-        
-        # 【改善要件 6. backtest_raw の HTML 除去ロジックの統一】
-        bt_raw = re.sub(r'<br\s*/?>', ' ', bt_str)
-        bt_raw = re.sub(r'</?.*?>', '', bt_raw)
-
-        return {
-            "code": ticker,
-            "name": info["name"],
-            "price": curr_price,
-            "cap_val": info["cap"],
-            "cap_disp": fmt_market_cap(info["cap"]),
-            "per": info["per"],
-            "pbr": info["pbr"],
-
-            "rsi": rsi_val,
-            "rsi_disp": f"{rsi_mark}{rsi_val:.1f}",
-
-            "vol_ratio": vol_ratio,
-            "vol_disp": vol_disp,
-            "momentum": momentum_str,
-
-            "strategy": strategy, # 🚀順ロジ, 🚀逆ロジ, 🔥順張り, 🌊逆張り
-            "score": score_to_return,
-
-            "buy": buy_target,
-            "p_half": p_half,
-            "p_full": p_full,
-
-            "backtest": bt_str,
-            "backtest_raw": bt_raw,
-
-            "max_dd_pct": max_dd_pct,
-            "sl_pct": sl_pct,
-            "sl_ma": sl_ma,
-
-            "avg_volume_5d": avg_vol_5d,
-            "is_low_liquidity": avg_vol_5d < 1000, 
-
-            "risk_reward": risk_reward_ratio,
-            "risk_value": risk_value,
-
-            "issued_shares": issued_shares,
-            "liquidity_ratio_pct": liquidity_ratio_pct,
-
-            "atr_val": atr_val,
-            "atr_smoothed": atr_smoothed, # ★ スムージングATRを追加
-            "is_gc": is_gc,
-            "is_dc": is_dc,
-
-            "atr_sl_price": atr_sl_price,
-            "score_diff": score_diff,
-
-            "base_score": base_score,
-            "is_aoteng": is_aoteng,
-            "run_count": current_run_count,
-            
-            "win_rate_pct": win_rate_pct, 
-            "bt_trade_count": bt_cnt, 
-            "bt_target_pct": bt_target_pct, 
-            "bt_win_count": bt_win_count,
-            "score_factors": score_factors, # 【⑥ スコア内訳表の生成】追加 
-        }
     except Exception as e:
-        st.session_state.error_messages.append(
-            f"データ処理エラー (コード:{ticker}) (テクニカル計算フェーズ): "
-            f"予期せぬエラーが発生しました。詳細: {e}"
-        )
+        st.session_state.error_messages.append(f"データ不足エラー (コード:{ticker}): Stooqデータ取得/解析失敗。詳細: {e}")
         return None
+        
+    # ------------------ 2. コア計算 (キャッシュ適用) ------------------
+    try:
+        calculated_metrics = calculate_stock_metrics(ticker, df_raw, info, jst_now_local, current_run_count, market_25d_ratio)
+    except Exception as e:
+        st.session_state.error_messages.append(f"データ処理エラー (コード:{ticker}) (コア計算フェーズ): 予期せぬエラーが発生しました。詳細: {e}")
+        return None
+        
+    # ------------------ 3. スコア変動の永続化ロジック ------------------
+    history = st.session_state.score_history.get(ticker, {}) 
+    score_to_return = calculated_metrics["score"]
+    score_diff = 0
+    
+    pre_market_score = history.get('pre_market_score')
+    
+    if status == "場前(固定)" or status == "引け後(確定値)" or status == "休日(固定)":
+         new_pre_market_score = calculated_metrics["score"]
+         if pre_market_score is None or status == "引け後(確定値)":
+              st.session_state.score_history[ticker] = {
+                   'pre_market_score': new_pre_market_score, 
+                   'current_score': new_pre_market_score, 
+              }
+              score_to_return = new_pre_market_score
+              score_diff = 0
+         else:
+              score_to_return = pre_market_score
+              score_diff = 0 
+              
+    elif status == "場中(進行中)":
+         if pre_market_score is None:
+              # 場中初回実行: 場前スコアを計算し、現在のリアルタイムスコアと比較
+              df_base_score = df_raw.copy()
+              if df_base_score.index[-1].date() == jst_now_local.date():
+                 df_base_score = df_base_score.iloc[:-1] # 当日行があれば削除
+                 
+              # 前日終値ベースでのベーススコアを計算
+              base_score_for_comparison = get_base_score(ticker, df_base_score, info) 
+              score_for_comparison = base_score_for_comparison + calculated_metrics["market_deduct"]
+              new_pre_market_score = max(0, min(100, score_for_comparison)) 
+              
+              st.session_state.score_history[ticker] = {
+                   'pre_market_score': new_pre_market_score, 
+                   'current_score': calculated_metrics["score"], 
+              }
+              score_to_return = calculated_metrics["score"]
+              score_diff = calculated_metrics["score"] - new_pre_market_score
+         else:
+              # 場中再実行
+              score_to_return = calculated_metrics["score"]
+              score_diff = calculated_metrics["score"] - pre_market_score
+              st.session_state.score_history[ticker]['current_score'] = calculated_metrics["score"]
+              
+    # ------------------ 4. 結果の整形 ------------------
+    rsi_val = calculated_metrics["rsi"]
+    if rsi_val <= 30: rsi_mark = "🔵"
+    elif 55 <= rsi_val <= 65: rsi_mark = "🟢"
+    elif rsi_val >= 70: rsi_mark = "🔴"
+    else: rsi_mark = "⚪"
+        
+    vol_ratio = calculated_metrics["vol_ratio"]
+    avg_vol_5d = calculated_metrics["avg_volume_5d"]
+    vol_disp = f"🔥{vol_ratio:.1f}倍" if vol_ratio > 1.5 else f"{vol_ratio:.1f}倍"
+    
+    return {
+        "code": ticker,
+        "name": info["name"],
+        "price": info.get("price"), # リアルタイム価格
+        "cap_val": info["cap"],
+        "cap_disp": fmt_market_cap(info["cap"]),
+        "per": info["per"],
+        "pbr": info["pbr"],
+
+        "rsi": rsi_val,
+        "rsi_disp": f"{rsi_mark}{rsi_val:.1f}",
+
+        "vol_ratio": vol_ratio,
+        "vol_disp": vol_disp,
+        "momentum": calculated_metrics["momentum"],
+
+        "strategy": calculated_metrics["strategy"], 
+        "score": score_to_return,
+
+        "buy": calculated_metrics["buy"],
+        "p_half": calculated_metrics["p_half"],
+        "p_full": calculated_metrics["p_full"],
+
+        "backtest": calculated_metrics["backtest"],
+        "backtest_raw": calculated_metrics["backtest_raw"],
+
+        "max_dd_pct": calculated_metrics["max_dd_pct"],
+        "sl_pct": calculated_metrics["sl_pct"],
+        "sl_ma": calculated_metrics["sl_ma"],
+
+        "avg_volume_5d": avg_vol_5d,
+        "is_low_liquidity": avg_vol_5d < 1000, 
+
+        "risk_reward": calculated_metrics["risk_reward"],
+        "risk_value": calculated_metrics["risk_value"],
+
+        "issued_shares": calculated_metrics["issued_shares"],
+        "liquidity_ratio_pct": calculated_metrics["liquidity_ratio_pct"],
+
+        "atr_val": calculated_metrics["atr_val"],
+        "atr_smoothed": calculated_metrics["atr_smoothed"],
+        "is_gc": calculated_metrics["is_gc"],
+        "is_dc": calculated_metrics["is_dc"],
+
+        "atr_sl_price": calculated_metrics["atr_sl_price"],
+        "score_diff": score_diff,
+
+        "base_score": calculated_metrics["base_score"],
+        "is_aoteng": calculated_metrics["is_aoteng"],
+        "run_count": current_run_count,
+        
+        "win_rate_pct": calculated_metrics["win_rate_pct"], 
+        "bt_trade_count": calculated_metrics["bt_trade_count"], 
+        "bt_target_pct": calculated_metrics["bt_target_pct"], 
+        "bt_win_count": calculated_metrics["bt_win_count"],
+        "score_factors": calculated_metrics["score_factors"], 
+    }
 
 def batch_analyze_with_ai(data_list):
     # ★ 選択されたモデルを使用
@@ -1630,7 +1649,7 @@ if analyze_start_clicked:
             # 最終回
             current_batch_num = start_index // MAX_TICKERS + 1
             st.info(f"📊 【最終回: 第{current_batch_num}回】({start_index + 1}〜{end_index}銘柄) の分析を開始します。")
-        elif end_index <= total_tickers:
+        elif end_index <= total_tickers and total_tickers > 0:
             # 1回で終わる or 少ない銘柄
             st.info(f"📊 分析を開始します。({start_index + 1}〜{end_index}銘柄)")
         
@@ -1756,35 +1775,23 @@ if st.session_state.analyzed_data:
     data = st.session_state.analyzed_data
     filtered_data = []
     
-    # 複数フィルターがONの場合、AND条件で絞り込む
-    is_filter_active = st.session_state.ui_filter_score_80 or st.session_state.ui_filter_liquid_10k or \
-                       st.session_state.ui_filter_pro_bull or st.session_state.ui_filter_pro_bear or \
-                       st.session_state.ui_filter_bull or st.session_state.ui_filter_bear or st.session_state.ui_filter_aoteng
+    # フィルターの値を取得
+    min_score = st.session_state.ui_filter_min_score
+    min_liquid_man = st.session_state.ui_filter_min_liquid_man
+    filter_aoteng = st.session_state.ui_filter_aoteng
 
     for d in data:
         keep = True
         
-        if st.session_state.ui_filter_score_80 and keep:
-            if d['score'] < 80: keep = False
+        # 1. スコアフィルター
+        if d['score'] < min_score: keep = False
         
-        if st.session_state.ui_filter_liquid_10k and keep:
-            if d['avg_volume_5d'] < 10000: keep = False
+        # 2. 出来高フィルター (n2 万株以上)
+        if keep and d['avg_volume_5d'] < min_liquid_man * 10000: keep = False
 
-        if st.session_state.ui_filter_aoteng and keep:
-            if not d['is_aoteng']: keep = False
+        # 3. 青天井フィルター
+        if keep and filter_aoteng and not d['is_aoteng']: keep = False
             
-        # ロジックフィルターは OR 条件でグループ化し、他の条件とAND
-        logic_filter_on = st.session_state.ui_filter_pro_bull or st.session_state.ui_filter_pro_bear or st.session_state.ui_filter_bull or st.session_state.ui_filter_bear
-        
-        if logic_filter_on and keep: # ロジックフィルターが一つでもONの場合
-            logic_match = False
-            if st.session_state.ui_filter_pro_bull and d['strategy'] == "🚀順ロジ": logic_match = True
-            if st.session_state.ui_filter_pro_bear and d['strategy'] == "🚀逆ロジ": logic_match = True
-            if st.session_state.ui_filter_bull and d['strategy'] == "🔥順張り": logic_match = True
-            if st.session_state.ui_filter_bear and d['strategy'] == "🌊逆張り": logic_match = True
-            
-            if not logic_match: keep = False # ロジックフィルターのいずれにも一致しない場合は除外
-
         if keep:
             filtered_data.append(d)
 
@@ -1797,6 +1804,10 @@ if st.session_state.analyzed_data:
         st.markdown("---")
         st.markdown(f"【アイの独り言】")
         st.markdown(st.session_state.ai_monologue) 
+        
+        # エラーメッセージ表示後にストップ
+        if st.session_state.ai_monologue or st.session_state.error_messages:
+            st.stop()
         st.stop()
     # ----------------------------------------------------
 
@@ -1818,7 +1829,8 @@ if st.session_state.analyzed_data:
     numeric_cols_for_sort = ['score', 'update_count', 'cap_val', 'rsi', 'vol_ratio', 'win_rate_pct']
     for col in numeric_cols_for_sort:
         if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(-1) # 欠損値を-1にしてソート時に下にくるようにする
+            # 安全に数値に変換。エラー値（'NaN', '-'など）は -1 にしてソート時に下にくるようにする
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(-1) 
 
     # フィルタリング後のDataFrameをソート
     df = df.sort_values(by=sort_col, ascending=ascending).reset_index(drop=True)
@@ -1867,8 +1879,8 @@ if st.session_state.analyzed_data:
     def format_score_disp(row, market_status_label):
         score = row['score']; diff = row['score_diff']
         diff_span = ""
-        # 市場が動いている（場中、引け後）の場合のみ差分を表示
-        if "場前" not in market_status_label and "休日" not in market_status_label:
+        # 市場が動いている（場中）の場合のみ差分を表示
+        if "場中" in market_status_label:
              diff_color = 'red' if diff < 0 else ('#1976d2' if diff > 0 else '#666')
              diff_span = f"<br><span style='font-size:10px;color:{diff_color}'>{diff:+.0f}</span>"
         
@@ -1887,7 +1899,11 @@ if st.session_state.analyzed_data:
         if price_val == int(price_val):
             return f"{int(price_val):,}"
         else:
-            return f"{price_val:,.2f}" # 小数点以下がある場合は2桁まで表示
+            # 整数部分が4桁以上の場合はカンマ区切りを維持
+            if int(price_val) >= 1000:
+                 return f"{price_val:,.2f}"
+            else:
+                 return f"{price_val:.2f}" 
 
     df['price_disp'] = df.apply(lambda row: format_price_disp(row['price']), axis=1)
 
@@ -1898,7 +1914,7 @@ if st.session_state.analyzed_data:
     df['dd_sl_disp'] = df.apply(lambda row: f"{row['max_dd_pct']:+.1f}%<br>{row['sl_pct']:+.1f}%", axis=1)
     df['update_disp'] = df['update_count'].apply(lambda x: f'{x}回目' if x > 1 else '')
     df['code_disp'] = df.apply(lambda row: f"<b>{row['code']}</b><br><span style='font-size:10px; font-weight: bold; color: #ff6347;'>{'更新済' if row.get('is_updated_in_this_run', False) and row['update_count'] > 1 else ''}</span>", axis=1)
-    df['target_txt'] = df.apply(format_target_txt, axis=1) # <--- ここが問題の箇所
+    df['target_txt'] = df.apply(format_target_txt, axis=1)
     df['bt_cell_content'] = df.apply(lambda row: f"<b>{row['backtest_raw']}</b><br><span style='font-size:11px;'>({row['bt_win_count']}勝)</span><br><span style='font-size:10px; color:#666;'>(+{row['bt_target_pct']*100:.1f}%抜)</span>" if "エラー" not in row['backtest_raw'] and "機会なし" not in row['backtest_raw'] else row['backtest'], axis=1)
     df['per_pbr_disp'] = df.apply(lambda row: f"{row['per']}<br>{row['pbr']}", axis=1)
     
@@ -1922,7 +1938,6 @@ if st.session_state.analyzed_data:
         # ヘッダー行のHTMLを生成
         header_html = "".join([
             # width/min-width/text-align は HEADER_MAPの定義から取得
-            f'<th class="has-tooltip" data-tooltip="スコアの内訳" style="width:{h[4]}; min-width:{h[3]}; text-align:{h[2]};">スコア内訳</th>' if h[0] == 'score_factors' else
             f'<th class-="has-tooltip" style="width:{h[4]}; min-width:{h[3]}; text-align:{h[2]};">{h[1]}</th>'
             for h in HEADER_MAP
         ])
@@ -1935,10 +1950,6 @@ if st.session_state.analyzed_data:
             
             row_cells = []
             for col_key, _, col_align, min_w, w in HEADER_MAP:
-                # 'score_factors' はテーブル本体では表示しない (Expanderで使用)
-                if col_key == 'score_factors':
-                    continue
-                    
                 cell_data = row[col_key]
                 
                 # AI所感のセルは特殊なスクロールボックスを適用
@@ -1991,15 +2002,29 @@ if st.session_state.analyzed_data:
         st.subheader("銘柄ごとのスコア要因")
         
         details = []
+        # スコア内訳は生のデータを使用する
+        raw_data_map = {d['code']: d for d in st.session_state.analyzed_data}
+        
         for index, row in df.iterrows():
-            details.append({
-                "No": row['No'],
-                "コード": row['code'],
-                "企業名": row['name'],
-                "総合点": row['score'],
-                # スコア内訳の辞書自体をそのまま渡す
-                "内訳": row['score_factors']
-            })
+            # フィルタリングされた行のコードに対応する生のデータを取得
+            raw_row = raw_data_map.get(row['code'])
+            if raw_row and 'score_factors' in raw_row:
+                 details.append({
+                    "No": row['No'],
+                    "コード": row['code'],
+                    "企業名": row['name'],
+                    "総合点": row['score'],
+                    "内訳": raw_row['score_factors']
+                })
+            else:
+                 details.append({
+                    "No": row['No'],
+                    "コード": row['code'],
+                    "企業名": row['name'],
+                    "総合点": row['score'],
+                    "内訳": {"エラー": "内訳データがありません"}
+                })
+
 
         for item in details:
             st.markdown(f"**No.{item['No']} - {item['企業名']} ({item['コード']}) - 総合点: {item['総合点']:.0f}**")
