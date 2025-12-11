@@ -1725,6 +1725,7 @@ def get_stock_data(ticker, current_run_count):
             "atr_smoothed": atr_smoothed,
             "is_gc": is_gc,
             "is_dc": is_dc,
+            "ma25": ma25,
 
             "atr_sl_price": atr_sl_price,
             "score_diff": score_diff,
@@ -1793,9 +1794,10 @@ def batch_analyze_with_ai(data_list):
         avg_vol_5d = d.get('avg_volume_5d', 0)
         low_liquidity_status = "致命的低流動性:警告(1000株未満)" if avg_vol_5d < 1000 else "流動性:問題なし"
         
-        # sl_ma と atr_sl_price の表示
+        # SL情報の取得と整形
         atr_sl_price = d.get('atr_sl_price', 0)
-
+        ma25_sl_price = d.get('ma25', 0) * 0.995 # MA25の終値の99.5%を構造的SLとして渡す
+        
         # GC/DC ステータス
         gc_dc_status = ""
         if d.get("is_gc"): gc_dc_status = "GC:発生"
@@ -1805,7 +1807,7 @@ def batch_analyze_with_ai(data_list):
         win_rate = d.get('backtest_raw', '-')
         
         # HTMLタグでデータを囲み、AIが解析しやすい/模倣しにくい形式にする
-        prompt_text += f"ID:{d['code']} | <b>{d['name']}</b>: 現在:{price:,.0f} | 戦略:{d['strategy']} | RSI:{d['rsi']:.1f} | 乖離率:{ma_div:+.1f}% | R/R:{rr_disp} | 出来高:{d['vol_ratio']:.1f}倍 | リスク: MDD:{mdd:+.1f}%, SL乖離率:{sl_pct:+.1f}% | 採用SL(R/R):{sl_ma:,.0f}円 | ATR_SL:{atr_sl_price:,.0f}円 | {low_liquidity_status} | {gc_dc_status} | 目標:{target_info} | 勝率:{win_rate.replace('%', '')}% | 点:{d['score']}\n"
+        prompt_text += f"ID:{d['code']} | <b>{d['name']}</b>: 現在:{price:,.0f} | 戦略:{d['strategy']} | RSI:{d['rsi']:.1f} | 乖離率:{ma_div:+.1f}% | R/R:{rr_disp} | 出来高:{d['vol_ratio']:.1f}倍 | リスク: MDD:{mdd:+.1f}%, SL乖離率:{sl_pct:+.1f}% | 採用SL(R/R):{sl_ma:,.0f}円 | ATR_SL:{atr_sl_price:,.0f}円 | MA25_SL:{ma25_sl_price:,.0f}円 | {low_liquidity_status} | {gc_dc_status} | 目標:{target_info} | 勝率:{win_rate.replace('%', '')}% | 点:{d['score']}\n"
         
     global market_25d_ratio
     r25 = market_25d_ratio
@@ -1832,7 +1834,7 @@ def batch_analyze_with_ai(data_list):
     - リスク情報（MDD、SL乖離率）を参照し、リスク管理の重要性に言及してください。MDDが-8.0%を超える場合は、「過去の最大下落リスクが高いデータ」がある旨を明確に伝えてください。
     - 流動性: 致命的低流動性:警告(1000株未満)の銘柄については、コメントの冒頭（プレフィックスの次）で「平均出来高が1,000株未満と極めて低く、希望価格での売買が困難な<b>流動性リスク</b>を伴います。ご自身の資金規模に応じたロット調整をご検討ください。」といった<b>明確な警告</b>を必ず含めてください。
     - 新規追加: 極端な低流動性 (流動性比率 < 0.05% や ATR < 0.5% の場合) についても、同様に<b>明確な警告</b>を盛り込んでください。
-    - **撤退基準（最重要修正）:** コメントの末尾で、<b>戦略上で採用されたSL（R/R基準）</b>と<b>ボラティリティ基準のATR_SL</b>を言及してください。<b>ただし、両者の価格が同じ場合は、片方のみを言及し、単に「SL（X円）を終値で下回ることを撤退基準と検討してください」のように簡潔に伝えてください。</b>
+    - **撤退基準（最重要修正）:** コメントの末尾で、**構造的崩壊ライン**の**MA25_SL（X円）**と、**ボラティリティ基準**の**ATR_SL（Y円）**を**両方とも**言及し、「**MA25_SLを終値で割るか、ATR_SLを割るかのどちらかをロスカット基準としてご検討ください**」という趣旨を明確に伝えてください。
     - **青天井領域の追記:** ターゲット情報が「青天井追従」または「追従目標」の場合、<b>「利益目標は固定目標ではなく、動的なATRトレーリング・ストップ（X円）に切り替わっています。この価格を終値で下回った場合は、利益を確保するための撤退を検討します。」</b>という趣旨を、コメントの適切な位置に含めてください。
     - 強調表現の制限: 総合分析点85点以上の銘柄コメントに限り、全体の5%の割合（例: 20銘柄中1つ程度）で、特に重要な部分（例：出来高増加の事実、高い整合性）を1箇所（10文字以内）に限り、<b>赤太字のHTMLタグ（<span style="color:red;">...</span>）</b>を使用して強調しても良い。それ以外のコメントでは赤太字を絶対に使用しないでください。
 【出力形式】ID:コード | コメント
@@ -1869,12 +1871,12 @@ def batch_analyze_with_ai(data_list):
                     CLEANUP_PATTERN_START = r'^(<b>.*?</b>)\s*[:：]\s*.*?'
                     c_com_cleaned = re.sub(CLEANUP_PATTERN_START, r'\1', c_com_cleaned).strip()
                     
-                    # 3. 再度、AIが誤って挿入した余分なプレフィックスを削除
-                    # 例: 銘柄名:、|、・、- などで始まっている場合に削除
-                    # 2. の処理が成功すれば不要だが、保険として残す。
-                    c_com_cleaned = re.sub(r'^[\s\:\｜\-\・\*\,]*', '', c_com_cleaned).strip()
-                    
-                    # ★★★ 最終チェック: AIがコメント末尾に不要なデータタグを付与した場合に削除するロジックを追記 ★★★
+                    # 3. 最終クリーンアップの強化 (先頭の不要な記号、コロン、スペースを削除)
+                    # 企業名タグが残っているかどうかに関わらず、先頭の不要な記号を全て削除
+                    c_com_cleaned = re.sub(r'^[\s\:\｜\-\・\*\,\.]*', '', c_com_cleaned).strip()
+
+
+                    # 4. 最終チェック: AIがコメント末尾に不要なデータタグを付与した場合に削除するロジックを追記 ★★★
                     # (ATR_SL:X円。, SL:X円。などの形式をカバー)
                     CLEANUP_PATTERN_END = r'(\s*(?:ATR_SL|SL|採用SL)[:：].*?円\.?)$'
                     c_com_cleaned = re.sub(CLEANUP_PATTERN_END, '', c_com_cleaned, flags=re.IGNORECASE).strip()
@@ -1885,7 +1887,6 @@ def batch_analyze_with_ai(data_list):
                          
                     comments[c_code] = c_com_cleaned
                 except: pass
-
             elif "|" not in line and line.strip().startswith('総合分析点'): continue
         return comments, monologue
     except Exception as e:
