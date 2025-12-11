@@ -286,7 +286,7 @@ st.markdown(f"""
 
     /* タイトルアイコンの大きさ調整 */
     .custom-title {{
-        font-size: 2.5rem !important; /* タイトル文字を大きく */
+        font-size: 1.5rem !important; /* タイトル文字を大きく */
     }}
     .custom-title img {{
         height: auto; 
@@ -295,7 +295,7 @@ st.markdown(f"""
         vertical-align: middle;
     }}
     /* サブタイトルの調整 */
-    .big-font {{ font-size: 20px !important; }}
+    .big-font {{ font-size: 16px !important; }}
     
     /* ========================================================== */
     /* 【★ 修正: 全てのウィジェットの縦幅調整によるコンパクト化】 */
@@ -321,24 +321,24 @@ st.markdown(f"""
     /* ラベルの縦幅調整 (API Key, n点以上, 出来高(万株) など) */
     /* Streamlitのラベル要素全般を対象 */
     label[data-testid^="stWidgetLabel"] {{
-        margin-top: 5px !important;     /* ラベルの上マージンを削減 */
+        margin-top: 2px !important;     /* ラベルの上マージンを削減 */
         margin-bottom: 2px !important;  /* ラベルの下マージンを削減 */
         padding: 0 !important;          /* パディングもゼロに */
     }}
     
     /* st.checkbox の縦幅調整 */
     [data-testid="stCheckbox"] {{
-         margin-top: -5px !important;    /* チェックボックスの上部マージンを詰める */
-         margin-bottom: -5px !important; /* チェックボックスの下部マージンを詰める */
-         padding-top: 5px !important;    
+         margin-top: 0px;    /* チェックボックスの上部マージンを詰める */
+         margin-bottom: 0px; /* チェックボックスの下部マージンを詰める */
+         padding-top: 8px;    
     }}
-    
+   
     /* フィルターエリア内のチェックボックス（特に col1_2, col2_2 の st.checkbox）の縦位置調整 */
     /* フィルターのチェックボックスが隣の number_input と縦方向で中央になるように微調整 (環境依存性が高い) */
     [data-testid="stSidebar"] [data-testid="stVerticalBlock"] > div:nth-child(2) > div:nth-child(4) [data-testid="stVerticalBlock"] > div > div:nth-child(2) [data-testid="stCheckbox"],
     [data-testid="stSidebar"] [data-testid="stVerticalBlock"] > div:nth-child(4) > div:nth-child(2) [data-testid="stVerticalBlock"] > div > div:nth-child(2) [data-testid="stCheckbox"]
     {{
-         transform: translateY(8px); /* 8px下にずらして number_input との高さを合わせる */
+         transform: translateY(28px); /* 8px下にずらして number_input との高さを合わせる */
     }}
 
     /* 銘柄コード入力欄 (st.text_area) 上部の余白調整 */
