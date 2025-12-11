@@ -84,7 +84,8 @@ if 'wait_start_time' not in st.session_state:
     st.session_state.wait_start_time = None
 if 'run_continuously_checkbox' not in st.session_state:
      st.session_state.run_continuously_checkbox = False # チェックボックスの状態を保存
-    
+
+   
 # --- 分析上限定数 ---
 MAX_TICKERS = 10 
 
@@ -165,8 +166,8 @@ st.markdown(f"""
     /* ========== 【新規追加】サイドバーの幅調整 ========== */
     /* stSidebarV内の幅を調整 (現在のStreamlitバージョンで広く機能するセレクタ) */
     [data-testid="stSidebar"] > div:first-child {{
-        width: 235px !important; 
-        max-width: 235px !important;
+        width: 250px !important; 
+        max-width: 250px !important;
     }}
 
     /* Streamlit標準のフォント設定を邪魔しないように限定的に適用 */
@@ -212,7 +213,7 @@ st.markdown(f"""
         line-height: 1.4;
         text-align: center; /* デフォルトのテキスト配置 */
     }}
-    /* 各種クラスの再定義 (省略) */
+    /* 各種クラスの再定義 */
     .td-center {{ text-align: center !important; }}
     .td-right {{ text-align: right !important; }}
     .td-left {{ text-align: left !important; }}
@@ -225,7 +226,7 @@ st.markdown(f"""
     .bg-triage-high {{ background-color: #FFFFCC !important; }} /* 75点以上 (薄い黄へ) */
 
 
-    /* AIコメントセル内のスクロールコンテナ (省略) */
+    /* AIコメントセル内のスクロールコンテナ */
     .comment-scroll-box {{
         max-height: 70px; 
         overflow-y: auto; 
@@ -236,16 +237,53 @@ st.markdown(f"""
         margin: 0;
     }}
     
-    /* セル内のテキスト配置の調整 (省略) */
+    /* セル内のテキスト配置の調整 (デスクトップ版) */
+    /* 企業名: 3列目、アイの所感: 17列目 */
     .ai-table td:nth-child(3) {{ text-align: left !important; }} /* 企業名 */
     .ai-table td:nth-child(17) {{ text-align: left !important; }} /* アイの所感 */
 
-    /* カスタム列幅の再設定 (省略) */
-    /* ... (他の列幅定義は省略) ... */
+    /* カスタム列幅の再設定 (全17列版に統一) */
+    .ai-table th:nth-child(1), .ai-table td:nth-child(1) {{ width: 40px; min-width: 40px; }} /* No (1) */
+    .ai-table th:nth-child(2), .ai-table td:nth-child(2) {{ width: 70px; min-width: 70px; }} /* コード (2) */
+    .ai-table th:nth-child(3), .ai-table td:nth-child(3) {{ width: 120px; min-width: 120px; }} /* 企業名 (3) */
+    .ai-table th:nth-child(4), .ai-table td:nth-child(4) {{ width: 100px; min-width: 100px; }} /* 時価総額 (4) */
+    .ai-table th:nth-child(5), .ai-table td:nth-child(5) {{ width: 50px; min-width: 50px; }} /* 点 (5) */
+    .ai-table th:nth-child(6), .ai-table td:nth-child(6) {{ width: 80px; min-width: 80px; }} /* 分析戦略 (6) */
+    .ai-table th:nth-child(7), .ai-table td:nth-child(7) {{ width: 70px; min-width: 70px; }} /* 現在値 (7) */
+    .ai-table th:nth-child(8), .ai-table td:nth-child(8) {{ width: 80px; min-width: 80px; }} /* 想定水準 (8) */
+    .ai-table th:nth-child(9), .ai-table td:nth-child(9) {{ width: 50px; min-width: 50px; }} /* R/R比 (9) */
+    .ai-table th:nth-child(10), .ai-table td:nth-child(10) {{ width: 90px; min-width: 90px; }} /* DD率/SL率 (10) */
+    .ai-table th:nth-child(11), .ai-table td:nth-child(11) {{ width: 120px; min-width: 120px; }} /* 利益確定目標値 (11) */
+    .ai-table th:nth-child(12), .ai-table td:nth-child(12) {{ width: 60px; min-width: 60px; }} /* RSI (12) */
+    .ai-table th:nth-child(13), .ai-table td:nth-child(13) {{ width: 70px; min-width: 70px; }} /* 出来高比 (13) */
+    .ai-table th:nth-child(14), .ai-table td:nth-child(14) {{ width: 60px; min-width: 60px; }} /* MA5実績 (14) */
+    .ai-table th:nth-child(15), .ai-table td:nth-child(15) {{ width: 60px; min-width: 60px; }} /* PER/PBR (15) */
+    .ai-table th:nth-child(16), .ai-table td:nth-child(16) {{ width: 60px; min-width: 60px; }} /* 直近勝率 (16) */
+    .ai-table th:nth-child(17), .ai-table td:nth-child(17) {{ width: 480px; min-width: 480px; }} /* アイの所感 (17) */
 
+    /* --- ツールチップ表示用CSSの追加 --- */
+    .ai-table th.has-tooltip:hover::after {{
+        content: attr(data-tooltip);
+        position: absolute;
+        top: 100%; 
+        left: 50%;
+        transform: translateX(-50%);
+        padding: 8px 12px;
+        background-color: #333;
+        color: white;
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: normal;
+        white-space: normal; 
+        min-width: 250px;
+        max-width: 350px;
+        z-index: 10;
+        text-align: left;
+        line-height: 1.5;
+        box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+    }}
+    .ai-table th.has-tooltip {{ cursor: help; }} 
 
-    /* --- ツールチップ表示用CSSの追加 (省略) --- */
-    
     /* タイトルアイコンの大きさ調整 */
     .custom-title {{
         font-size: 2.5rem !important; /* タイトル文字を大きく */
@@ -322,6 +360,36 @@ st.markdown(f"""
     }}
     
     /* ========================================================== */
+    /* 【★ 改善要件：スマホでの所感列の幅を広くするメディアクエリの再調整】 */
+    @media (max-width: 768px) {{
+        /* 狭い画面では、テーブル全体の最小幅を縮小 */
+        .ai-table {{ 
+            min-width: 1000px; /* 1200pxから縮小 */
+        }}
+        
+        /* 必須項目の幅を可能な限り縮小 (新しい列番号に修正) */
+        .ai-table th:nth-child(1), .ai-table td:nth-child(1) {{ width: 40px !important; min-width: 40px !important; }} /* No (1) */
+        .ai-table th:nth-child(2), .ai-table td:nth-child(2) {{ width: 50px !important; min-width: 50px !important; }} /* コード (2) */
+        .ai-table th:nth-child(5), .ai-table td:nth-child(5) {{ width: 40px !important; min-width: 40px !important; }} /* 点 (5) */
+        .ai-table th:nth-child(6), .ai-table td:nth-child(6) {{ width: 60px !important; min-width: 60px !important; }} /* 分析戦略 (6) */
+        .ai-table th:nth-child(7), .ai-table td:nth-child(7) {{ width: 55px !important; min-width: 55px !important; }} /* 現在値 (7) */
+        .ai-table th:nth-child(8), .ai-table td:nth-child(8) {{ width: 60px !important; min-width: 60px !important; }} /* 想定水準 (8) */
+        .ai-table th:nth-child(9), .ai-table td:nth-child(9) {{ width: 35px !important; min-width: 35px !important; }} /* R/R比 (9) */
+        .ai-table th:nth-child(11), .ai-table td:nth-child(11) {{ width: 100px !important; min-width: 100px !important; }} /* 利益確定目標値 (11) */
+        .ai-table th:nth-child(12), .ai-table td:nth-child(12) {{ width: 45px !important; min-width: 45px !important; }} /* RSI (12) */
+        .ai-table th:nth-child(13), .ai-table td:nth-child(13) {{ width: 50px !important; min-width: 50px !important; }} /* 出来高比 (13) */
+        .ai-table th:nth-child(14), .ai-table td:nth-child(14) {{ width: 50px !important; min-width: 50px !important; }} /* MA5実績 (14) */
+        .ai-table th:nth-child(16), .ai-table td:nth-child(16) {{ width: 40px !important; min-width: 40px !important; }} /* 直近勝率 (16) */
+        
+        /* アイの所感列の幅を強制的に広く確保 (新しい列番号は17) */
+        .ai-table th:nth-child(17), .ai-table td:nth-child(17) {{ 
+             width: 350px !important; min-width: 350px !important; 
+        }}
+        
+        /* 企業名列の幅を相対的に縮小 (新しい列番号は3) */
+        .ai-table th:nth-child(3), .ai-table td:nth-child(3) {{ width: 80px !important; min-width: 80px !important; }} /* 企業名 */
+    }}
+    /* ========================================================== */
 
 </style>
 """, unsafe_allow_html=True)
@@ -382,7 +450,6 @@ def toggle_continuous_run():
     if not st.session_state.run_continuously_checkbox_key:
          st.session_state.is_running_continuous = False
          st.session_state.wait_start_time = None
-# --- コールバック関数定義ここまで ---
 
 
 # --- サイドバー (UIのコアを移動) ---
@@ -459,7 +526,7 @@ with st.sidebar:
         # 【④ UIデザイン改善 B. 絞り込みフィルターの追加 (最終修正) 】
         
         # ★ 修正: タイトルサイズを統一し、マージンを詰める
-        st.markdown("### 🔍 表示フィルター") 
+        st.markdown("##### 🔍 表示フィルター") 
         
         # フィルター入力とチェックボックスを横並びにする
         col1_1, col1_2 = st.columns([0.6, 0.4]) # 入力:60%, チェックボックス:40%
@@ -517,7 +584,7 @@ with st.sidebar:
         # 連続実行チェックボックス
         is_checkbox_on_for_ui = st.session_state.get('run_continuously_checkbox_key', False) # UI表示用の値を取得
         st.session_state.run_continuously_checkbox = col_check.checkbox( # ステート自体も更新
-             "連続分析",
+             "連続",
              value=st.session_state.run_continuously_checkbox,
              key='run_continuously_checkbox_key',
              on_change=toggle_continuous_run 
@@ -526,7 +593,7 @@ with st.sidebar:
         # 分析開始ボタン (常時表示)
         is_start_disabled = st.session_state.clear_confirmed or st.session_state.is_running_continuous 
         analyze_start_clicked = col_start.button(
-            "🚀分析", 
+            "▶️分析", 
             use_container_width=True, 
             disabled=is_start_disabled, 
             key='analyze_start_key'
@@ -537,7 +604,7 @@ with st.sidebar:
 
         # 結果を消去ボタン (左側)
         clear_button_clicked = col_clear.button(
-            "クリア", 
+            "🗑️消去", 
             on_click=clear_all_data_confirm, 
             use_container_width=True, 
             disabled=st.session_state.is_running_continuous
@@ -546,7 +613,7 @@ with st.sidebar:
         # 結果を再分析ボタン (右側)
         is_reload_disabled = not st.session_state.analyzed_data or st.session_state.is_running_continuous
         reload_button_clicked = col_reload.button(
-            "再分析", 
+            "🔄再診", 
             on_click=reanalyze_all_data_logic, 
             use_container_width=True, 
             disabled=is_reload_disabled
@@ -555,7 +622,7 @@ with st.sidebar:
         # 5-3. キャンセルボタン (連続実行中のみ表示)
         if st.session_state.is_running_continuous:
              st.markdown("---")
-             if st.button("🛑 連続分析をキャンセル", use_container_width=True, key='cancel_continuous_key_large'):
+             if st.button("🛑分析中止", use_container_width=True, key='cancel_continuous_key_large'):
                  st.session_state.is_running_continuous = False
                  st.session_state.wait_start_time = None
                  st.info("連続分析のキャンセルを承りました。現在のバッチが完了後、停止します。")
@@ -596,6 +663,8 @@ if st.session_state.clear_confirmed:
         st.session_state.is_running_continuous = False
         st.session_state.wait_start_time = None
         st.session_state.run_continuously_checkbox = False 
+        # 選択銘柄リストもリセット
+        st.session_state.selected_tickers_for_transfer = set()
         st.rerun() 
     
     if col_cancel.button("❌ キャンセル", use_container_width=False): 
@@ -950,7 +1019,8 @@ def get_base_score(ticker, df_base, info):
     avg_vol_5d_b = last_base['Vol_SMA5'] if not pd.isna(last_base['Vol_SMA5']) else 0; curr_price_b = last_base.get('Close', 0)
 
     strategy_b = "様子見"; buy_target_b = int(ma5_b) if ma5_b > 0 else 0
-    if ma5_b > ma25_b > ma75_b and ma5_b > prev_ma5_b: strategy_b = "🔥順張り"
+    # ★ 修正: PO上向き判定 (ma5_b > prev_ma5_b) を削除し、PO維持のみを判定基準とする
+    if ma5_b > ma25_b > ma75_b: strategy_b = "🔥順張り"
     elif rsi_val_b <= 30 or (curr_price_b < ma25_b * 0.9 if ma25_b else False): strategy_b = "🌊逆張り"
 
     score_b = 50; total_structural_deduction_b = 0
@@ -1151,7 +1221,7 @@ def evaluate_strategy_new(df, info, vol_ratio, high_250d, atr_val, curr_price, m
          sl_ma = atr_sl_price
          
          # 🔥順張り判定 (既存ロジックそのまま移植)
-         if ma5 > ma25 > ma75 and ma5 > prev_ma5:
+         if ma5 > ma25 > ma75: # ★ 修正: PO上向き判定 (ma5 > prev_ma5) を削除し、PO維持のみを判定基準とする
               strategy, buy_target = "🔥順張り", int(ma5)
               # グローバルスコープの関数を参照
               category_str = get_market_cap_category(info["cap"])
@@ -1204,8 +1274,8 @@ def get_stock_data(ticker, current_run_count):
     buy_target, bt_str, max_dd_pct, win_rate_pct, sl_ma = 0, "計算エラー", 0.0, 0.0, 0 
     bt_cnt = 0; bt_target_pct = 0.0; bt_win_count = 0
     current_calculated_score, score_diff, score_to_return = 0, 0, 50 
-    base_score = 50 # Pylanceエラー対策
-    market_deduct = 0 # Pylanceエラー対策
+    base_score = 50 
+    market_deduct = 0 
     
     # 【DD/リカバリー解析用】
     last_high_recovery_date = None
@@ -1684,6 +1754,9 @@ def batch_analyze_with_ai(data_list):
     
     # モデルの再設定（ここでmodelがNoneになる可能性があるため）
     model = None
+    # api_key はグローバルスコープから取得されることを前提とする
+    global api_key 
+    
     if api_key:
         try:
             genai.configure(api_key=api_key)
@@ -1692,49 +1765,49 @@ def batch_analyze_with_ai(data_list):
             st.session_state.error_messages.append(f"System Error: Gemini設定時にエラーが発生しました: {e}")
 
     if not model: return {}, f"⚠️ AIモデル ({model_name}) が設定されていません。APIキーを確認してください。"
+    
+    # ★★★ 修正後の prompt_text 生成ロジック（データリーク防止のため形式を複雑化） ★★★
     prompt_text = ""
     for d in data_list:
         price = d['price'] if d['price'] is not None else 0
         p_half = d['p_half']; p_full = d['p_full']; rr_val = d.get('risk_reward', 0.0)
+        
+        # R/R表示の整形
         if d.get('is_aoteng'): rr_disp = "青天" 
-        elif rr_val >= 0.1: rr_disp = f"R/R:{rr_val:.1f}"
+        elif rr_val >= 0.1: rr_disp = f"{rr_val:.1f}"
         else: rr_disp = "-" 
-        if rr_disp: rr_disp = f" | {rr_disp}" 
+        
+        # 利確目標情報の整形
         target_price_for_pct = p_full if d.get('is_aoteng') and p_full > 0 else (p_half if p_half > 0 else p_full)
         target_info = "利確目標:無効"
-        if price > 0 and target_price_for_pct > 0: target_info = f"利確目標(半):{((target_price_for_pct / price) - 1) * 100:+.1f}%"
+        if price > 0 and target_price_for_pct > 0: 
+            target_info = f"半目標:{((p_half / price) - 1) * 100:+.1f}% / 全目標:{((p_full / price) - 1) * 100:+.1f}%"
         if d.get('is_aoteng'): target_info = f"利確目標:青天井追従/SL:{p_full:,.0f}円"
         elif p_half == 0 and d['strategy'] == "🔥順張り" and p_full > 0: target_info = f"利確目標:追従目標/全:{p_full:,.0f}円" 
         elif p_half == 0 and d['strategy'] == "🔥順張り": target_info = "利確目標:目標超過/無効"
+            
         buy_target = d.get('buy', 0); ma_div = (price/buy_target-1)*100 if buy_target > 0 and price > 0 else 0
-        mdd = d.get('max_dd_pct', 0.0); sl_pct = d.get('sl_pct', 0.0); sl_ma = d.get('sl_ma', 0); avg_vol = d.get('avg_volume_5d', 0)
-        # --- 流動性表示の統一 ---
+        mdd = d.get('max_dd_pct', 0.0); sl_pct = d.get('sl_pct', 0.0); sl_ma = d.get('sl_ma', 0); 
+        
+        # 流動性表示の統一
         avg_vol_5d = d.get('avg_volume_5d', 0)
         low_liquidity_status = "致命的低流動性:警告(1000株未満)" if avg_vol_5d < 1000 else "流動性:問題なし"
-        is_low_liquidity = (avg_vol_5d < 1000)
         
-        # sl_ma はR/R計算に使用された実SL価格 (🚀時: -3%, 非🚀時: ATR SL)
-        sl_ma_disp = f"採用SL:{sl_ma:,.0f}円" if sl_ma > 0 else "採用SL:不明" 
-        
-        # 【改善要件 4. ATR_SL の表示改善】
+        # sl_ma と atr_sl_price の表示
         atr_sl_price = d.get('atr_sl_price', 0)
-        atr_sl_disp = f"ATR_SL:{atr_sl_price:,.0f}円" if (not d.get('is_aoteng') and atr_sl_price > 0) else "ATR_SL:-"
 
+        # GC/DC ステータス
         gc_dc_status = ""
         if d.get("is_gc"): gc_dc_status = "GC:発生"
         elif d.get("is_dc"): gc_dc_status = "DC:発生"
-
-        liq_disp = f"流動性比率:{d.get('liquidity_ratio_pct', 0.0):.2f}%" 
-        atr_disp = f"ATR(Smoothed):{d.get('atr_smoothed', 0.0):.1f}円" # ★ ATR_SMA3を表示 
         
-        # 🎯 過去実績の勝率を追加
+        atr_disp = f"ATR(Smoothed):{d.get('atr_smoothed', 0.0):.1f}円"
         win_rate = d.get('backtest_raw', '-')
-        win_rate_disp = f"過去勝率:{win_rate}"
-
-        prompt_text += f"ID:{d['code']} | {d['name']} | 現在:{price:,.0f} | 分析戦略:{d['strategy']} | RSI:{d['rsi']:.1f} | 5MA乖離率:{ma_div:+.1f}%{rr_disp} | 出来高倍率:{d['vol_ratio']:.1f}倍 | リスク情報: MDD:{mdd:+.1f}%, SL乖離率:{sl_pct:+.1f}% | {sl_ma_disp} | {low_liquidity_status} | {liq_disp} | {atr_disp} | {gc_dc_status} | {atr_sl_disp} | {target_info} | {win_rate_disp} | 総合分析点:{d['score']}\n" 
-
-    prompt_text += f"ID:{d['code']} | {d['name']} | 現在:{price:,.0f} | 分析戦略:{d['strategy']} | RSI:{d['rsi']:.1f} | 5MA乖離率:{ma_div:+.1f}%{rr_disp} | 出来高倍率:{d['vol_ratio']:.1f}倍 | リスク情報: MDD:{mdd:+.1f}%, SL乖離率:{sl_pct:+.1f}% | {sl_ma_disp} | {low_liquidity_status} | {liq_disp} | {atr_disp} | {gc_dc_status} | {atr_sl_disp} | {target_info} | {win_rate_disp} | 総合分析点:{d['score']}\n" 
-
+        
+        # HTMLタグでデータを囲み、AIが解析しやすい/模倣しにくい形式にする
+        prompt_text += f"ID:{d['code']} | <b>{d['name']}</b>: 現在:{price:,.0f} | 戦略:{d['strategy']} | RSI:{d['rsi']:.1f} | 乖離率:{ma_div:+.1f}% | R/R:{rr_disp} | 出来高:{d['vol_ratio']:.1f}倍 | リスク: MDD:{mdd:+.1f}%, SL乖離率:{sl_pct:+.1f}% | 採用SL(R/R):{sl_ma:,.0f}円 | ATR_SL:{atr_sl_price:,.0f}円 | {low_liquidity_status} | {gc_dc_status} | 目標:{target_info} | 勝率:{win_rate.replace('%', '')}% | 点:{d['score']}\n"
+        
+    global market_25d_ratio
     r25 = market_25d_ratio
     market_alert_info = f"市場25日騰落レシオ: {r25:.2f}%。"
     if r25 >= 125.0: market_alert_info += "市場は【明確な過熱ゾーン】にあり、全体的な調整リスクが非常に高いです。"
@@ -1742,14 +1815,31 @@ def batch_analyze_with_ai(data_list):
     else: market_alert_info += "市場の過熱感は中立的です。"
     
     prompt = f"""あなたは「アイ」という名前のプロトレーダー（30代女性、冷静・理知的）。以下の【市場環境】と【銘柄リスト】に基づき、それぞれの「所感コメント（丁寧語）」を【生成コメントの原則】に従って作成してください。
+
 【市場環境】{market_alert_info}
-【生成コメントの原則（厳守）】1. <b>Markdownの太字（**）は絶対に使用せず、HTMLの太字（<b>）のみをコメント内で使用してください。</b>2. <b>表現の多様性は最小限に抑えてください。</b>定型的な文章構造を維持してください。3. <b>コメントの先頭に、必ず「<b>[銘柄名]</b>｜」というプレフィックスを挿入してください。</b>4. <b>最大文字数の厳守：全てのコメント（プレフィックス含む）は最大でも100文字とします。この100文字制限は、プレフィックスを含めた全体の文字数です。これを厳格に守ってください。</b>投資助言と誤解される表現、特に「最終的な売買判断は、ご自身の分析とリスク許容度に基づいて行うことが重要です。」という定型文は、<b>全てのコメントから完全に削除してください。</b>5. <b>総合分析点に応じた文章量を厳格に調整してください。</b>（プレフィックスの文字数も考慮し、制限を厳しくします）- 総合分析点 85点以上 (超高評価): 85文字以下。- 総合分析点 75点 (高評価): 75文字以下。- 総合分析点 65点以下 (中立/様子見): 65文字以下。6. 市場環境が【明確な過熱ゾーン】の場合、全てのコメントのトーンを控えめにし、「市場全体が過熱しているため、この銘柄にも調整が入るリスクがある」といった<b>強い警戒感</b>を盛り込んでください。7. 戦略の根拠、RSIの状態（極端な減点があったか否か）、出来高倍率（1.5倍超）、およびR/R比（1.0未満の不利、2.0超の有利など）を必ず具体的に盛り込んでください。<b>特に、RSIが55.0から65.0の範囲にある場合（スイートスポット）、コメントでは「トレンドの勢いが継続しやすい中立的な水準」といった、積極的かつ客観的な評価を用いてください。</b>8. <b>GC:発生またはDC:発生の銘柄については、コメント内で必ずその事実に言及し、トレンド転換の可能性を慎重に伝えてください。</b>9. 【リスク情報と撤退基準】- リスク情報（MDD、SL乖離率）を参照し、リスク管理の重要性に言及してください。MDDが-8.0%を超える場合は、「過去の最大下落リスクが高いデータ」がある旨を明確に伝えてください。- 流動性: 致命的低流動性:警告(1000株未満)の銘柄については、コメントの冒頭（プレフィックスの次）で「平均出来高が1,000株未満と極めて低く、希望価格での売買が困難な<b>流動性リスク</b>を伴います。ご自身の資金規模に応じたロット調整をご検討ください。」といった<b>明確な警告</b>を必ず含めてください。- 新規追加: 極端な低流動性 (流動性比率 < 0.05% や ATR < 0.5% の場合) についても、同様に<b>明確な警告</b>を盛り込んでください。- 撤退基準: コメントの末尾で、**構造的崩壊の支持線MA**を終値で明確に割り込む場合と、**ATRに基づくボラティリティ水準**を終値で明確に下回る場合を、**両方とも**、具体的な価格を付記して言及してください。（例: 撤退基準はMA支持線（X円）またはATR水準（Y円）です。）- **青天井領域の追記:** ターゲット情報が「青天井追従」または「追従目標」の場合、**「利益目標は固定目標ではなく、動的なATRトレーリング・ストップ（X円）に切り替わっています。この価格を終値で下回った場合は、利益を確保するための撤退を検討します。」**という趣旨を、コメントの適切な位置に含めてください。- 強調表現の制限: 総合分析点85点以上の銘柄コメントに限り、全体の5%の割合（例: 20銘柄中1つ程度）で、特に重要な部分（例：出来高増加の事実、高い整合性）を1箇所（10文字以内）に限り、<b>赤太字のHTMLタグ（<span style="color:red;">...</span>）</b>を使用して強調しても良い。それ以外のコメントでは赤太字を絶対に使用しないでください。
+
+【生成コメントの原則（厳守）】
+1. <b>最重要厳守ルール: アプリケーション側での警告表示（例: ⚠️長文注意）を避けるため、何があっても最大文字数（100文字）を厳格に守ってください。また、提供された【銘柄リスト】の「データテキスト」をそのままコピー＆ペーストする行為（データリーク）は固く禁じます。</b>
+2. <b>Markdownの太字（**）は絶対に使用せず、HTMLの太字（<b>）のみをコメント内で使用してください。</b>
+3. <b>表現の多様性は最小限に抑えてください。</b>定型的な文章構造を維持してください。
+4. <b>最大文字数の厳守：全てのコメント（プレフィックス含む）は最大でも100文字とします。</b>これを厳格に守ってください。投資助言と誤解される表現は、<b>全てのコメントから完全に削除してください。</b>
+5. <b>コメントの先頭に、必ず「<b>[銘柄名]</b>｜」というプレフィックスを挿入してください。</b>
+6. <b>総合分析点に応じた文章量を厳格に調整してください。</b>（プレフィックスの文字数も考慮し、制限を厳しくします）- 総合分析点 85点以上 (超高評価): 85文字以下。- 総合分析点 75点 (高評価): 75文字以下。- 総合分析点 65点以下 (中立/様子見): 65文字以下。
+7. 市場環境が【明確な過熱ゾーン】の場合、全てのコメントのトーンを控えめにし、「市場全体が過熱しているため、この銘柄にも調整が入るリスクがある」といった<b>強い警戒感</b>を盛り込んでください。
+8. 戦略の根拠、RSIの状態（極端な減点があったか否か）、出来高倍率（1.5倍超）、およびR/R比（1.0未満の不利、2.0超の有利など）を必ず具体的に盛り込んでください。<b>特に、RSIが55.0から65.0の範囲にある場合（スイートスポット）、コメントでは「トレンドの勢いが継続しやすい中立的な水準」といった、積極的かつ客観的な評価を用いてください。</b>
+9. <b>GC:発生またはDC:発生の銘柄については、コメント内で必ずその事実に言及し、トレンド転換の可能性を慎重に伝えてください。</b>
+10. 【リスク情報と撤退基準】
+    - リスク情報（MDD、SL乖離率）を参照し、リスク管理の重要性に言及してください。MDDが-8.0%を超える場合は、「過去の最大下落リスクが高いデータ」がある旨を明確に伝えてください。
+    - 流動性: 致命的低流動性:警告(1000株未満)の銘柄については、コメントの冒頭（プレフィックスの次）で「平均出来高が1,000株未満と極めて低く、希望価格での売買が困難な<b>流動性リスク</b>を伴います。ご自身の資金規模に応じたロット調整をご検討ください。」といった<b>明確な警告</b>を必ず含めてください。
+    - 新規追加: 極端な低流動性 (流動性比率 < 0.05% や ATR < 0.5% の場合) についても、同様に<b>明確な警告</b>を盛り込んでください。
+    - **撤退基準（最重要修正）:** コメントの末尾で、<b>戦略上で採用されたSL（R/R基準）</b>と<b>ボラティリティ基準のATR_SL</b>を言及してください。<b>ただし、両者の価格が同じ場合は、片方のみを言及し、単に「SL（X円）を終値で下回ることを撤退基準と検討してください」のように簡潔に伝えてください。</b>
+    - **青天井領域の追記:** ターゲット情報が「青天井追従」または「追従目標」の場合、<b>「利益目標は固定目標ではなく、動的なATRトレーリング・ストップ（X円）に切り替わっています。この価格を終値で下回った場合は、利益を確保するための撤退を検討します。」</b>という趣旨を、コメントの適切な位置に含めてください。
+    - 強調表現の制限: 総合分析点85点以上の銘柄コメントに限り、全体の5%の割合（例: 20銘柄中1つ程度）で、特に重要な部分（例：出来高増加の事実、高い整合性）を1箇所（10文字以内）に限り、<b>赤太字のHTMLタグ（<span style="color:red;">...</span>）</b>を使用して強調しても良い。それ以外のコメントでは赤太字を絶対に使用しないでください。
 【出力形式】ID:コード | コメント
 {prompt_text}
 【最後に】リストの最後に「END_OF_LIST」と書き、その後に続けて「アイの独り言（常体・独白調）」を1行で書いてください。語尾に「ね」や「だわ」などはしないこと。※見出し不要。独り言は、市場25日騰落レシオ({r25:.2f}%)を総括し、規律ある撤退の重要性に言及する。
 """
     try:
-        # ★ 選択されたモデルでコンテンツを生成
         res = model.generate_content(prompt)
         text = res.text
         comments = {}; monologue = ""
@@ -1768,21 +1858,34 @@ def batch_analyze_with_ai(data_list):
                     c_code_part, c_com = line.split("|", 1)
                     c_code = c_code_part.replace("ID:", "").strip()
                     c_com_cleaned = c_com.strip()
+                    
+                    # 1. HTMLタグ/Markdownを削除
                     c_com_cleaned = re.sub(r'\*\*(.*?)\*\*', r'\1', c_com_cleaned) 
                     c_com_cleaned = c_com_cleaned.replace('**', '').strip() 
-                    c_com_cleaned = c_com_cleaned.lstrip('・-')
                     
-                    # ★★★ 修正 B: 文字数制限の「...」トリミングを削除し、警告メッセージに置き換える ★★★
+                    # 2. AIが誤って挿入したプレフィックスを削除するロジックを強化
+                    # 企業名（<b>タグ）は残し、その直後にある不要なデータタグを削除する。
+                    # パターン: <b>[企業名]</b>: 現在:X | 戦略:Y | ... のような部分を削除
+                    CLEANUP_PATTERN_START = r'^(<b>.*?</b>)\s*[:：]\s*.*?'
+                    c_com_cleaned = re.sub(CLEANUP_PATTERN_START, r'\1', c_com_cleaned).strip()
+                    
+                    # 3. 再度、AIが誤って挿入した余分なプレフィックスを削除
+                    # 例: 銘柄名:、|、・、- などで始まっている場合に削除
+                    # 2. の処理が成功すれば不要だが、保険として残す。
+                    c_com_cleaned = re.sub(r'^[\s\:\｜\-\・\*\,]*', '', c_com_cleaned).strip()
+                    
+                    # ★★★ 最終チェック: AIがコメント末尾に不要なデータタグを付与した場合に削除するロジックを追記 ★★★
+                    # (ATR_SL:X円。, SL:X円。などの形式をカバー)
+                    CLEANUP_PATTERN_END = r'(\s*(?:ATR_SL|SL|採用SL)[:：].*?円\.?)$'
+                    c_com_cleaned = re.sub(CLEANUP_PATTERN_END, '', c_com_cleaned, flags=re.IGNORECASE).strip()
+                    
                     WARNING_THRESHOLD = 105 
                     if len(c_com_cleaned) > WARNING_THRESHOLD:
-                         # コメントが長すぎる場合、スクロールを促す警告メッセージを冒頭に追加
-                         # HTML内なので、<br>で改行し、スクロールバー内に収める
-                         c_com_cleaned = f'<span style="color:orange; font-size:11px;"><b>⚠️長文注意/全文はスクロール</b></span><br>' + c_com_cleaned
+                         c_com_cleaned = f'<span style="color:orange; font-size:11px; margin-right: 5px;"><b>⚠️長文注意/全文はスクロール</b></span>' + c_com_cleaned
                          
-                    # ★★★ 修正 B ここまで ★★★
-                        
                     comments[c_code] = c_com_cleaned
                 except: pass
+
             elif "|" not in line and line.strip().startswith('総合分析点'): continue
         return comments, monologue
     except Exception as e:
@@ -1801,9 +1904,6 @@ def merge_new_data(new_data_list):
         new_data['is_updated_in_this_run'] = True 
         existing_map[new_data['code']] = new_data
     st.session_state.analyzed_data = list(existing_map.values())
-
-
-# --- 後半開始 ---
 
 # ★ モデル名をセッションステートから取得
 model_name = st.session_state.selected_model_name
@@ -1958,45 +2058,39 @@ if analyze_start_clicked or (st.session_state.is_running_continuous and st.sessi
                 st.session_state.is_first_session_run = False
                 st.session_state.analysis_index = end_index 
                 
-                # 8. 完了判定と次のバッチへの移行ロジック (★ 修正箇所)
-                if end_index >= total_tickers:
+                # 8. 完了判定と次のバッチへの移行ロジック
+                is_analysis_complete = (end_index >= total_tickers)
+
+                if is_analysis_complete:
+                     # 全銘柄完了時の処理（連続モードのチェック有無に関わらず実行）
                      st.success(f"🎉 全{total_tickers}銘柄の分析が完了しました。")
                      st.session_state.tickers_input_value = "" # テキストボックスの値をクリア
                      st.session_state.analysis_index = 0 
                      st.session_state.is_running_continuous = False # 連続モードをオフにする
                      st.session_state.wait_start_time = None # 待機タイマーをリセット
                      st.session_state.run_continuously_checkbox = False # チェックボックスもオフにする
+                
                 elif new_analyzed_data and st.session_state.is_running_continuous:
+                     # 連続実行モードで、かつまだ銘柄が残っている場合の処理
                      current_batch_num = start_index // MAX_TICKERS + 1
-                     st.success(f"✅ 第{current_batch_num}回の分析が完了しました。")
+                     st.success(f"✅ 第{current_batch_num}回の分析が完了しました。次のバッチへ自動移行します。")
                      
-                     # ★★★ 自動継続処理：キャンセル判定を追加 ★★★
-                     if st.session_state.is_running_continuous:
-                          # まだ銘柄が残っている場合、待機状態へ移行して自動再実行
-                          if st.session_state.analysis_index < total_tickers:
-                               st.session_state.wait_start_time = datetime.datetime.now()
-                               st.rerun() # 待機ポーリングロジックへ移行
-                          else: 
-                               # 銘柄が残っていない場合、最終完了と同じ処理を行う
-                               st.success(f"🎉 全{total_tickers}銘柄の分析が完了しました。")
-                               st.session_state.tickers_input_value = "" 
-                               st.session_state.analysis_index = 0 
-                               st.session_state.is_running_continuous = False
-                               st.session_state.wait_start_time = None 
-                               st.session_state.run_continuously_checkbox = False 
-                     else:
-                          # is_running_continuous が False の場合 (キャンセルされた場合)
-                          st.warning(f"🛑 連続分析がキャンセルされました。現在のバッチ（第{current_batch_num}回）で処理を停止します。")
-                          st.session_state.is_running_continuous = False
-                          st.session_state.wait_start_time = None
-                          if st.session_state.analysis_index < total_tickers:
-                               remaining = total_tickers - st.session_state.analysis_index
-                               st.info(f"残り{remaining}銘柄は未分析です。")
-                    
+                     # 待機状態へ移行して自動再実行
+                     st.session_state.wait_start_time = datetime.datetime.now()
+                     st.rerun() # 待機ポーリングロジックへ移行
+                     
+                elif new_analyzed_data and not st.session_state.is_running_continuous and start_index > 0:
+                     # 連続モードではないが、複数バッチの途中で手動停止またはキャンセルされた場合
+                     current_batch_num = start_index // MAX_TICKERS + 1
+                     remaining = total_tickers - st.session_state.analysis_index
+                     st.warning(f"🛑 現在のバッチ（第{current_batch_num}回）で処理を停止しました。残り{remaining}銘柄は未分析です。")
+                     
+                
                 if raw_tickers: 
                      st.empty() 
-                     # 連続実行モードでなければ、次の分析を手動で行うために再実行
-                     if not st.session_state.is_running_continuous:
+                     # 全銘柄完了したか、手動実行だった場合のみ st.rerun()
+                     if is_analysis_complete or not st.session_state.is_running_continuous:
+                           # 連続モードの自動再実行中ではない場合のみ画面をリフレッシュ
                            st.rerun() 
 
         # --- エラーメッセージ一括表示 ---
@@ -2041,8 +2135,7 @@ def highlight_rows(row):
     if row.get('score', 0) >= 75: return 'bg-triage-high'
 
     return '' # デフォルトは白 (色なし)
-
-
+   
 # [元のキー, 表示名, テキストアライメント, 最小幅(px), 幅(px)]
 HEADER_MAP = [
     ('No', 'No', 'center', '40px', '40px'), 
@@ -2228,15 +2321,27 @@ if st.session_state.analyzed_data:
         diff_span = ""
         # 市場が動いている（場中）の場合のみ差分を表示
         if "場中" in market_status_label:
-             diff_color = 'red' if diff < 0 else ('#1976d2' if diff > 0 else '#666')
-             diff_span = f"<br><span style='font-size:10px;color:{diff_color}'>{diff:+.0f}</span>"
-        
+            diff_color = '#666' # デフォルト
+            
+            # 視覚的な安定化のための色分けロジックを【逆転】して追加
+            if diff >= 10:
+                diff_color = '#CC0066' # 濃い赤/マゼンタ系（大幅上昇）
+            elif diff >= 5:
+                diff_color = 'red' # 赤（中程度の上昇）
+            elif diff <= -10:
+                diff_color = '#000080' # 濃い青/ネイビー（大幅下落）
+            elif diff <= -5:
+                diff_color = '#1976d2' # 青（中程度の下落）
+            
+            diff_span = f"<br><span style='font-size:10px;color:{diff_color}; font-weight: bold;'>{diff:+.0f}</span>"
+    
         if score >= 80:
-             return f"<span style='color:red; font-weight:bold;'>{score:.0f}</span>{diff_span}"
+            # スコア本体は元の赤太字
+            return f"<span style='color:red; font-weight:bold;'>{score:.0f}</span>{diff_span}"
         elif score >= 50:
-             return f"<span style='font-weight:bold;'>{score:.0f}</span>{diff_span}"
+            return f"<span style='font-weight:bold;'>{score:.0f}</span>{diff_span}"
         else:
-             return f"{score:.0f}{diff_span}"
+            return f"{score:.0f}{diff_span}"
 
     df['score_disp'] = df.apply(lambda row: format_score_disp(row, status_label), axis=1)
 
@@ -2267,9 +2372,7 @@ if st.session_state.analyzed_data:
     
     # 'No' 列の追加
     df['No'] = range(1, len(df) + 1)
-    # ----------------------------------------------------------------------
-    
-    
+       
     # --- 【トリアージによるテーブル分割】 ---
     df_above_75 = df[df['score'] >= 75].copy()
     df_50_to_74 = df[(df['score'] >= 50) & (df['score'] <= 74)].copy()
@@ -2281,8 +2384,8 @@ if st.session_state.analyzed_data:
             return ""
 
         # ヘッダー行のHTMLを生成
+        # ★ 修正: 選択チェックボックス列を考慮したヘッダーマップを使用
         header_html = "".join([
-            # width/min-width/text-align は HEADER_MAPの定義から取得
             f'<th class-="has-tooltip" data-tooltip="{h[1]}" style="width:{h[4]}; min-width:{h[3]}; text-align:{h[2]};">{h[1]}</th>'
             for h in HEADER_MAP
         ])
@@ -2305,20 +2408,19 @@ if st.session_state.analyzed_data:
                  bg_class = ''
             
             row_cells = []
+            # ★ 修正: HTMLテーブル内のセル描画
             for col_key, _, col_align, _, _ in HEADER_MAP:
-                cell_data = row[col_key]
-                
-                # AI所感のセルは特殊なスクロールボックスを適用
+                cell_data = row[col_key]             
+                    
                 if col_key == 'comment':
                     cell_html = f'<td class="{bg_class} td-{col_align}"><div class="comment-scroll-box">{cell_data}</div></td>'
-                # スコアは強調表示を適用
                 else:
                     cell_html = f'<td class="{bg_class} td-{col_align}">{cell_data}</td>'
                 
                 row_cells.append(cell_html)
             
             rows_html.append(f'<tr>{"".join(row_cells)}</tr>')
-
+            
         # テーブル全体を構築
         table_html = f"""
         <h4 style="margin-top: 1.5rem; margin-bottom: 0.5rem;">{title} ({len(data_frame)}件)</h4>
@@ -2354,19 +2456,17 @@ if st.session_state.analyzed_data:
     table_low = generate_html_table(df_below_50, "【⚠️ リスク高】50点未満（慎重な検討が必要）", "0-49")
     st.markdown(table_low, unsafe_allow_html=True)
     
+    # ★ 選択銘柄転送ボタンの配置
+    st.markdown("---")
+
     # 3. スコア内訳の表示
     with st.expander("詳細なスコア内訳（透明性向上）"):
-        # df はソート済み・整形済みのため、このまま使用
-        
-        # DataFrameのインデックス（No）とスコア内訳を紐付けて表示
         st.subheader("銘柄ごとのスコア要因")
         
         details = []
-        # df_raw はフィルタリング前のデータ。ここではフィルタリングされた行のコードに対応するデータを使用
         raw_data_map = {d['code']: d for d in st.session_state.analyzed_data}
         
         for index, row in df.iterrows():
-            # フィルタリングされた行のコードに対応する生のデータを取得
             raw_row = raw_data_map.get(row['code'])
             if raw_row and 'score_factors' in raw_row:
                  details.append({
@@ -2389,24 +2489,20 @@ if st.session_state.analyzed_data:
         for item in details:
             st.markdown(f"**No.{item['No']} - {item['企業名']} ({item['コード']}) - 総合点: {item['総合点']:.0f}**")
             
-            # 内訳を整形して表示
             st.markdown("##### ➕ 加点要因")
             
             def format_score_html(key, value):
                 color = 'green' if value > 0 else ('red' if value < 0 else 'black')
                 return f'<p style="color:{color}; margin: 0; padding: 0 0 0 15px; font-weight: bold;">{key}: {value:+.0f}点</p>'
             
-            # 加点要因（ボーナス系）の表示
             plus_items = ["基礎点", "戦略優位性ボーナス", "RSI中立ゾーンボーナス", "出来高急増ボーナス", "直近モメンタムボーナス", "青天井ボーナス", "リスクリワード評価", "DDリカバリー速度評価"]
             for key in plus_items:
                 if key in item['内訳'] and item['内訳'][key] > 0:
                      st.markdown(format_score_html(key, item['内訳'][key]), unsafe_allow_html=True)
                      
             st.markdown("##### ➖ 減点要因")
-            # 減点要因（ペナルティ系）の表示
             minus_items = ["構造的減点（合計）", "RSI過熱/底打ちペナルティ", "DD連続性リスク評価", "流動性ペナルティ", "ボラティリティペナルティ", "SL浅さリスク減点", "市場過熱ペナルティ", "過去最大DD評価", "GC/DC評価", "場中・出来高過大評価減点", "場中・MA乖離リスク減点", "DDリカバリー速度評価"]
             for key in minus_items:
-                # 減点要因リストを順番に表示。リカバリー速度評価はマイナスの場合のみここで表示。
                 if key == "DDリカバリー速度評価" and item['内訳'].get(key, 0) >= 0: continue
                 if key in item['内訳'] and item['内訳'][key] < 0:
                      st.markdown(format_score_html(key, item['内訳'][key]), unsafe_allow_html=True)
@@ -2422,9 +2518,7 @@ if st.session_state.analyzed_data:
         df_raw = pd.DataFrame(data).copy()
         if 'backtest' in df_raw.columns: df_raw = df_raw.drop(columns=['backtest']) 
         if 'backtest_raw' in df_raw.columns: df_raw = df_raw.rename(columns={'backtest_raw': 'backtest'}) 
-        # 🎯 bt_target_pct, bt_win_count, score_factors も維持
         columns_to_drop = ['risk_value', 'issued_shares', 'liquidity_ratio_pct', 'atr_val', 'is_gc', 'is_dc', 'atr_sl_price', 'base_score', 'is_aoteng', 'is_updated_in_this_run', 'run_count', 'batch_order', 'update_count'] 
         for col in columns_to_drop:
              if col in df_raw.columns: df_raw = df_raw.drop(columns=[col]) 
-        # 【改善要件 1. スマホ表示を改善（UI最適化）】
         st.dataframe(df_raw, use_container_width=True)
