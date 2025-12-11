@@ -1768,7 +1768,7 @@ def batch_analyze_with_ai(data_list):
     if not model: return {}, f"⚠️ AIモデル ({model_name}) が設定されていません。APIキーを確認してください。"
     
     # ★★★ 修正後の prompt_text 生成ロジック（データリーク防止のため形式を複雑化） ★★★
-    prompt_text = ""
+    data_for_ai = ""
     for d in data_list:
         price = d['price'] if d['price'] is not None else 0
         p_half = d['p_half']; p_full = d['p_full']; rr_val = d.get('risk_reward', 0.0)
@@ -1778,37 +1778,22 @@ def batch_analyze_with_ai(data_list):
         elif rr_val >= 0.1: rr_disp = f"{rr_val:.1f}"
         else: rr_disp = "-" 
         
-        # 利確目標情報の整形
-        target_price_for_pct = p_full if d.get('is_aoteng') and p_full > 0 else (p_half if p_half > 0 else p_full)
+        # 利確目標, MA乖離, SL情報などの整形
         target_info = "利確目標:無効"
-        if price > 0 and target_price_for_pct > 0: 
-            target_info = f"半目標:{((p_half / price) - 1) * 100:+.1f}% / 全目標:{((p_full / price) - 1) * 100:+.1f}%"
-        if d.get('is_aoteng'): target_info = f"利確目標:青天井追従/SL:{p_full:,.0f}円"
-        elif p_half == 0 and d['strategy'] == "🔥順張り" and p_full > 0: target_info = f"利確目標:追従目標/全:{p_full:,.0f}円" 
-        elif p_half == 0 and d['strategy'] == "🔥順張り": target_info = "利確目標:目標超過/無効"
-            
-        buy_target = d.get('buy', 0); ma_div = (price/buy_target-1)*100 if buy_target > 0 and price > 0 else 0
-        mdd = d.get('max_dd_pct', 0.0); sl_pct = d.get('sl_pct', 0.0); sl_ma = d.get('sl_ma', 0); 
-        
-        # 流動性表示の統一
-        avg_vol_5d = d.get('avg_volume_5d', 0)
-        low_liquidity_status = "致命的低流動性:警告(1000株未満)" if avg_vol_5d < 1000 else "流動性:問題なし"
-        
-        # SL情報の取得と整形
+        if d.get('is_aoteng'): target_info = "青天井"
+        elif p_half > 0: target_info = f"半目標:{p_half:,.0f}"
+
+        ma_div = (price/d.get('buy', 1)-1)*100 if d.get('buy', 1) > 0 and price > 0 else 0
+        mdd = d.get('max_dd_pct', 0.0); sl_ma = d.get('sl_ma', 0); 
         atr_sl_price = d.get('atr_sl_price', 0)
         ma25_sl_price = d.get('ma25', 0) * 0.995 # MA25の終値の99.5%を構造的SLとして渡す
         
-        # GC/DC ステータス
-        gc_dc_status = ""
-        if d.get("is_gc"): gc_dc_status = "GC:発生"
-        elif d.get("is_dc"): gc_dc_status = "DC:発生"
+        # 流動性表示の統一
+        low_liquidity_status = "致命的低流動性:警告(1000株未満)" if d.get('avg_volume_5d', 0) < 1000 else "流動性:問題なし"
         
-        atr_disp = f"ATR(Smoothed):{d.get('atr_smoothed', 0.0):.1f}円"
-        win_rate = d.get('backtest_raw', '-')
-        
-        # HTMLタグでデータを囲み、AIが解析しやすい/模倣しにくい形式にする
-        prompt_text += f"ID:{d['code']} | <b>{d['name']}</b>: 現在:{price:,.0f} | 戦略:{d['strategy']} | RSI:{d['rsi']:.1f} | 乖離率:{ma_div:+.1f}% | R/R:{rr_disp} | 出来高:{d['vol_ratio']:.1f}倍 | リスク: MDD:{mdd:+.1f}%, SL乖離率:{sl_pct:+.1f}% | 採用SL(R/R):{sl_ma:,.0f}円 | ATR_SL:{atr_sl_price:,.0f}円 | MA25_SL:{ma25_sl_price:,.0f}円 | {low_liquidity_status} | {gc_dc_status} | 目標:{target_info} | 勝率:{win_rate.replace('%', '')}% | 点:{d['score']}\n"
-        
+        # データをIDとキーバリューペアのリストとして渡す (AIが模倣しやすい記号を排除)
+        data_for_ai += f"ID:{d['code']}: 名称:{d['name']} | 点:{d['score']} | 戦略:{d['strategy']} | RSI:{d['rsi']:.1f} | 乖離:{ma_div:+.1f}% | R/R:{rr_disp} | MDD:{mdd:+.1f}% | SL_R/R:{sl_ma:,.0f} | SL_ATR:{atr_sl_price:,.0f} | SL_MA25:{ma25_sl_price:,.0f} | LIQUIDITY:{low_liquidity_status}\n"
+
     global market_25d_ratio
     r25 = market_25d_ratio
     market_alert_info = f"市場25日騰落レシオ: {r25:.2f}%。"
@@ -1816,12 +1801,13 @@ def batch_analyze_with_ai(data_list):
     elif r25 <= 80.0: market_alert_info += "市場は【明確な底値ゾーン】にあり、全体的な反発期待が高いです。"
     else: market_alert_info += "市場の過熱感は中立的です。"
     
-    prompt = f"""あなたは「アイ」という名前のプロトレーダー（30代女性、冷静・理知的）。以下の【市場環境】と【銘柄リスト】に基づき、それぞれの「所感コメント（丁寧語）」を【生成コメントの原則】に従って作成してください。
+    # ★★★ プロンプトの構造分離と出力タグの強制追加によるデータリーク防止 ★★★
+    prompt = f"""あなたは「アイ」という名前のプロトレーダー（30代女性、冷静・理知的）。以下の【市場環境】と【銘柄データ】に基づき、それぞれの「所感コメント（丁寧語）」を【生成コメントの原則】に従って作成してください。
 
 【市場環境】{market_alert_info}
 
 【生成コメントの原則（厳守）】
-1. <b>最重要厳守ルール: アプリケーション側での警告表示（例: ⚠️長文注意）を避けるため、何があっても最大文字数（100文字）を厳格に守ってください。また、提供された【銘柄リスト】の「データテキスト」をそのままコピー＆ペーストする行為（データリーク）は固く禁じます。</b>
+1. <b>最重要厳守ルール: アプリケーション側での警告表示（例: ⚠️長文注意）を避けるため、何があっても最大文字数（100文字）を厳格に守ってください。</b>提供された【銘柄データ】のテキストをそのままコピー＆ペーストする行為（データリーク）は固く禁じます。
 2. <b>Markdownの太字（**）は絶対に使用せず、HTMLの太字（<b>）のみをコメント内で使用してください。</b>
 3. <b>表現の多様性は最小限に抑えてください。</b>定型的な文章構造を維持してください。
 4. <b>最大文字数の厳守：全てのコメント（プレフィックス含む）は最大でも100文字とします。</b>これを厳格に守ってください。投資助言と誤解される表現は、<b>全てのコメントから完全に削除してください。</b>
@@ -1834,11 +1820,17 @@ def batch_analyze_with_ai(data_list):
     - リスク情報（MDD、SL乖離率）を参照し、リスク管理の重要性に言及してください。MDDが-8.0%を超える場合は、「過去の最大下落リスクが高いデータ」がある旨を明確に伝えてください。
     - 流動性: 致命的低流動性:警告(1000株未満)の銘柄については、コメントの冒頭（プレフィックスの次）で「平均出来高が1,000株未満と極めて低く、希望価格での売買が困難な<b>流動性リスク</b>を伴います。ご自身の資金規模に応じたロット調整をご検討ください。」といった<b>明確な警告</b>を必ず含めてください。
     - 新規追加: 極端な低流動性 (流動性比率 < 0.05% や ATR < 0.5% の場合) についても、同様に<b>明確な警告</b>を盛り込んでください。
-    - **撤退基準（最重要修正）:** コメントの末尾で、**構造的崩壊ライン**の**MA25_SL（X円）**と、**ボラティリティ基準**の**ATR_SL（Y円）**を**両方とも**言及し、「**MA25_SLを終値で割るか、ATR_SLを割るかのどちらかをロスカット基準としてご検討ください**」という趣旨を明確に伝えてください。
+    - **撤退基準（MA25/ATR併記）:** コメントの末尾で、**構造的崩壊ライン**の**MA25_SL（X円）**と、**ボラティリティ基準**の**ATR_SL（Y円）**を**両方とも**言及し、「**MA25を終値で割るか、ATR_SLを割るかのどちらかをロスカット基準としてご検討ください**」という趣旨を明確に伝えてください。（※XとYの価格は、AIが渡されたデータから参照してください。）
     - **青天井領域の追記:** ターゲット情報が「青天井追従」または「追従目標」の場合、<b>「利益目標は固定目標ではなく、動的なATRトレーリング・ストップ（X円）に切り替わっています。この価格を終値で下回った場合は、利益を確保するための撤退を検討します。」</b>という趣旨を、コメントの適切な位置に含めてください。
     - 強調表現の制限: 総合分析点85点以上の銘柄コメントに限り、全体の5%の割合（例: 20銘柄中1つ程度）で、特に重要な部分（例：出来高増加の事実、高い整合性）を1箇所（10文字以内）に限り、<b>赤太字のHTMLタグ（<span style="color:red;">...</span>）</b>を使用して強調しても良い。それ以外のコメントでは赤太字を絶対に使用しないでください。
+
+【銘柄データ】
+{data_for_ai}
+
 【出力形式】ID:コード | コメント
-{prompt_text}
+（例）
+ID:9984 | <b>ソフトバンクグループ</b>｜RSIは中立圏に位置し、MA25_SL（6,500円）を終値で割るか、ATR_SL（6,400円）を割るかのどちらかをロスカット基準としてご検討ください。
+
 【最後に】リストの最後に「END_OF_LIST」と書き、その後に続けて「アイの独り言（常体・独白調）」を1行で書いてください。語尾に「ね」や「だわ」などはしないこと。※見出し不要。独り言は、市場25日騰落レシオ({r25:.2f}%)を総括し、規律ある撤退の重要性に言及する。
 """
     try:
@@ -1850,7 +1842,7 @@ def batch_analyze_with_ai(data_list):
             return {}, "AI分析失敗"
         parts = text.split("END_OF_LIST", 1)
         comment_lines = parts[0].strip().split("\n")
-        monologue_raw = parts[1].strip()
+        monologue = monologue_raw = parts[1].strip()
         monologue = re.sub(r'\*\*(.*?)\*\*', r'\1', monologue) 
         monologue = monologue.replace('**', '').strip() 
         for line in comment_lines:
@@ -1865,10 +1857,9 @@ def batch_analyze_with_ai(data_list):
                     c_com_cleaned = re.sub(r'\*\*(.*?)\*\*', r'\1', c_com_cleaned) 
                     c_com_cleaned = c_com_cleaned.replace('**', '').strip() 
                     
-                    # 2. AIが誤って挿入したプレフィックスを削除するロジックを強化
-                    # 企業名（<b>タグ）は残し、その直後にある不要なデータタグを削除する。
-                    # パターン: <b>[企業名]</b>: 現在:X | 戦略:Y | ... のような部分を削除
-                    CLEANUP_PATTERN_START = r'^(<b>.*?</b>)\s*[:：]\s*.*?'
+                    # 2. AIが誤って挿入したプレフィックスを削除するロジックを強化 (企業名タグを残すロジックを維持)
+                    # パターン: <b>[企業名]</b>: ... のように、タグとコロンの後のデータタグを一掃
+                    CLEANUP_PATTERN_START = r'^(<b>.*?</b>)\s*[:：].*?' 
                     c_com_cleaned = re.sub(CLEANUP_PATTERN_START, r'\1', c_com_cleaned).strip()
                     
                     # 3. 最終クリーンアップの強化 (先頭の不要な記号、コロン、スペースを削除)
@@ -1881,6 +1872,7 @@ def batch_analyze_with_ai(data_list):
                     CLEANUP_PATTERN_END = r'(\s*(?:ATR_SL|SL|採用SL)[:：].*?円\.?)$'
                     c_com_cleaned = re.sub(CLEANUP_PATTERN_END, '', c_com_cleaned, flags=re.IGNORECASE).strip()
                     
+                    # 5. 警告閾値の判定
                     WARNING_THRESHOLD = 105 
                     if len(c_com_cleaned) > WARNING_THRESHOLD:
                          c_com_cleaned = f'<span style="color:orange; font-size:11px; margin-right: 5px;"><b>⚠️長文注意/全文はスクロール</b></span>' + c_com_cleaned
