@@ -1610,13 +1610,24 @@ def get_stock_data(ticker, current_run_count):
         market_deduct = -20 if is_market_alert else 0 # ローカル変数として定義
         
         # ------------------ 6. スコア変動の永続化ロジック ------------------
-        history = st.session_state.score_history.get(ticker, {}) 
+        # 💡 市場過熱ペナルティの計算（最終適用用）
+        is_market_alert = market_25d_ratio >= 125.0
+        market_deduct = -20 if is_market_alert else 0 # ローカル変数として定義
         
+        # current_calculated_score は市場過熱ペナルティ適用前のスコア (例: 71点)
+        
+        history = st.session_state.score_history.get(ticker, {}) 
         pre_market_score = history.get('pre_market_score')
         
-        if status == "場前(固定)" or status == "引け後(確定値)" or status == "休日(固定)":
-             new_pre_market_score = current_calculated_score
+        # 1. 場前/引け後/休日 (スコアが確定する状態)
+        if status != "場中(進行中)":
+             # 確定スコア = (テクニカルスコア + 市場ペナルティ)
+             final_score_with_market_deduct = max(0, min(100, current_calculated_score + market_deduct))
+             
+             new_pre_market_score = final_score_with_market_deduct
+             
              if pre_market_score is None or status == "引け後(確定値)":
+                  # 初回または引け後の確定値として履歴を更新
                   st.session_state.score_history[ticker] = {
                        'pre_market_score': new_pre_market_score, 
                        'current_score': new_pre_market_score, 
@@ -1624,27 +1635,35 @@ def get_stock_data(ticker, current_run_count):
                   score_to_return = new_pre_market_score
                   score_diff = 0
              else:
+                  # 履歴が存在する場合は、確定した履歴値を表示
                   score_to_return = pre_market_score
                   score_diff = 0 
                   
+        # 2. 場中 (リアルタイムスコアとベーススコアの比較)
         elif status == "場中(進行中)":
+             # リアルタイムスコア = (場中スコア + 市場ペナルティ + 場中ペナルティ)
+             # current_calculated_score には既に場中ペナルティが含まれている前提
+             realtime_score = max(0, min(100, current_calculated_score + market_deduct))
+             
              if pre_market_score is None:
-                  # 場中ペナルティが適用される前のベーススコアを比較に使用
-                  score_for_comparison = get_base_score(ticker, df_base_score, info) + market_deduct
-                  new_pre_market_score = max(0, min(100, score_for_comparison)) 
+                  # 場中初回アクセス時: ベーススコアを計算し、市場ペナルティを適用してベーススコアとする
+                  # base_score は get_base_score で計算済み（市場ペナルティ適用前）
+                  new_pre_market_score = max(0, min(100, base_score + market_deduct)) 
                   
                   st.session_state.score_history[ticker] = {
                        'pre_market_score': new_pre_market_score, 
-                       'current_score': current_calculated_score, 
+                       'current_score': realtime_score, 
                   }
-                  score_to_return = current_calculated_score
-                  score_diff = current_calculated_score - new_pre_market_score
+                  score_to_return = realtime_score
+                  score_diff = realtime_score - new_pre_market_score
              else:
-                  score_to_return = current_calculated_score
-                  score_diff = current_calculated_score - pre_market_score
-                  st.session_state.score_history[ticker]['current_score'] = current_calculated_score
+                  # 履歴が存在する場合: リアルタイムスコアを更新し、差分を計算
+                  score_to_return = realtime_score
+                  score_diff = realtime_score - pre_market_score
+                  st.session_state.score_history[ticker]['current_score'] = realtime_score
                   
         # ------------------ 7. 結果の整形とリターン ------------------
+        score_factors_inner["market_overheat"] = market_deduct
         if rsi_val <= 30: rsi_mark = "🔵"
         elif 55 <= rsi_val <= 65: rsi_mark = "🟢"
         elif rsi_val >= 70: rsi_mark = "🔴"
