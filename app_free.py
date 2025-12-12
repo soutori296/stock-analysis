@@ -334,7 +334,7 @@ st.markdown(f"""
     [data-testid="stCheckbox"] {{
          margin-top: 0px;    /* チェックボックスの上部マージンを詰める */
          margin-bottom: 0px; /* チェックボックスの下部マージンを詰める */
-         padding-top: 8px;    
+         padding-top: 6px;    
     }}
    
     /* フィルターエリア内のチェックボックス（特に col1_2, col2_2 の st.checkbox）の縦位置調整 */
@@ -2618,3 +2618,4 @@ if st.session_state.analyzed_data:
         for col in columns_to_drop:
              if col in df_raw.columns: df_raw = df_raw.drop(columns=[col]) 
         st.dataframe(df_raw, use_container_width=True)
+
