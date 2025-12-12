@@ -183,7 +183,7 @@ st.markdown(f"""
         width: 100%; 
         overflow-x: auto; 
         -webkit-overflow-scrolling: touch; 
-        margin-bottom: 20px; 
+        margin-bottom: 20px;
     }}
     
     /* 自作テーブルのみにスタイルを適用 (.ai-table配下のみ) */
@@ -512,7 +512,7 @@ with st.sidebar:
             index=model_options.index(st.session_state.selected_model_name) if st.session_state.selected_model_name in model_options else 0,
             key='model_select_key' 
         )
-        st.markdown("<br><br>", unsafe_allow_html=True)
+        st.markdown("<br>", unsafe_allow_html=True)
         st.markdown("---") # CSSで縦幅が詰まっている
 
         # 3. ソート選択ボックス (★ レイアウト変更: テキストボックスの上に配置)
@@ -568,6 +568,7 @@ with st.sidebar:
             value=st.session_state.ui_filter_liquid_on, 
             key='filter_liquid_on',
         )
+        st.markdown("<br>", unsafe_allow_html=True)
 
         # 4. 銘柄コード入力エリア (上部の余白をCSSで詰めている)
         tickers_input = st.text_area(
@@ -2618,5 +2619,3 @@ if st.session_state.analyzed_data:
         for col in columns_to_drop:
              if col in df_raw.columns: df_raw = df_raw.drop(columns=[col]) 
         st.dataframe(df_raw, use_container_width=True)
-
-
