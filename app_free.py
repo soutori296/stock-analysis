@@ -475,17 +475,37 @@ with st.sidebar:
 
     if not st.session_state.authenticated:
         # ★ 認証スキップがTrueでない場合にのみ認証UIを表示
-        st.header("🔑 認証が必要です")
-        user_password = st.text_input("パスワードを入力", type="password", key='password_input')
+        st.header("🔑 認証 & 設定")
         
-        if st.button("ログイン", use_container_width=True, disabled=not is_password_set):
-            if user_password and hash_password(user_password) == SECRET_HASH:
-                st.session_state.authenticated = True
-                st.success("ログイン成功！")
-                st.rerun() 
-            else:
-                st.error("パスワードが異なります。")
-        st.markdown("---") 
+        # 【修正】st.formを使って、パスワードとAPIキーを同時に送信・保存させる
+        with st.form("login_form"):
+            st.markdown("Chrome等に保存する場合、**ユーザー名欄にパスワード**、**パスワード欄にAPIキー**が保存される挙動になりますが、自動入力には便利です。")
+            
+            # 1. アプリのパスワード入力
+            user_password = st.text_input("パスワード (必須)", type="password", key='password_input')
+            
+            # 2. APIキー入力 (ログイン時にまとめて入力させる)
+            # すでにsecretsにある場合はプレースホルダーで案内
+            api_placeholder = "secrets.tomlに設定済みの場合は空欄でOK" if "GEMINI_API_KEY" in st.secrets else "APIキーを入力 (ブラウザ保存用)"
+            input_api_key = st.text_input("Gemini API Key (任意)", type="password", placeholder=api_placeholder, key='login_api_key_input')
+            
+            # ログインボタン
+            submitted = st.form_submit_button("ログイン", use_container_width=True)
+            
+            if submitted:
+                # パスワード判定
+                if user_password and hash_password(user_password) == SECRET_HASH:
+                    st.session_state.authenticated = True
+                    
+                    # APIキーが入力されていればセッションに保存（secretsより優先、または未設定時の入力用）
+                    if input_api_key:
+                        st.session_state.gemini_api_key_input = input_api_key
+                    
+                    st.success("ログイン成功！")
+                    st.rerun() 
+                else:
+                    st.error("パスワードが異なります。")
+        st.markdown("---")  
         
     # 1. API Key (認証成功後のみ表示)
     api_key = None
