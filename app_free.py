@@ -85,6 +85,10 @@ if 'wait_start_time' not in st.session_state:
 if 'run_continuously_checkbox' not in st.session_state:
      st.session_state.run_continuously_checkbox = False # チェックボックスの状態を保存
 
+# 【★ 導入: コードコピー機能】コピー実行フラグ
+# (コピー機能は削除するが、既存コードの参照を避けるためステートは残す)
+if 'trigger_copy_filtered_data' not in st.session_state:
+    st.session_state.trigger_copy_filtered_data = False
    
 # --- 分析上限定数 ---
 MAX_TICKERS = 10 
@@ -321,8 +325,8 @@ st.markdown(f"""
     /* ラベルの縦幅調整 (API Key, n点以上, 出来高(万株) など) */
     /* Streamlitのラベル要素全般を対象 */
     label[data-testid^="stWidgetLabel"] {{
-        margin-top: 2px !important;     /* ラベルの上マージンを削減 */
-        margin-bottom: 2px !important;  /* ラベルの下マージンを削減 */
+        margin-top: -7px !important;     /* ラベルの上マージンを削減 */
+        margin-bottom: 0px !important;  /* ラベルの下マージンを削減 */
         padding: 0 !important;          /* パディングもゼロに */
     }}
     
@@ -392,7 +396,10 @@ st.markdown(f"""
     /* ========================================================== */
 
 </style>
-""", unsafe_allow_html=True)
+""", unsafe_allow_html=True) # <<<--- ここで f-string ブロックを終了する
+
+# 【★ 削除: コードコピー機能】JavaScriptブロック全体を削除
+# -----------------------------------------------------------------
 
 
 # --- タイトル --- (変更なし)
@@ -505,6 +512,7 @@ with st.sidebar:
             index=model_options.index(st.session_state.selected_model_name) if st.session_state.selected_model_name in model_options else 0,
             key='model_select_key' 
         )
+        st.markdown("<br><br>", unsafe_allow_html=True)
         st.markdown("---") # CSSで縦幅が詰まっている
 
         # 3. ソート選択ボックス (★ レイアウト変更: テキストボックスの上に配置)
@@ -551,7 +559,8 @@ with st.sidebar:
             "出来高(万株)", 
             min_value=0.0, max_value=500.0, 
             value=st.session_state.ui_filter_min_liquid_man, 
-            step=0.5, 
+            step=0.5,
+            format="%.1f", 
             key='filter_min_liquid_man'
         )
         st.session_state.ui_filter_liquid_on = col2_2.checkbox(
@@ -664,7 +673,10 @@ if st.session_state.clear_confirmed:
         st.session_state.wait_start_time = None
         st.session_state.run_continuously_checkbox = False 
         # 選択銘柄リストもリセット
-        st.session_state.selected_tickers_for_transfer = set()
+        if 'selected_tickers_for_transfer' in st.session_state: # 既存のコードになかったためチェック
+             del st.session_state.selected_tickers_for_transfer 
+        if 'trigger_copy_filtered_data' in st.session_state:
+            del st.session_state.trigger_copy_filtered_data # 【★ 削除: コードコピー機能】フラグをリセット
         st.rerun() 
     
     if col_cancel.button("❌ キャンセル", use_container_width=False): 
@@ -1315,7 +1327,7 @@ def get_stock_data(ticker, current_run_count):
             
         df_base_score = df_raw.copy()
         
-        # 場前/休日：前日のデータ（stooqの最新行が前日データ）をベーススコア算出に使用
+        # 場前/引け後/休日：前日のデータ（stooqの最新行が前日データ）をベーススコア算出に使用
         if status == "場前(固定)" or status == "休日(固定)":
              pass 
         else: # 場中または引け後：当日データは変動しているので、前日のデータを使用
@@ -1561,20 +1573,45 @@ def get_stock_data(ticker, current_run_count):
             if is_gc: gc_dc_score = 15 
             elif is_dc: gc_dc_score = -10
         score += gc_dc_score; score_factors_inner["gc_dc"] = gc_dc_score
-            
-        # DD評価（MDD一律ペナルティは削除）
-        dd_abs = abs(max_dd_pct); dd_score = 0
-        # 2.0% < DD <= 10.0% の連続減点は維持
-        if dd_abs < 1.0: dd_score = 5
-        elif 1.0 <= dd_abs <= 2.0: dd_score = 0
-        elif 2.0 < dd_abs: dd_score = -int(np.floor(dd_abs - 2.0)) * 2 
-        
-        # ただし、DD連続性ペナルティのロジックと重なるため、最大で-20点に抑制
-        dd_score = max(-20, dd_score) 
 
-        score += dd_score; score_factors_inner["dd_score"] = dd_score
+        # DD評価（MDD一律ペナルティは削除）
+        dd_abs = abs(max_dd_pct); 
         
-        # 💡 リカバリー速度と連続性ペナルティの適用
+        dd_score_low_risk_bonus = 0      # マニュアル: DD率 優秀 (< 1.0%) 用
+        dd_score_continuous_deduct = 0   # マニュアル: DD率 連続減点 (2.0% < DD <= 10.0%) 用
+        dd_score_high_risk_deduct = 0    # マニュアル: DD率 高リスク (> 10.0%) 用
+        
+        final_dd_score = 0 # 最終的にスコアに加算されるDD評価点
+        
+        # 1. DD率 優秀 (< 1.0%)
+        if dd_abs < 1.0: 
+            dd_score_low_risk_bonus = 5
+            
+        # 2. DD率 高リスク (> 10.0%)
+        elif dd_abs > 10.0:
+            dd_score_high_risk_deduct = -20 # マニュアルの通り -20点
+        
+        # 3. DD率 連続減点 (2.0% < DD <= 10.0%)
+        elif 2.0 < dd_abs <= 10.0: 
+             # 2%を超えるごとに2点減点
+             dd_score_continuous_deduct = -int(np.floor(dd_abs - 2.0)) * 2 
+        
+        # 4. 最終スコアの決定 (高リスク減点が最優先、連続減点が次、ボーナスが最後)
+        # DD評価は排他的に適用し、高リスクが負の値であればそれを採用
+        final_dd_score = dd_score_high_risk_deduct if dd_score_high_risk_deduct < 0 else dd_score_continuous_deduct
+        
+        # 低リスクボーナスは、他の減点が適用されなかった場合にのみ加算
+        if final_dd_score == 0 and dd_score_low_risk_bonus > 0:
+             final_dd_score = dd_score_low_risk_bonus
+             
+        # 【修正】: スコア内訳に分離した3項目を格納し、総点にはfinal_dd_scoreのみ加算
+        score += final_dd_score
+        # 以前の "dd_score" の項目は削除し、新しい項目のみを格納します。
+        score_factors_inner["dd_score_low_risk_bonus"] = dd_score_low_risk_bonus if dd_score_low_risk_bonus > 0 else 0
+        score_factors_inner["dd_score_continuous_deduct"] = dd_score_continuous_deduct if dd_score_continuous_deduct < 0 else 0
+        score_factors_inner["dd_score_high_risk_deduct"] = dd_score_high_risk_deduct if dd_score_high_risk_deduct < 0 else 0
+        
+        # 💡 リカバリー速度と連続性ペナルティの適用 (ここは変更なしで維持)
         dd_recovery_bonus = 0
         if recovery_days <= 20: dd_recovery_bonus = 10 # 💡 20日以内の回復で+10点
         elif recovery_days >= 101: dd_recovery_bonus = -10 
@@ -1684,9 +1721,14 @@ def get_stock_data(ticker, current_run_count):
             "GC/DC評価": score_factors_inner["gc_dc"],
             "青天井ボーナス": score_factors_inner["aoteng_bonus"],
             "リスクリワード評価": score_factors_inner["rr_score"],
-            "過去最大DD評価": score_factors_inner["dd_score"],
+            
+            # 【新規DD項目】: マニュアルの通りに分離して表示
+            "DD率 低リスクボーナス": score_factors_inner["dd_score_low_risk_bonus"],
+            "DD率 連続減点": score_factors_inner["dd_score_continuous_deduct"],
+            "DD率 高リスク減点": score_factors_inner["dd_score_high_risk_deduct"],
+            
             "DDリカバリー速度評価": score_factors_inner["dd_recovery_bonus"], # リカバリーボーナス/ペナルティ
-            "DD連続性リスク評価": score_factors_inner["dd_continuous_penalty"], # DD連続性ペナルティ
+            "DD連続性リスク評価": score_factors_inner["dd_continuous_penalty"], # DD連続性ペナルティ (別ロジックの連続性)
             "RSI過熱/底打ちペナルティ": score_factors_inner["rsi_penalty"],
             "流動性ペナルティ": score_factors_inner["liquidity_penalty"],
             "ボラティリティペナルティ": score_factors_inner["atr_penalty"],
@@ -2207,6 +2249,13 @@ if st.session_state.analyzed_data:
     # DataFrameの準備
     df = pd.DataFrame(filtered_data)
     
+    # 【★ 削除: コードコピー機能】サイドバーボタンの処理を削除
+    if st.session_state.get('trigger_copy_filtered_data', False):
+         st.session_state.trigger_copy_filtered_data = False # フラグをリセット
+         # コピー処理自体を削除したため、ここでは何もしない
+         st.warning("⚠️ 現在、コピー機能は無効化されています。")
+
+
     # --- 【潜在的な問題点の修正】空のDataFrameチェックを追加 ---
     if df.empty:
         # フィルター適用中かつデータがない場合のみメッセージを表示
@@ -2377,14 +2426,23 @@ if st.session_state.analyzed_data:
     df['rr_disp'] = df.apply(lambda row: "青天" if row['is_aoteng'] else (f"{row['risk_reward']:.1f}" if row['risk_reward'] >= 0.1 else "-"), axis=1)
     df['dd_sl_disp'] = df.apply(lambda row: f"{row['max_dd_pct']:+.1f}%<br>{row['sl_pct']:+.1f}%", axis=1)
     df['update_disp'] = df['update_count'].apply(lambda x: f'{x}回目' if x > 1 else '')
-    df['code_disp'] = df.apply(lambda row: f"<b>{row['code']}</b><br><span style='font-size:10px; font-weight: bold; color: #ff6347;'>{'更新済' if row.get('is_updated_in_this_run', False) and row['update_count'] > 1 else ''}</span>", axis=1)
+    # 【★ 修正: code_disp から '更新済' テキストを削除】
+    df['code_disp'] = df.apply(lambda row: f"<b>{row['code']}</b>", axis=1)
     df['target_txt'] = df.apply(format_target_txt, axis=1)
     df['bt_cell_content'] = df.apply(lambda row: f"<b>{row['backtest_raw']}</b><br><span style='font-size:11px;'>({row['bt_win_count']}勝)</span><br><span style='font-size:10px; color:#666;'>(+{row['bt_target_pct']*100:.1f}%抜)</span>" if "エラー" not in row['backtest_raw'] and "機会なし" not in row['backtest_raw'] else row['backtest'], axis=1)
     df['per_pbr_disp'] = df.apply(lambda row: f"{row['per']}<br>{row['pbr']}", axis=1)
+    df['No'] = range(1, len(df) + 1) # <-- 【修正】ここで数値で初期化する
     
-    # 'No' 列の追加
-    df['No'] = range(1, len(df) + 1)
-       
+    def format_no_column(row):
+        is_updated = row.get('is_updated_in_this_run', False) and row['update_count'] > 1
+        if is_updated:
+            return f"{row['No']}<br><span style='font-size:10px; font-weight: bold; color: #ff6347;'>更新済</span>"
+        else:
+            # 更新がない場合は番号のみを返します。
+            return f"{row['No']}"
+
+    df['No'] = df.apply(format_no_column, axis=1)
+    
     # --- 【トリアージによるテーブル分割】 ---
     df_above_75 = df[df['score'] >= 75].copy()
     df_50_to_74 = df[(df['score'] >= 50) & (df['score'] <= 74)].copy()
@@ -2423,8 +2481,12 @@ if st.session_state.analyzed_data:
             # ★ 修正: HTMLテーブル内のセル描画
             for col_key, _, col_align, _, _ in HEADER_MAP:
                 cell_data = row[col_key]             
-                    
-                if col_key == 'comment':
+                
+                # 【★ 削除: コードコピー機能】個別コピー機能を削除 (onclickイベント削除)
+                if col_key == 'code_disp':
+                    # コードコピー機能を削除
+                    cell_html = f'<td class="{bg_class} td-{col_align}">{cell_data}</td>'
+                elif col_key == 'comment':
                     cell_html = f'<td class="{bg_class} td-{col_align}"><div class="comment-scroll-box">{cell_data}</div></td>'
                 else:
                     cell_html = f'<td class="{bg_class} td-{col_align}">{cell_data}</td>'
@@ -2497,27 +2559,49 @@ if st.session_state.analyzed_data:
                     "内訳": {"エラー": "内訳データがありません"}
                 })
 
-
         for item in details:
+            # 【修正: 不要なHTMLタグ残骸を削除し、No.とコード・企業名をシンプルに表示】
+            # item['No'] は既にクリーンな状態のHTML（No.<br>更新済）
             st.markdown(f"**No.{item['No']} - {item['企業名']} ({item['コード']}) - 総合点: {item['総合点']:.0f}**")
             
+            # 【修正点】: 加点要因を全て表示するロジックに変更
             st.markdown("##### ➕ 加点要因")
             
             def format_score_html(key, value):
+                # valueが負の場合は赤、正の場合は緑、ゼロの場合は黒（ただしゼロは非表示）
                 color = 'green' if value > 0 else ('red' if value < 0 else 'black')
                 return f'<p style="color:{color}; margin: 0; padding: 0 0 0 15px; font-weight: bold;">{key}: {value:+.0f}点</p>'
             
-            plus_items = ["基礎点", "戦略優位性ボーナス", "RSI中立ゾーンボーナス", "出来高急増ボーナス", "直近モメンタムボーナス", "青天井ボーナス", "リスクリワード評価", "DDリカバリー速度評価"]
-            for key in plus_items:
-                if key in item['内訳'] and item['内訳'][key] > 0:
-                     st.markdown(format_score_html(key, item['内訳'][key]), unsafe_allow_html=True)
-                     
+            # 1. 加点要因の表示
+            all_factors = item['内訳']
+            has_plus_item = False
+            
+            # 基礎点と、値が正の項目を全て表示
+            for key, value in all_factors.items():
+                if key == "基礎点" or value > 0:
+                     # 基礎点と、値が正の項目を表示
+                     if key == "基礎点":
+                          st.markdown(format_score_html(key, value), unsafe_allow_html=True)
+                          has_plus_item = True
+                     elif value > 0:
+                          st.markdown(format_score_html(key, value), unsafe_allow_html=True)
+                          has_plus_item = True
+                          
+            # 2. 減点要因の表示
             st.markdown("##### ➖ 減点要因")
-            minus_items = ["構造的減点（合計）", "RSI過熱/底打ちペナルティ", "DD連続性リスク評価", "流動性ペナルティ", "ボラティリティペナルティ", "SL浅さリスク減点", "市場過熱ペナルティ", "過去最大DD評価", "GC/DC評価", "場中・出来高過大評価減点", "場中・MA乖離リスク減点", "DDリカバリー速度評価"]
-            for key in minus_items:
-                if key == "DDリカバリー速度評価" and item['内訳'].get(key, 0) >= 0: continue
-                if key in item['内訳'] and item['内訳'][key] < 0:
-                     st.markdown(format_score_html(key, item['内訳'][key]), unsafe_allow_html=True)
+            has_minus_item = False
+            for key, value in all_factors.items():
+                # 【重要】構造的減点（合計）は、合計値なので表示から除外
+                if key == "構造的減点（合計）": continue
+                
+                # 値が負の項目を全て表示
+                if value < 0:
+                     st.markdown(format_score_html(key, value), unsafe_allow_html=True)
+                     has_minus_item = True
+            
+            if not has_minus_item:
+                # 減点がない場合も「減点要因はありません」と表示
+                st.markdown(f'<p style="color:#666; margin: 0; padding: 0 0 0 15px;">- 該当する減点要因はありません</p>', unsafe_allow_html=True)
 
             st.markdown("---")
 
