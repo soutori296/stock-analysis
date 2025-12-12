@@ -462,46 +462,63 @@ def toggle_continuous_run():
 # --- サイドバー (UIのコアを移動) ---
 with st.sidebar:
     
-    # 【新規追加】パスワード認証ロジック
-    if 'security' not in st.secrets or 'secret_password_hash' not in st.secrets.get('security', {}):
-        # Web環境でSecretsがない場合 or ローカルテストの場合
+    # 【修正1】エラー抑制: try-exceptで囲み、ファイルがない場合も静かに処理する
+    try:
+        # secretsへのアクセスを試みる
+        if 'security' in st.secrets and 'secret_password_hash' in st.secrets['security']:
+            SECRET_HASH = st.secrets["security"]["secret_password_hash"]
+            is_password_set = True
+        else:
+            raise ValueError("No config") # 手動で例外を起こしてexceptに飛ばす
+    except Exception:
+        # secretsがない、または読み込めない場合はローカルモードへ
         is_password_set = False
-        SECRET_HASH = hash_password("default_password_for_local_test") # ローカルテスト用デフォルト
+        SECRET_HASH = hash_password("default_password_for_local_test") 
         if not IS_LOCAL_SKIP_AUTH:
-             st.warning("⚠️ secrets.tomlに認証情報がないため、ローカルテスト用パスワード: 'default_password_for_local_test' を使用します。")
-    else:
-        SECRET_HASH = st.secrets["security"]["secret_password_hash"]
-        is_password_set = True
+             # st.warning等の表示を消し、静かにログだけ残すか、何もしない
+             # どうしても表示したい場合のみ以下を残す（起動直後のチラつき原因になるため削除推奨）
+             pass 
 
     if not st.session_state.authenticated:
         # ★ 認証スキップがTrueでない場合にのみ認証UIを表示
         st.header("🔑 認証 & 設定")
         
-        # 【修正】st.formを使って、パスワードとAPIキーを同時に送信・保存させる
+        if not is_password_set and not IS_LOCAL_SKIP_AUTH:
+            st.info("⚠️ secrets設定なし。パスワード: default_password_for_local_test")
+
+        # 【修正2】ブラウザにパスワードを保存させるためのフォーム
         with st.form("login_form"):
-            st.markdown("Chrome等に保存する場合、**ユーザー名欄にパスワード**、**パスワード欄にAPIキー**が保存される挙動になりますが、自動入力には便利です。")
+            st.markdown("""
+            <small style="color:gray;">ユーザー名欄にパスワード、パスワード欄にAPIキーが保存されます。</small>
+            """, unsafe_allow_html=True)
             
-            # 1. アプリのパスワード入力
-            user_password = st.text_input("パスワード (必須)", type="password", key='password_input')
+            # Chrome用: ユーザー名欄としてパスワードを入力
+            user_password = st.text_input("パスワード", type="password", key='password_input')
             
-            # 2. APIキー入力 (ログイン時にまとめて入力させる)
-            # すでにsecretsにある場合はプレースホルダーで案内
-            api_placeholder = "secrets.tomlに設定済みの場合は空欄でOK" if "GEMINI_API_KEY" in st.secrets else "APIキーを入力 (ブラウザ保存用)"
+            # Chrome用: パスワード欄としてAPIキーを入力
+            # プレースホルダーの設定（secretsにあるかどうかで文言を変える）
+            try:
+                has_secret_api = "GEMINI_API_KEY" in st.secrets
+            except:
+                has_secret_api = False
+                
+            api_placeholder = "secrets.tomlに設定済なら空欄でOK" if has_secret_api else "APIキー (保存用)"
             input_api_key = st.text_input("Gemini API Key (任意)", type="password", placeholder=api_placeholder, key='login_api_key_input')
             
             # ログインボタン
             submitted = st.form_submit_button("ログイン", use_container_width=True)
             
             if submitted:
-                # パスワード判定
                 if user_password and hash_password(user_password) == SECRET_HASH:
+                    # 認証成功
                     st.session_state.authenticated = True
-                    
-                    # APIキーが入力されていればセッションに保存（secretsより優先、または未設定時の入力用）
+                    # APIキーが入力されていればセッションに保存
                     if input_api_key:
                         st.session_state.gemini_api_key_input = input_api_key
                     
-                    st.success("ログイン成功！")
+                    # ★【重要】ブラウザが保存ポップアップを出すための待機時間
+                    st.success("認証成功！設定を保存しています...")
+                    time.sleep(1.5) 
                     st.rerun() 
                 else:
                     st.error("パスワードが異なります。")
