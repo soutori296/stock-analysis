@@ -535,7 +535,7 @@ with st.sidebar:
         # API Keyの取得
         if "GEMINI_API_KEY" in st.secrets:
             api_key = st.secrets["GEMINI_API_KEY"]
-            st.info("🔑 Gemini API Key: OK (Secrets)")
+            st.info("🔑 Gemini API Key: OK")
         else:
             default_val = st.session_state.get('gemini_api_key_input', "")
             api_key = st.text_input("Gemini API Key", value=default_val, type="password", key='gemini_api_key_input_field')
