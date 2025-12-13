@@ -1112,7 +1112,7 @@ ID:9984 | <b>ソフトバンクグループ</b>｜RSIは中立圏に位置し、
                     c_com_cleaned = re.sub(r'^[\s\:\｜\-\・\*\,\.]*', '', c_com_cleaned).strip()
                     CLEANUP_PATTERN_END = r'(\s*(?:ATR_SL|SL|採用SL)[:：].*?円\.?)$'
                     c_com_cleaned = re.sub(CLEANUP_PATTERN_END, '', c_com_cleaned, flags=re.IGNORECASE).strip()
-                    if len(c_com_cleaned) > 125: c_com_cleaned = f'<span style="color:orange; font-size:11px; margin-right: 5px;"><b>⚠️長文注意/全文はスクロール</b></span>' + c_com_cleaned
+                    if len(c_com_cleaned) > 150: c_com_cleaned = f'<span style="color:orange; font-size:11px; margin-right: 5px;"><b>⚠️長文注意/全文はスクロール</b></span>' + c_com_cleaned
                     comments[c_code] = c_com_cleaned
                 except: pass
         return comments, monologue
