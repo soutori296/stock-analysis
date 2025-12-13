@@ -18,7 +18,6 @@ ICON_URL = "https://raw.githubusercontent.com/soutori296/stock-analysis/main/ais
 
 # ==============================================================================
 # 【最優先】ページ設定
-# ※Streamlitのお作法として、変数の定義よりも何よりも先にこれを実行します
 # ==============================================================================
 st.set_page_config(page_title="教えて！AIさん 2", page_icon=ICON_URL, layout="wide") 
 
@@ -31,31 +30,21 @@ def hash_password(password):
     return hashlib.sha256(password.encode('utf-8')).hexdigest()
 
 # ==============================================================================
-# 設定読み込みロジック (静音モード)
-# ※意図的なエラー発生(raise)を廃止し、if文だけで静かに分岐させます
+# 設定読み込みロジック
 # ==============================================================================
 SECRET_HASH = ""
 is_password_set = False
 
-# デフォルトのハッシュ値を事前に計算
-DEFAULT_HASH = hash_password("default_password_for_local_test")
-
 try:
-    # secretsへのアクセスを試みる (ファイルがない場合はここでFileNotFoundErrorが出る)
-    # .get() を使うことでキーが存在しない場合もエラーにならず None が返るようにする
-    sec_config = st.secrets.get("security")
-    
-    if sec_config and "secret_password_hash" in sec_config:
-        SECRET_HASH = sec_config["secret_password_hash"]
+    if 'security' in st.secrets and 'secret_password_hash' in st.secrets['security']:
+        SECRET_HASH = st.secrets["security"]["secret_password_hash"]
         is_password_set = True
     else:
-        # 設定がない場合は静かにデフォルト値をセット
-        SECRET_HASH = DEFAULT_HASH
+        # 設定がない場合はデフォルト値を使用
+        SECRET_HASH = hash_password("default_password_for_local_test")
         is_password_set = False
-
 except Exception:
-    # ファイル読み込みエラー等が起きても無視してデフォルト値をセット
-    SECRET_HASH = DEFAULT_HASH
+    SECRET_HASH = hash_password("default_password_for_local_test")
     is_password_set = False
 
 # --- 外部説明書URL ---
@@ -261,21 +250,23 @@ with st.sidebar:
     if not st.session_state.authenticated:
         st.header("🔑 認証")
         
+        # フォームの外で変数を準備することでエラー回避
+        has_secret_api = False
+        try:
+            if "GEMINI_API_KEY" in st.secrets: has_secret_api = True
+        except: pass
+        
+        api_placeholder = "secrets設定済なら空欄でOK" if has_secret_api else "APIキー (パスワードとして保存)"
+
         with st.form("login_form"):
             
-            # 1. アプリパスワード
+            # 1. アプリパスワード (ユーザー名として保存させるため type="default")
             user_password = st.text_input("ユーザー名", type="default", key='username_field')
             
-            # 2. APIキー
-            has_secret_api = False
-            try:
-                if "GEMINI_API_KEY" in st.secrets: has_secret_api = True
-            except: pass
-            
-            api_placeholder = "secrets設定済なら空欄でOK" if has_secret_api else "APIキー (パスワードとして保存)"
+            # 2. APIキー (パスワードとして保存させるため type="password")
             input_api_key = st.text_input("Key", type="password", placeholder=api_placeholder, key='password_field')
             
-            # ★警告対策: use_container_width=True を維持（2025年末まで有効）
+            # ★警告対策: use_container_width=True を維持
             submitted = st.form_submit_button("ログイン", use_container_width=True)
             
             if submitted:
@@ -362,23 +353,19 @@ with st.sidebar:
              key='run_continuously_checkbox_key', on_change=toggle_continuous_run 
         )
         is_start_disabled = st.session_state.clear_confirmed or st.session_state.is_running_continuous 
-        # 【修正】use_container_width=True
         analyze_start_clicked = col_start.button("▶️分析", use_container_width=True, disabled=is_start_disabled, key='analyze_start_key') 
 
         col_clear, col_reload = st.columns(2)
         
-        # 【修正】データがない場合、または連続実行中は「消去」ボタンを押せないようにする
+        # データがない場合、または連続実行中は「消去」ボタンを押せないようにする
         is_clear_disabled = not st.session_state.analyzed_data or st.session_state.is_running_continuous
-        # 【修正】use_container_width=True
         clear_button_clicked = col_clear.button("🗑️消去", on_click=clear_all_data_confirm, use_container_width=True, disabled=is_clear_disabled)
         
         is_reload_disabled = not st.session_state.analyzed_data or st.session_state.is_running_continuous
-        # 【修正】use_container_width=True
         reload_button_clicked = col_reload.button("🔄再診", on_click=reanalyze_all_data_logic, use_container_width=True, disabled=is_reload_disabled)
         
         if st.session_state.is_running_continuous:
              st.markdown("---")
-             # 【修正】use_container_width=True
              if st.button("🛑分析中止", use_container_width=True, key='cancel_continuous_key_large'):
                  st.session_state.is_running_continuous = False
                  st.session_state.wait_start_time = None
@@ -397,7 +384,6 @@ if clear_button_clicked or reload_button_clicked:
 if st.session_state.clear_confirmed:
     st.warning("⚠️ 本当に分析結果をすべてクリアしますか？この操作は取り消せません。", icon="🚨")
     col_confirm, col_cancel, col_clear_spacer = st.columns([0.2, 0.2, 0.6])
-    # 【修正】use_container_width=False
     if col_confirm.button("✅ はい、クリアします", use_container_width=False): 
         st.session_state.analyzed_data = []
         st.session_state.ai_monologue = ""
@@ -416,7 +402,6 @@ if st.session_state.clear_confirmed:
         if 'selected_tickers_for_transfer' in st.session_state: del st.session_state.selected_tickers_for_transfer 
         if 'trigger_copy_filtered_data' in st.session_state: del st.session_state.trigger_copy_filtered_data
         st.rerun() 
-    # 【修正】use_container_width=False
     if col_cancel.button("❌ キャンセル", use_container_width=False): 
         st.session_state.clear_confirmed = False
         st.rerun() 
@@ -1389,12 +1374,16 @@ if st.session_state.analyzed_data:
 
     df['score_disp'] = df.apply(lambda row: format_score_disp(row, status_label), axis=1)
     
+    # --- ATR表示用の関数を追加 (RSI列用) ---
     def format_rsi_atr(row):
         rsi = row['rsi']; rsi_disp = row['rsi_disp']
         atr = row['atr_smoothed']; pct = row['atr_pct']
+        
+        # 色判定 (5%以上:赤, 3%以上:オレンジ, それ以外:グレー)
         atr_color = "#666"
         if pct >= 5.0: atr_color = "red"
-        elif pct >= 3.0: atr_color = "#e67e22" 
+        elif pct >= 3.0: atr_color = "#e67e22" # orange
+        
         atr_html = f"<br><span style='font-size:10px; color:{atr_color};'>ATR:{atr:.0f}円<br>({pct:.1f}%)</span>"
         return rsi_disp + atr_html
 
