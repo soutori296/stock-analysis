@@ -330,6 +330,7 @@ with st.sidebar:
         st.session_state.ui_filter_min_liquid_man = col2_1.number_input("出来高(万株)", min_value=0.0, max_value=500.0, value=st.session_state.ui_filter_min_liquid_man, step=0.5, format="%.1f", key='filter_min_liquid_man')
         st.session_state.ui_filter_liquid_on = col2_2.checkbox("適用", value=st.session_state.ui_filter_liquid_on, key='filter_liquid_on')
         st.markdown("---")
+
         tickers_input = st.text_area(
             f"銘柄コード（上限{MAX_TICKERS}銘柄/回）", 
             value=st.session_state.tickers_input_value, 
@@ -353,7 +354,11 @@ with st.sidebar:
         analyze_start_clicked = col_start.button("▶️分析", use_container_width=True, disabled=is_start_disabled, key='analyze_start_key') 
 
         col_clear, col_reload = st.columns(2)
-        clear_button_clicked = col_clear.button("🗑️消去", on_click=clear_all_data_confirm, use_container_width=True, disabled=st.session_state.is_running_continuous)
+        
+        # 【修正】データがない場合、または連続実行中は「消去」ボタンを押せないようにする
+        is_clear_disabled = not st.session_state.analyzed_data or st.session_state.is_running_continuous
+        clear_button_clicked = col_clear.button("🗑️消去", on_click=clear_all_data_confirm, use_container_width=True, disabled=is_clear_disabled)
+        
         is_reload_disabled = not st.session_state.analyzed_data or st.session_state.is_running_continuous
         reload_button_clicked = col_reload.button("🔄再診", on_click=reanalyze_all_data_logic, use_container_width=True, disabled=is_reload_disabled)
         
@@ -365,6 +370,7 @@ with st.sidebar:
                  st.info("連続分析のキャンセルを承りました。現在のバッチが完了後、停止します。")
                  st.rerun() 
     else:
+        # 認証されていない場合
         analyze_start_clicked = False
         clear_button_clicked = False
         reload_button_clicked = False
