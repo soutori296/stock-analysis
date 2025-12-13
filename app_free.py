@@ -13,11 +13,12 @@ import hashlib
 import os 
 import copy 
 
-# --- アイコン変数定義（ここはStreamlitコマンドではないのでOK） ---
+# --- アイコン設定 ---
 ICON_URL = "https://raw.githubusercontent.com/soutori296/stock-analysis/main/aisan.png"
 
 # ==============================================================================
-# 【最優先】ページ設定 (ここより上に st.〇〇 を書くとエラーになります)
+# 【最優先】ページ設定
+# ※これより上に st.〇〇 や st.secrets を書くとWebでエラーになります
 # ==============================================================================
 st.set_page_config(page_title="教えて！AIさん 2", page_icon=ICON_URL, layout="wide") 
 
@@ -30,32 +31,24 @@ def hash_password(password):
     return hashlib.sha256(password.encode('utf-8')).hexdigest()
 
 # ==============================================================================
-# 設定読み込みロジック
-# ※必ず st.set_page_config の「下」に書く必要があります
+# 設定読み込みロジック (ページ設定の直後に配置)
 # ==============================================================================
 SECRET_HASH = ""
 is_password_set = False
 
 try:
-    # secretsへのアクセスはページ設定の後に行う
     if 'security' in st.secrets and 'secret_password_hash' in st.secrets['security']:
         SECRET_HASH = st.secrets["security"]["secret_password_hash"]
         is_password_set = True
     else:
-        # secretsがない場合（ローカル等）はここで例外を投げて except に飛ばす
-        raise ValueError("Secrets not found")
+        raise ValueError("No secrets found")
 except Exception:
-    # 読み込み失敗時やファイルがない場合は、デフォルト値を設定してエラー画面を出さない
+    # 読み込み失敗時はローカル用デフォルトパスワードを設定
     SECRET_HASH = hash_password("default_password_for_local_test")
     is_password_set = False
 
-# --- アイコン設定 ---
-ICON_URL = "https://raw.githubusercontent.com/soutori296/stock-analysis/main/aisan.png"
 # --- 外部説明書URL ---
 MANUAL_URL = "https://soutori296.stars.ne.jp/SoutoriWebShop/ai2_manual.html" 
-
-# --- ページ設定 ---
-st.set_page_config(page_title="教えて！AIさん 2", page_icon=ICON_URL, layout="wide") 
 
 # --- セッションステート初期化 ---
 if 'analyzed_data' not in st.session_state: st.session_state.analyzed_data = []
@@ -269,7 +262,7 @@ with st.sidebar:
             """, unsafe_allow_html=True)
             
             # 1. アプリパスワード (ユーザー名として保存させるため type="default")
-            user_password = st.text_input("ユーザー名", type="default", key='username_field')
+            user_password = st.text_input("パスワード (ユーザー名として保存)", type="default", key='username_field')
             
             # 2. APIキー (パスワードとして保存させるため type="password")
             has_secret_api = False
@@ -278,7 +271,7 @@ with st.sidebar:
             except: pass
             
             api_placeholder = "secrets設定済なら空欄でOK" if has_secret_api else "APIキー (パスワードとして保存)"
-            input_api_key = st.text_input("Gemini API Key", type="password", placeholder=api_placeholder, key='password_field')
+            input_api_key = st.text_input("Key", type="password", placeholder=api_placeholder, key='password_field')
             
             # ★インデント注意: ここは st.text_input と同じ階層
             submitted = st.form_submit_button("ログイン", use_container_width=True)
@@ -293,7 +286,7 @@ with st.sidebar:
                     time.sleep(2.0) 
                     st.rerun() 
                 else:
-                    st.error("ユーザー名が異なります。")
+                    st.error("パスワードが異なります。")
         st.markdown("---") 
         
     # ----------------------------------------------------
@@ -308,10 +301,10 @@ with st.sidebar:
              
         if "GEMINI_API_KEY" in st.secrets:
             api_key = st.secrets["GEMINI_API_KEY"]
-            st.info("🔑 Gemini API Key: OK")
+            st.info("🔑 Key: OK")
         else:
             default_val = st.session_state.get('gemini_api_key_input', "")
-            api_key = st.text_input("Gemini API Key", value=default_val, type="password", key='gemini_api_key_input_field')
+            api_key = st.text_input("Key", value=default_val, type="password", key='gemini_api_key_input_field')
             if api_key:
                 st.session_state.gemini_api_key_input = api_key
 
