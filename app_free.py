@@ -17,7 +17,8 @@ import copy
 ICON_URL = "https://raw.githubusercontent.com/soutori296/stock-analysis/main/aisan.png"
 
 # ==============================================================================
-# 【最優先】ページ設定 (エラー回避のため最上部に配置)
+# 【最優先】ページ設定
+# ※Streamlitのお作法として、変数の定義よりも何よりも先にこれを実行します
 # ==============================================================================
 st.set_page_config(page_title="教えて！AIさん 2", page_icon=ICON_URL, layout="wide") 
 
@@ -30,19 +31,31 @@ def hash_password(password):
     return hashlib.sha256(password.encode('utf-8')).hexdigest()
 
 # ==============================================================================
-# 設定読み込みロジック
+# 設定読み込みロジック (静音モード)
+# ※意図的なエラー発生(raise)を廃止し、if文だけで静かに分岐させます
 # ==============================================================================
 SECRET_HASH = ""
 is_password_set = False
 
+# デフォルトのハッシュ値を事前に計算
+DEFAULT_HASH = hash_password("default_password_for_local_test")
+
 try:
-    if 'security' in st.secrets and 'secret_password_hash' in st.secrets['security']:
-        SECRET_HASH = st.secrets["security"]["secret_password_hash"]
+    # secretsへのアクセスを試みる (ファイルがない場合はここでFileNotFoundErrorが出る)
+    # .get() を使うことでキーが存在しない場合もエラーにならず None が返るようにする
+    sec_config = st.secrets.get("security")
+    
+    if sec_config and "secret_password_hash" in sec_config:
+        SECRET_HASH = sec_config["secret_password_hash"]
         is_password_set = True
     else:
-        raise ValueError("No secrets found")
+        # 設定がない場合は静かにデフォルト値をセット
+        SECRET_HASH = DEFAULT_HASH
+        is_password_set = False
+
 except Exception:
-    SECRET_HASH = hash_password("default_password_for_local_test")
+    # ファイル読み込みエラー等が起きても無視してデフォルト値をセット
+    SECRET_HASH = DEFAULT_HASH
     is_password_set = False
 
 # --- 外部説明書URL ---
@@ -262,10 +275,8 @@ with st.sidebar:
             api_placeholder = "secrets設定済なら空欄でOK" if has_secret_api else "APIキー (パスワードとして保存)"
             input_api_key = st.text_input("Key", type="password", placeholder=api_placeholder, key='password_field')
             
-            # ★警告対策: use_container_width=True ではなく width=パラメータを使わずにデフォルトにするか
-            #  Streamlitのバージョン警告に従うなら "stretch" だが、環境によりエラーになるため
-            #  ここではシンプルにパラメータを外してデフォルト挙動に任せる（これで警告は出ない）
-            submitted = st.form_submit_button("ログイン")
+            # ★警告対策: use_container_width=True を維持（2025年末まで有効）
+            submitted = st.form_submit_button("ログイン", use_container_width=True)
             
             if submitted:
                 if user_password and hash_password(user_password) == SECRET_HASH:
@@ -351,23 +362,23 @@ with st.sidebar:
              key='run_continuously_checkbox_key', on_change=toggle_continuous_run 
         )
         is_start_disabled = st.session_state.clear_confirmed or st.session_state.is_running_continuous 
-        # 【修正】use_container_width=True に戻して横幅いっぱいに
+        # 【修正】use_container_width=True
         analyze_start_clicked = col_start.button("▶️分析", use_container_width=True, disabled=is_start_disabled, key='analyze_start_key') 
 
         col_clear, col_reload = st.columns(2)
         
-        # データがない場合、または連続実行中は「消去」ボタンを押せないようにする
+        # 【修正】データがない場合、または連続実行中は「消去」ボタンを押せないようにする
         is_clear_disabled = not st.session_state.analyzed_data or st.session_state.is_running_continuous
-        # 【修正】use_container_width=True に戻す
+        # 【修正】use_container_width=True
         clear_button_clicked = col_clear.button("🗑️消去", on_click=clear_all_data_confirm, use_container_width=True, disabled=is_clear_disabled)
         
         is_reload_disabled = not st.session_state.analyzed_data or st.session_state.is_running_continuous
-        # 【修正】use_container_width=True に戻す
+        # 【修正】use_container_width=True
         reload_button_clicked = col_reload.button("🔄再診", on_click=reanalyze_all_data_logic, use_container_width=True, disabled=is_reload_disabled)
         
         if st.session_state.is_running_continuous:
              st.markdown("---")
-             # 【修正】use_container_width=True に戻す
+             # 【修正】use_container_width=True
              if st.button("🛑分析中止", use_container_width=True, key='cancel_continuous_key_large'):
                  st.session_state.is_running_continuous = False
                  st.session_state.wait_start_time = None
@@ -386,7 +397,8 @@ if clear_button_clicked or reload_button_clicked:
 if st.session_state.clear_confirmed:
     st.warning("⚠️ 本当に分析結果をすべてクリアしますか？この操作は取り消せません。", icon="🚨")
     col_confirm, col_cancel, col_clear_spacer = st.columns([0.2, 0.2, 0.6])
-    if col_confirm.button("✅ はい、クリアします"): 
+    # 【修正】use_container_width=False
+    if col_confirm.button("✅ はい、クリアします", use_container_width=False): 
         st.session_state.analyzed_data = []
         st.session_state.ai_monologue = ""
         st.session_state.error_messages = []
@@ -404,7 +416,8 @@ if st.session_state.clear_confirmed:
         if 'selected_tickers_for_transfer' in st.session_state: del st.session_state.selected_tickers_for_transfer 
         if 'trigger_copy_filtered_data' in st.session_state: del st.session_state.trigger_copy_filtered_data
         st.rerun() 
-    if col_cancel.button("❌ キャンセル"): 
+    # 【修正】use_container_width=False
+    if col_cancel.button("❌ キャンセル", use_container_width=False): 
         st.session_state.clear_confirmed = False
         st.rerun() 
 
@@ -1020,6 +1033,7 @@ def get_stock_data(ticker, current_run_count):
         }
         japanese_score_factors = {k: v for k, v in japanese_score_factors.items() if v != 0}
         
+        # --- ATR拡大判定 (コメント生成用) ---
         atr_pct_val = (atr_smoothed / curr_price) * 100 if curr_price > 0 else 0
         atr_comment = "ATRは通常レンジ内です。"
         if atr_pct_val >= 5.0:
@@ -1035,7 +1049,7 @@ def get_stock_data(ticker, current_run_count):
             "atr_val": atr_val, "atr_smoothed": atr_smoothed, "is_gc": is_gc, "is_dc": is_dc, "ma25": ma25, "atr_sl_price": atr_sl_price, "score_diff": score_diff,
             "base_score": base_score, "is_aoteng": is_aoteng, "run_count": current_run_count, "win_rate_pct": win_rate_pct, "bt_trade_count": bt_cnt, "bt_target_pct": bt_target_pct, "bt_win_count": bt_win_count,
             "score_factors": japanese_score_factors, 
-            "atr_pct": atr_pct_val, "atr_comment": atr_comment, 
+            "atr_pct": atr_pct_val, "atr_comment": atr_comment, # 新規追加
         }
     except Exception as e:
         st.session_state.error_messages.append(f"データ処理エラー (コード:{ticker}) 詳細: {e}")
@@ -1063,7 +1077,7 @@ def batch_analyze_with_ai(data_list):
         atr_sl_price = d.get('atr_sl_price', 0)
         ma25_sl_price = d.get('ma25', 0) * 0.995 
         low_liquidity_status = "致命的低流動性:警告(1000株未満)" if d.get('avg_volume_5d', 0) < 1000 else "流動性:問題なし"
-        atr_msg = d.get('atr_comment', '') 
+        atr_msg = d.get('atr_comment', '') # ATRコメント取得
         data_for_ai += f"ID:{d['code']}: 名称:{d['name']} | 点:{d['score']} | 戦略:{d['strategy']} | RSI:{d['rsi']:.1f} | 乖離:{ma_div:+.1f}% | R/R:{rr_disp} | MDD:{mdd:+.1f}% | SL_R/R:{sl_ma:,.0f} | SL_ATR:{atr_sl_price:,.0f} | SL_MA25:{ma25_sl_price:,.0f} | LIQUIDITY:{low_liquidity_status} | ATR_MSG:{atr_msg}\n"
     global market_25d_ratio
     r25 = market_25d_ratio
@@ -1498,4 +1512,4 @@ if st.session_state.analyzed_data:
         columns_to_drop = ['risk_value', 'issued_shares', 'liquidity_ratio_pct', 'atr_val', 'is_gc', 'is_dc', 'atr_sl_price', 'base_score', 'is_aoteng', 'is_updated_in_this_run', 'run_count', 'batch_order', 'update_count'] 
         for col in columns_to_drop:
              if col in df_raw.columns: df_raw = df_raw.drop(columns=[col]) 
-        st.dataframe(df_raw)
+        st.dataframe(df_raw, use_container_width=True)
