@@ -13,38 +13,39 @@ import hashlib
 import os 
 import copy 
 
-# --- アイコン設定 ---
+# --- アイコン変数定義（ここはStreamlitコマンドではないのでOK） ---
 ICON_URL = "https://raw.githubusercontent.com/soutori296/stock-analysis/main/aisan.png"
 
 # ==============================================================================
-# 【重要修正】ページ設定を必ず一番最初に実行する
-# これによりWebデプロイ時の一瞬のエラー表示（フラッシュ）を防ぎます
+# 【最優先】ページ設定 (ここより上に st.〇〇 を書くとエラーになります)
 # ==============================================================================
 st.set_page_config(page_title="教えて！AIさん 2", page_icon=ICON_URL, layout="wide") 
 
-# --- 環境変数チェックで認証のON/OFFを決定 ---
-# ローカルで 'SKIP_AUTH=true streamlit run your_app.py' のように実行すると認証をスキップ
+# --- 環境変数チェック ---
 IS_LOCAL_SKIP_AUTH = os.environ.get("SKIP_AUTH", "false").lower() == 'true'
 
-# --- ハッシュ化ヘルパー関数 ---
+# --- ハッシュ化ヘルパー ---
 def hash_password(password):
     """入力されたパスワードをSHA256でハッシュ化する"""
     return hashlib.sha256(password.encode('utf-8')).hexdigest()
 
-# ==========================================
-# 設定読み込みロジック (エラー抑制用)
-# ページ設定の「あと」に配置することで動作を安定させます
-# ==========================================
+# ==============================================================================
+# 設定読み込みロジック
+# ※必ず st.set_page_config の「下」に書く必要があります
+# ==============================================================================
 SECRET_HASH = ""
 is_password_set = False
 
 try:
+    # secretsへのアクセスはページ設定の後に行う
     if 'security' in st.secrets and 'secret_password_hash' in st.secrets['security']:
         SECRET_HASH = st.secrets["security"]["secret_password_hash"]
         is_password_set = True
     else:
-        raise ValueError("No secrets found")
+        # secretsがない場合（ローカル等）はここで例外を投げて except に飛ばす
+        raise ValueError("Secrets not found")
 except Exception:
+    # 読み込み失敗時やファイルがない場合は、デフォルト値を設定してエラー画面を出さない
     SECRET_HASH = hash_password("default_password_for_local_test")
     is_password_set = False
 
