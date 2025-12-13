@@ -250,19 +250,10 @@ with st.sidebar:
     if not st.session_state.authenticated:
         st.header("🔑 認証")
         
-        if not is_password_set and not IS_LOCAL_SKIP_AUTH:
-             st.caption("※ローカルテスト用: default_password_for_local_test")
-
         with st.form("login_form"):
-            st.markdown("""
-            <div style="font-size:12px; color:gray; margin-bottom:10px;">
-            <b>【保存と自動入力のコツ】</b><br>
-            ブラウザに2つの項目を同時に保存させるため、以下の形式で入力してください。<br>
-            </div>
-            """, unsafe_allow_html=True)
             
             # 1. アプリパスワード (ユーザー名として保存させるため type="default")
-            user_password = st.text_input("パスワード (ユーザー名として保存)", type="default", key='username_field')
+            user_password = st.text_input("ユーザー名", type="default", key='username_field')
             
             # 2. APIキー (パスワードとして保存させるため type="password")
             has_secret_api = False
@@ -297,7 +288,7 @@ with st.sidebar:
         if IS_LOCAL_SKIP_AUTH:
              st.info("✅ ローカルモード")
         else:
-             st.success("✅ 認証済み")
+             st.success("✅ ユーザー認証済")
              
         if "GEMINI_API_KEY" in st.secrets:
             api_key = st.secrets["GEMINI_API_KEY"]
@@ -317,6 +308,7 @@ with st.sidebar:
         )
         st.markdown("<br>", unsafe_allow_html=True)
         st.markdown("---")
+        st.markdown("<br>", unsafe_allow_html=True)
 
         sort_options = [
             "スコア順 (高い順)", "更新回数順", "時価総額順 (高い順)", 
@@ -337,8 +329,7 @@ with st.sidebar:
         
         st.session_state.ui_filter_min_liquid_man = col2_1.number_input("出来高(万株)", min_value=0.0, max_value=500.0, value=st.session_state.ui_filter_min_liquid_man, step=0.5, format="%.1f", key='filter_min_liquid_man')
         st.session_state.ui_filter_liquid_on = col2_2.checkbox("適用", value=st.session_state.ui_filter_liquid_on, key='filter_liquid_on')
-        st.markdown("<br>", unsafe_allow_html=True)
-
+        st.markdown("---")
         tickers_input = st.text_area(
             f"銘柄コード（上限{MAX_TICKERS}銘柄/回）", 
             value=st.session_state.tickers_input_value, 
@@ -408,7 +399,7 @@ if st.session_state.clear_confirmed:
         st.rerun() 
 
 if not st.session_state.authenticated:
-    st.info("⬅️ サイドバーでパスワードを入力してログインしてください。")
+    st.info("⬅️ サイドバーでユーザー名を入力して認証してください。")
     st.stop()
 
 # --- 関数群 ---
