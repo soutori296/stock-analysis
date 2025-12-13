@@ -22,6 +22,19 @@ def hash_password(password):
     """入力されたパスワードをSHA256でハッシュ化する"""
     return hashlib.sha256(password.encode('utf-8')).hexdigest()
 
+SECRET_HASH = ""
+is_password_set = False
+
+try:
+    if 'security' in st.secrets and 'secret_password_hash' in st.secrets['security']:
+        SECRET_HASH = st.secrets["security"]["secret_password_hash"]
+        is_password_set = True
+    else:
+        raise ValueError("No secrets found")
+except Exception:
+    SECRET_HASH = hash_password("default_password_for_local_test")
+    is_password_set = False
+
 # --- アイコン設定 ---
 ICON_URL = "https://raw.githubusercontent.com/soutori296/stock-analysis/main/aisan.png"
 # --- 外部説明書URL ---
@@ -462,87 +475,75 @@ def toggle_continuous_run():
 # --- サイドバー (UIのコアを移動) ---
 with st.sidebar:
     
-    # 【修正1】エラー抑制: try-exceptで囲み、ファイルがない場合も静かに処理する
-    try:
-        # secretsへのアクセスを試みる
-        if 'security' in st.secrets and 'secret_password_hash' in st.secrets['security']:
-            SECRET_HASH = st.secrets["security"]["secret_password_hash"]
-            is_password_set = True
-        else:
-            raise ValueError("No config") # 手動で例外を起こしてexceptに飛ばす
-    except Exception:
-        # secretsがない、または読み込めない場合はローカルモードへ
-        is_password_set = False
-        SECRET_HASH = hash_password("default_password_for_local_test") 
-        if not IS_LOCAL_SKIP_AUTH:
-             # st.warning等の表示を消し、静かにログだけ残すか、何もしない
-             # どうしても表示したい場合のみ以下を残す（起動直後のチラつき原因になるため削除推奨）
-             pass 
-
+    # ----------------------------------------------------
+    # 【修正2】ブラウザ保存対応のログインフォーム
+    # ----------------------------------------------------
     if not st.session_state.authenticated:
-        # ★ 認証スキップがTrueでない場合にのみ認証UIを表示
-        st.header("🔑 認証 & 設定")
+        st.header("🔑 認証")
         
+        # 開発環境等の表示
         if not is_password_set and not IS_LOCAL_SKIP_AUTH:
-            st.info("⚠️ secrets設定なし。パスワード: default_password_for_local_test")
+             st.caption("※ローカルテスト用パスワード: default_password_for_local_test")
 
-        # 【修正2】ブラウザにパスワードを保存させるためのフォーム
         with st.form("login_form"):
             st.markdown("""
-            <small style="color:gray;">ユーザー名欄にパスワード、パスワード欄にAPIキーが保存されます。</small>
+            <div style="font-size:12px; color:gray; margin-bottom:10px;">
+            Chrome等に保存する場合、<br>
+            ・上段：<b>パスワード</b><br>
+            ・下段：<b>APIキー</b> (空欄可)<br>
+            を入力してログインしてください。
+            </div>
             """, unsafe_allow_html=True)
             
-            # Chrome用: ユーザー名欄としてパスワードを入力
-            user_password = st.text_input("パスワード", type="password", key='password_input')
+            # 1. アプリパスワード (ユーザー名として認識させる)
+            user_password = st.text_input("パスワード", type="password", key='username')
             
-            # Chrome用: パスワード欄としてAPIキーを入力
-            # プレースホルダーの設定（secretsにあるかどうかで文言を変える）
+            # 2. APIキー (パスワードとして認識させる)
+            has_secret_api = False
             try:
-                has_secret_api = "GEMINI_API_KEY" in st.secrets
-            except:
-                has_secret_api = False
-                
-            api_placeholder = "secrets.tomlに設定済なら空欄でOK" if has_secret_api else "APIキー (保存用)"
-            input_api_key = st.text_input("Gemini API Key (任意)", type="password", placeholder=api_placeholder, key='login_api_key_input')
+                if "GEMINI_API_KEY" in st.secrets: has_secret_api = True
+            except: pass
             
-            # ログインボタン
+            api_placeholder = "secrets設定済なら空欄でOK" if has_secret_api else "APIキー (保存用)"
+            input_api_key = st.text_input("Gemini API Key", type="password", placeholder=api_placeholder, key='password')
+            
             submitted = st.form_submit_button("ログイン", use_container_width=True)
             
             if submitted:
                 if user_password and hash_password(user_password) == SECRET_HASH:
-                    # 認証成功
                     st.session_state.authenticated = True
-                    # APIキーが入力されていればセッションに保存
                     if input_api_key:
                         st.session_state.gemini_api_key_input = input_api_key
                     
-                    # ★【重要】ブラウザが保存ポップアップを出すための待機時間
                     st.success("認証成功！設定を保存しています...")
-                    time.sleep(1.5) 
+                    time.sleep(2.0) # 保存ポップアップ用の待機
                     st.rerun() 
                 else:
                     st.error("パスワードが異なります。")
-        st.markdown("---")  
+        st.markdown("---") 
         
-    # 1. API Key (認証成功後のみ表示)
+    # ----------------------------------------------------
+    # 認証成功後の表示項目
+    # ----------------------------------------------------
     api_key = None
-    if st.session_state.authenticated: # 認証成功後のみ表示・処理
+    if st.session_state.authenticated:
         if IS_LOCAL_SKIP_AUTH:
              st.info("✅ ローカルモード")
         else:
              st.success("✅ 認証済み")
              
+        # API Keyの取得
         if "GEMINI_API_KEY" in st.secrets:
             api_key = st.secrets["GEMINI_API_KEY"]
-            st.info("🔑 Gemini API Key: OK")
+            st.info("🔑 Gemini API Key: OK (Secrets)")
         else:
-            api_key = st.text_input("Gemini API Key", type="password", key='gemini_api_key_input') 
+            default_val = st.session_state.get('gemini_api_key_input', "")
+            api_key = st.text_input("Gemini API Key", value=default_val, type="password", key='gemini_api_key_input_field')
+            if api_key:
+                st.session_state.gemini_api_key_input = api_key
 
-        # 2. AIモデル選択ボックス
-        model_options = [
-            "gemma-3-12b-it",
-            "gemini-2.5-flash", 
-        ]
+        # モデル選択
+        model_options = ["gemma-3-12b-it", "gemini-2.5-flash"]
         st.session_state.selected_model_name = st.selectbox(
             "使用AIモデルを選択", 
             options=model_options, 
@@ -550,123 +551,60 @@ with st.sidebar:
             key='model_select_key' 
         )
         st.markdown("<br>", unsafe_allow_html=True)
-        st.markdown("---") # CSSで縦幅が詰まっている
+        st.markdown("---")
 
-        # 3. ソート選択ボックス (★ レイアウト変更: テキストボックスの上に配置)
+        # ソート順
         sort_options = [
             "スコア順 (高い順)", "更新回数順", "時価総額順 (高い順)", 
             "RSI順 (低い順)", "RSI順 (高い順)", "出来高倍率順 (高い順)",
-            "勝率順 (高い順)", # 🎯 4. 勝率ソートの追加
-            "銘柄コード順"
+            "勝率順 (高い順)", "銘柄コード順"
         ]
-        
         current_index = sort_options.index(st.session_state.sort_option_key) if st.session_state.sort_option_key in sort_options else 0
         st.session_state.sort_option_key = st.selectbox(
-            "📊 結果のソート順", 
-            options=sort_options, 
-            index=current_index, 
-            key='sort_selectbox_ui_key' 
+            "📊 結果のソート順", options=sort_options, index=current_index, key='sort_selectbox_ui_key' 
         )
         
-        # 【④ UIデザイン改善 B. 絞り込みフィルターの追加 (最終修正) 】
-        
-        # ★ 修正: タイトルサイズを統一し、マージンを詰める
+        # フィルター
         st.markdown("##### 🔍 表示フィルター") 
-        
-        # フィルター入力とチェックボックスを横並びにする
-        col1_1, col1_2 = st.columns([0.6, 0.4]) # 入力:60%, チェックボックス:40%
+        col1_1, col1_2 = st.columns([0.6, 0.4])
         col2_1, col2_2 = st.columns([0.6, 0.4])
         
-        # --- 総合点（n点以上） ---
-        st.session_state.ui_filter_min_score = col1_1.number_input(
-            "n点以上", 
-            min_value=0, max_value=100, 
-            value=st.session_state.ui_filter_min_score, 
-            step=5, 
-            key='filter_min_score'
-        )
-        st.session_state.ui_filter_score_on = col1_2.checkbox(
-            "適用", 
-            value=st.session_state.ui_filter_score_on, 
-            key='filter_score_on',    
-        )
+        st.session_state.ui_filter_min_score = col1_1.number_input("n点以上", min_value=0, max_value=100, value=st.session_state.ui_filter_min_score, step=5, key='filter_min_score')
+        st.session_state.ui_filter_score_on = col1_2.checkbox("適用", value=st.session_state.ui_filter_score_on, key='filter_score_on')
         
-        # --- 5日平均出来高（n万株以上） ---
-        st.session_state.ui_filter_min_liquid_man = col2_1.number_input(
-            "出来高(万株)", 
-            min_value=0.0, max_value=500.0, 
-            value=st.session_state.ui_filter_min_liquid_man, 
-            step=0.5,
-            format="%.1f", 
-            key='filter_min_liquid_man'
-        )
-        st.session_state.ui_filter_liquid_on = col2_2.checkbox(
-            "適用", 
-            value=st.session_state.ui_filter_liquid_on, 
-            key='filter_liquid_on',
-        )
+        st.session_state.ui_filter_min_liquid_man = col2_1.number_input("出来高(万株)", min_value=0.0, max_value=500.0, value=st.session_state.ui_filter_min_liquid_man, step=0.5, format="%.1f", key='filter_min_liquid_man')
+        st.session_state.ui_filter_liquid_on = col2_2.checkbox("適用", value=st.session_state.ui_filter_liquid_on, key='filter_liquid_on')
         st.markdown("<br>", unsafe_allow_html=True)
 
-        # 4. 銘柄コード入力エリア (上部の余白をCSSで詰めている)
+        # 銘柄入力
         tickers_input = st.text_area(
             f"銘柄コード（上限{MAX_TICKERS}銘柄/回）", 
             value=st.session_state.tickers_input_value, 
             placeholder="例:\n7203\n8306\n9984",
             height=150
         )
-       
-        # ★ ユーザー入力値の同期ロジック (追記・上書きに最適化)
         if tickers_input != st.session_state.tickers_input_value:
             st.session_state.tickers_input_value = tickers_input
             st.session_state.analysis_index = 0
             st.session_state.current_input_hash = "" 
 
-        st.markdown("---") # CSSで縦幅が詰まっている
+        st.markdown("---")
 
-        # 5. ボタン類 (コンパクト化案)
-        
-        # 5-1. 分析開始ボタンと連続実行チェックボックス
+        # ボタン類
         col_start, col_check = st.columns([0.65, 0.35]) 
-        
-        # 連続実行チェックボックス
-        is_checkbox_on_for_ui = st.session_state.get('run_continuously_checkbox_key', False) # UI表示用の値を取得
-        st.session_state.run_continuously_checkbox = col_check.checkbox( # ステート自体も更新
-             "連続",
-             value=st.session_state.run_continuously_checkbox,
-             key='run_continuously_checkbox_key',
-             on_change=toggle_continuous_run 
+        is_checkbox_on_for_ui = st.session_state.get('run_continuously_checkbox_key', False) 
+        st.session_state.run_continuously_checkbox = col_check.checkbox(
+             "連続", value=st.session_state.run_continuously_checkbox,
+             key='run_continuously_checkbox_key', on_change=toggle_continuous_run 
         )
-        
-        # 分析開始ボタン (常時表示)
         is_start_disabled = st.session_state.clear_confirmed or st.session_state.is_running_continuous 
-        analyze_start_clicked = col_start.button(
-            "▶️分析", 
-            use_container_width=True, 
-            disabled=is_start_disabled, 
-            key='analyze_start_key'
-        ) 
+        analyze_start_clicked = col_start.button("▶️分析", use_container_width=True, disabled=is_start_disabled, key='analyze_start_key') 
 
-        # 5-2. 結果を消去と再分析ボタン
         col_clear, col_reload = st.columns(2)
-
-        # 結果を消去ボタン (左側)
-        clear_button_clicked = col_clear.button(
-            "🗑️消去", 
-            on_click=clear_all_data_confirm, 
-            use_container_width=True, 
-            disabled=st.session_state.is_running_continuous
-        )
-
-        # 結果を再分析ボタン (右側)
+        clear_button_clicked = col_clear.button("🗑️消去", on_click=clear_all_data_confirm, use_container_width=True, disabled=st.session_state.is_running_continuous)
         is_reload_disabled = not st.session_state.analyzed_data or st.session_state.is_running_continuous
-        reload_button_clicked = col_reload.button(
-            "🔄再診", 
-            on_click=reanalyze_all_data_logic, 
-            use_container_width=True, 
-            disabled=is_reload_disabled
-        )
+        reload_button_clicked = col_reload.button("🔄再診", on_click=reanalyze_all_data_logic, use_container_width=True, disabled=is_reload_disabled)
         
-        # 5-3. キャンセルボタン (連続実行中のみ表示)
         if st.session_state.is_running_continuous:
              st.markdown("---")
              if st.button("🛑分析中止", use_container_width=True, key='cancel_continuous_key_large'):
@@ -675,11 +613,9 @@ with st.sidebar:
                  st.info("連続分析のキャンセルを承りました。現在のバッチが完了後、停止します。")
                  st.rerun() 
     else:
-        # 認証されていない場合、ボタンクリックを無効化
         analyze_start_clicked = False
         clear_button_clicked = False
         reload_button_clicked = False
-
 
 # --- ボタンの実行ロジック (メインスコープでの処理) ---
 
