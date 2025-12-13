@@ -1499,3 +1499,21 @@ if st.session_state.analyzed_data:
              if col in df_raw.columns: df_raw = df_raw.drop(columns=[col]) 
         # use_container_width=True を明示的に指定して幅を確保（警告は許容する）
         st.dataframe(df_raw, use_container_width=True)
+    # --- 最下部の免責事項 (HTML表示) ---
+    st.markdown("""
+    <br>
+    <div style="
+        border: 1px solid #ffcccc;
+        background-color: #fff5f5;
+        padding: 15px;
+        border-radius: 5px;
+        color: #d32f2f;
+        font-size: 13px;
+        line-height: 1.6;
+    ">
+        <h5 style="margin-top: 0; color: #d32f2f;">【注意事項】</h5>
+        本アプリは研究・検証目的の内部ツールです。<br>
+        特定の銘柄の売買を推奨するものではなく、<br>
+        実際の投資判断や売買に用いることを目的としていません。
+    </div>
+    """, unsafe_allow_html=True)
