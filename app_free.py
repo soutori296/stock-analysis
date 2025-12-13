@@ -171,10 +171,10 @@ st.markdown(f"""
     .big-font {{ font-size: 16px !important; }}
     [data-testid="stAlert"] {{ padding-top: 5px !important; padding-bottom: 5px !important; margin-top: 0px !important; margin-bottom: 2px !important; }}
     [data-testid="stTextInput"], [data-testid="stNumberInput"], [data-testid="stSelectbox"] {{ margin-top: 0px !important; margin-bottom: 5px !important; }}
-    label[data-testid^="stWidgetLabel"] {{ margin-top: -7px !important; margin-bottom: 0px !important; padding: 0 !important; }}
+    label[data-testid^="stWidgetLabel"] {{ margin-top: 0px !important; margin-bottom: 0px !important; padding: 0 !important; }}
     [data-testid="stCheckbox"] {{ margin-top: 0px; margin-bottom: 0px; padding-top: 4px; }}
     [data-testid="stSidebar"] [data-testid="stVerticalBlock"] > div:nth-child(2) > div:nth-child(4) [data-testid="stVerticalBlock"] > div > div:nth-child(2) [data-testid="stCheckbox"], [data-testid="stSidebar"] [data-testid="stVerticalBlock"] > div:nth-child(4) > div:nth-child(2) [data-testid="stVerticalBlock"] > div > div:nth-child(2) [data-testid="stCheckbox"] {{ transform: translateY(28px); }}
-    [data-testid="stTextarea"] {{ margin-top: -10px !important; margin-bottom: 5px !important; }}
+    [data-testid="stTextarea"] {{ margin-top: 0px !important; margin-bottom: 5px !important; }}
     .st-emotion-cache-1pxe8jp.e1nzilvr4 {{ margin-top: 10px !important; margin-bottom: 5px !important; }}
     hr {{ margin-top: 5px !important; margin-bottom: 5px !important; }}
     @media (max-width: 768px) {{
@@ -330,7 +330,6 @@ with st.sidebar:
         st.session_state.ui_filter_min_liquid_man = col2_1.number_input("出来高(万株)", min_value=0.0, max_value=500.0, value=st.session_state.ui_filter_min_liquid_man, step=0.5, format="%.1f", key='filter_min_liquid_man')
         st.session_state.ui_filter_liquid_on = col2_2.checkbox("適用", value=st.session_state.ui_filter_liquid_on, key='filter_liquid_on')
         st.markdown("---")
-        st.markdown("<br>", unsafe_allow_html=True)
         tickers_input = st.text_area(
             f"銘柄コード（上限{MAX_TICKERS}銘柄/回）", 
             value=st.session_state.tickers_input_value, 
