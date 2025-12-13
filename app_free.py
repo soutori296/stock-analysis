@@ -18,7 +18,6 @@ ICON_URL = "https://raw.githubusercontent.com/soutori296/stock-analysis/main/ais
 
 # ==============================================================================
 # 【最優先】ページ設定
-# ※これより上に st.〇〇 や st.secrets を書くとWebでエラーになります
 # ==============================================================================
 st.set_page_config(page_title="教えて！AIさん 2", page_icon=ICON_URL, layout="wide") 
 
@@ -31,7 +30,7 @@ def hash_password(password):
     return hashlib.sha256(password.encode('utf-8')).hexdigest()
 
 # ==============================================================================
-# 設定読み込みロジック (ページ設定の直後に配置)
+# 設定読み込みロジック
 # ==============================================================================
 SECRET_HASH = ""
 is_password_set = False
@@ -43,7 +42,6 @@ try:
     else:
         raise ValueError("No secrets found")
 except Exception:
-    # 読み込み失敗時はローカル用デフォルトパスワードを設定
     SECRET_HASH = hash_password("default_password_for_local_test")
     is_password_set = False
 
@@ -148,7 +146,7 @@ st.markdown(f"""
     .ai-table td:nth-child(3) {{ text-align: left !important; }} 
     .ai-table td:nth-child(17) {{ text-align: left !important; }} 
     .ai-table th:nth-child(1), .ai-table td:nth-child(1) {{ width: 40px; min-width: 40px; }}
-    .ai-table th:nth-child(2), .ai-table td:nth-child(2) {{ width: 70px; min-width: 70px; }} 
+    .ai-table th:nth-child(2), .ai-table td:nth-child(2) {{ width: 60px; min-width: 60px; }} 
     .ai-table th:nth-child(3), .ai-table td:nth-child(3) {{ width: 120px; min-width: 120px; }} 
     .ai-table th:nth-child(4), .ai-table td:nth-child(4) {{ width: 100px; min-width: 100px; }} 
     .ai-table th:nth-child(5), .ai-table td:nth-child(5) {{ width: 50px; min-width: 50px; }} 
@@ -158,7 +156,7 @@ st.markdown(f"""
     .ai-table th:nth-child(9), .ai-table td:nth-child(9) {{ width: 50px; min-width: 50px; }} 
     .ai-table th:nth-child(10), .ai-table td:nth-child(10) {{ width: 90px; min-width: 90px; }} 
     .ai-table th:nth-child(11), .ai-table td:nth-child(11) {{ width: 120px; min-width: 120px; }} 
-    .ai-table th:nth-child(12), .ai-table td:nth-child(12) {{ width: 60px; min-width: 60px; }} 
+    .ai-table th:nth-child(12), .ai-table td:nth-child(12) {{ width: 80px; min-width: 80px; }} 
     .ai-table th:nth-child(13), .ai-table td:nth-child(13) {{ width: 70px; min-width: 70px; }} 
     .ai-table th:nth-child(14), .ai-table td:nth-child(14) {{ width: 60px; min-width: 60px; }} 
     .ai-table th:nth-child(15), .ai-table td:nth-child(15) {{ width: 60px; min-width: 60px; }} 
@@ -405,7 +403,7 @@ if st.session_state.clear_confirmed:
         st.rerun() 
 
 if not st.session_state.authenticated:
-    st.info("⬅️ サイドバーでユーザー名を入力して認証してください。")
+    st.info("⬅️ サイドバーでパスワードを入力してログインしてください。")
     st.stop()
 
 # --- 関数群 ---
@@ -1015,6 +1013,15 @@ def get_stock_data(ticker, current_run_count):
             "構造的減点（合計）": total_structural_deduction, 
         }
         japanese_score_factors = {k: v for k, v in japanese_score_factors.items() if v != 0}
+        
+        # --- ATR拡大判定 (コメント生成用) ---
+        atr_pct_val = (atr_smoothed / curr_price) * 100 if curr_price > 0 else 0
+        atr_comment = "ATRは通常レンジ内です。"
+        if atr_pct_val >= 5.0:
+            atr_comment = "ATRが大きく拡大しており、値動きが不安定な危険寄りの状態です。引けエントリーは慎重判断が必要です。"
+        elif atr_pct_val >= 3.0:
+            atr_comment = "ATRがやや拡大しており、値動きが荒くなっています。"
+
         return {
             "code": ticker, "name": info["name"], "price": curr_price, "cap_val": info["cap"], "cap_disp": fmt_market_cap(info["cap"]), "per": info["per"], "pbr": info["pbr"],
             "rsi": rsi_val, "rsi_disp": f"{rsi_mark}{rsi_val:.1f}", "vol_ratio": vol_ratio, "vol_disp": vol_disp, "momentum": momentum_str, "strategy": strategy, "score": score_to_return,
@@ -1023,6 +1030,7 @@ def get_stock_data(ticker, current_run_count):
             "atr_val": atr_val, "atr_smoothed": atr_smoothed, "is_gc": is_gc, "is_dc": is_dc, "ma25": ma25, "atr_sl_price": atr_sl_price, "score_diff": score_diff,
             "base_score": base_score, "is_aoteng": is_aoteng, "run_count": current_run_count, "win_rate_pct": win_rate_pct, "bt_trade_count": bt_cnt, "bt_target_pct": bt_target_pct, "bt_win_count": bt_win_count,
             "score_factors": japanese_score_factors, 
+            "atr_pct": atr_pct_val, "atr_comment": atr_comment, # 新規追加
         }
     except Exception as e:
         st.session_state.error_messages.append(f"データ処理エラー (コード:{ticker}) 詳細: {e}")
@@ -1050,7 +1058,8 @@ def batch_analyze_with_ai(data_list):
         atr_sl_price = d.get('atr_sl_price', 0)
         ma25_sl_price = d.get('ma25', 0) * 0.995 
         low_liquidity_status = "致命的低流動性:警告(1000株未満)" if d.get('avg_volume_5d', 0) < 1000 else "流動性:問題なし"
-        data_for_ai += f"ID:{d['code']}: 名称:{d['name']} | 点:{d['score']} | 戦略:{d['strategy']} | RSI:{d['rsi']:.1f} | 乖離:{ma_div:+.1f}% | R/R:{rr_disp} | MDD:{mdd:+.1f}% | SL_R/R:{sl_ma:,.0f} | SL_ATR:{atr_sl_price:,.0f} | SL_MA25:{ma25_sl_price:,.0f} | LIQUIDITY:{low_liquidity_status}\n"
+        atr_msg = d.get('atr_comment', '') # ATRコメント取得
+        data_for_ai += f"ID:{d['code']}: 名称:{d['name']} | 点:{d['score']} | 戦略:{d['strategy']} | RSI:{d['rsi']:.1f} | 乖離:{ma_div:+.1f}% | R/R:{rr_disp} | MDD:{mdd:+.1f}% | SL_R/R:{sl_ma:,.0f} | SL_ATR:{atr_sl_price:,.0f} | SL_MA25:{ma25_sl_price:,.0f} | LIQUIDITY:{low_liquidity_status} | ATR_MSG:{atr_msg}\n"
     global market_25d_ratio
     r25 = market_25d_ratio
     market_alert_info = f"市場25日騰落レシオ: {r25:.2f}%。"
@@ -1074,6 +1083,7 @@ def batch_analyze_with_ai(data_list):
 10. 【リスク情報と撤退基準】
     - リスク情報（MDD、SL乖離率）を参照し、リスク管理の重要性に言及してください。MDDが-8.0%を超える場合は、「過去の最大下落リスクが高いデータ」がある旨を明確に伝えてください。
     - 流動性: 致命的低流動性:警告(1000株未満)の銘柄については、コメントの冒頭（プレフィックスの次）で「平均出来高が1,000株未満と極めて低く、希望価格での売買が困難な<b>流動性リスク</b>を伴います。ご自身の資金規模に応じたロット調整をご検討ください。」といった<b>明確な警告</b>を必ず含めてください。
+    - **【ATRリスク】: ATR_MSGがある場合（「通常レンジ内」以外）、ボラティリティリスクとして必ずコメントに含めてください。特に「危険」判定の場合は優先的に警告してください。**
     - 新規追加: 極端な低流動性 (流動性比率 < 0.05% や ATR < 0.5% の場合) についても、同様に<b>明確な警告</b>を盛り込んでください。
     - **撤退基準（MA25/ATR併記）:** コメントの末尾で、**構造的崩壊ライン**の**MA25_SL（X円）**と、**ボラティリティ基準**の**ATR_SL（Y円）**を**両方とも**言及し、「**MA25を終値で割るか、ATR_SLを割るかのどちらかをロスカット基準としてご検討ください**」という趣旨を明確に伝えてください。（※XとYの価格は、AIが渡されたデータから参照してください。）
     - **青天井領域の追記:** ターゲット情報が「青天井追従」または「追従目標」の場合、<b>「利益目標は固定目標ではなく、動的なATRトレーリング・ストップ（X円）に切り替わっています。この価格を終値で下回った場合は、利益を確保するための撤退を検討します。」</b>という趣旨を、コメントの適切な位置に含めてください。
@@ -1359,6 +1369,22 @@ if st.session_state.analyzed_data:
         else: return f"{score:.0f}{diff_span}"
 
     df['score_disp'] = df.apply(lambda row: format_score_disp(row, status_label), axis=1)
+    
+    # --- ATR表示用の関数を追加 (RSI列用) ---
+    def format_rsi_atr(row):
+        rsi = row['rsi']; rsi_disp = row['rsi_disp']
+        atr = row['atr_smoothed']; pct = row['atr_pct']
+        
+        # 色判定 (5%以上:赤, 3%以上:オレンジ, それ以外:グレー)
+        atr_color = "#666"
+        if pct >= 5.0: atr_color = "red"
+        elif pct >= 3.0: atr_color = "#e67e22" # orange
+        
+        atr_html = f"<br><span style='font-size:12px; color:{atr_color};'>ATR:{atr:.0f}円<br>({pct:.1f}%)</span>"
+        return rsi_disp + atr_html
+
+    df['rsi_disp'] = df.apply(format_rsi_atr, axis=1)
+
     def format_price_disp(price_val):
         if price_val is None: return "-"
         if price_val == int(price_val): return f"{int(price_val):,}"
