@@ -13,7 +13,17 @@ import hashlib
 import os 
 import copy 
 
+# --- アイコン設定 ---
+ICON_URL = "https://raw.githubusercontent.com/soutori296/stock-analysis/main/aisan.png"
+
+# ==============================================================================
+# 【重要修正】ページ設定を必ず一番最初に実行する
+# これによりWebデプロイ時の一瞬のエラー表示（フラッシュ）を防ぎます
+# ==============================================================================
+st.set_page_config(page_title="教えて！AIさん 2", page_icon=ICON_URL, layout="wide") 
+
 # --- 環境変数チェックで認証のON/OFFを決定 ---
+# ローカルで 'SKIP_AUTH=true streamlit run your_app.py' のように実行すると認証をスキップ
 IS_LOCAL_SKIP_AUTH = os.environ.get("SKIP_AUTH", "false").lower() == 'true'
 
 # --- ハッシュ化ヘルパー関数 ---
@@ -22,7 +32,8 @@ def hash_password(password):
     return hashlib.sha256(password.encode('utf-8')).hexdigest()
 
 # ==========================================
-# 【修正1】設定読み込みロジック (エラー抑制用)
+# 設定読み込みロジック (エラー抑制用)
+# ページ設定の「あと」に配置することで動作を安定させます
 # ==========================================
 SECRET_HASH = ""
 is_password_set = False
