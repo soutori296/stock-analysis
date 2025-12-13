@@ -257,7 +257,7 @@ with st.sidebar:
             """, unsafe_allow_html=True)
             
             # 1. アプリパスワード (ユーザー名として保存させるため type="default")
-            user_password = st.text_input("パスワード (ユーザー名として保存)", type="default", key='username_field')
+            user_password = st.text_input("ユーザー名", type="default", key='username_field')
             
             # 2. APIキー (パスワードとして保存させるため type="password")
             has_secret_api = False
@@ -281,7 +281,7 @@ with st.sidebar:
                     time.sleep(2.0) 
                     st.rerun() 
                 else:
-                    st.error("パスワードが異なります。")
+                    st.error("ユーザー名が異なります。")
         st.markdown("---") 
         
     # ----------------------------------------------------
@@ -296,7 +296,7 @@ with st.sidebar:
              
         if "GEMINI_API_KEY" in st.secrets:
             api_key = st.secrets["GEMINI_API_KEY"]
-            st.info("🔑 Gemini API Key: OK (Secrets)")
+            st.info("🔑 Gemini API Key: OK")
         else:
             default_val = st.session_state.get('gemini_api_key_input', "")
             api_key = st.text_input("Gemini API Key", value=default_val, type="password", key='gemini_api_key_input_field')
