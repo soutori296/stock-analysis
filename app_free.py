@@ -134,9 +134,10 @@ st.markdown(f"""
         font-size: 10px; 
         font-weight: bold; 
         color: #ff6347; 
-        display: inline-block; /* 💡 重要: 要素をブロック化して安定させる */
-        vertical-align: top; /* 💡 重要: 行の先頭に合わせる */
-        line-height: 1.0;  /* 💡 重要: 行の高さを縮小 */
+        display: inline-block; /* 💡 必ずブロック化 */
+        vertical-align: middle; /* 💡 垂直方向を揃える */
+        line-height: 1.0; 
+        margin-left: 5px; /* 数字と更新済の間にスペースを確保 */
     }}
     .center-text {{ text-align: center; font-family: "Meiryo", sans-serif; }}
     .table-container {{ width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; margin-bottom: 20px; }}
@@ -1415,8 +1416,7 @@ if st.session_state.analyzed_data:
     
     def format_no_column(row):
         is_updated = row.get('is_updated_in_this_run', False) and row['update_count'] > 1
-        # 修正: クラス名を使用
-        if is_updated: return f"{row['No']}<br><span class='update-badge'>更新済</span>"
+        if is_updated: return f"{row['No']} <span class='update-badge'>更新済</span>"
         else: return f"{row['No']}"
 
     df['No'] = df.apply(format_no_column, axis=1)
@@ -1476,7 +1476,12 @@ if st.session_state.analyzed_data:
             else: details.append({"No": row['No'], "コード": row['code'], "企業名": row['name'], "総合点": row['score'], "内訳": {"エラー": "内訳データなし"}})
 
         for item in details:
-            st.markdown(f"**No.{item['No']} - {item['企業名']} ({item['コード']}) - 総合点: {item['総合点']:.0f}**")
+            header_html = f"""
+            <div style="font-weight: bold; margin-top: 10px; margin-bottom: 5px; font-size: 16px;">
+                No.{item['No']} - {item['企業名']} ({item['コード']}) - 総合点: {item['総合点']:.0f}
+            </div>
+            """
+            st.markdown(header_html, unsafe_allow_html=True)
             st.markdown("##### ➕ 加点要因")
             def format_score_html(key, value):
                 color = 'green' if value > 0 else ('red' if value < 0 else 'black')
@@ -1526,3 +1531,4 @@ if st.session_state.analyzed_data:
         実際の投資判断や売買に用いることを目的としていません。
     </div>
     """, unsafe_allow_html=True)
+
