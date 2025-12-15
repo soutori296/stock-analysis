@@ -320,7 +320,9 @@ with st.sidebar:
 
         sort_options = [
             "スコア順 (高い順)", "更新回数順", "時価総額順 (高い順)", 
-            "RSI順 (低い順)", "RSI順 (高い順)", "出来高倍率順 (高い順)",
+            "RSI順 (低い順)", "RSI順 (高い順)", 
+            "R/R比順 (高い順)",         # 💡 【追加】R/R比順
+            "出来高倍率順 (高い順)",    # 💡 【修正】順序変更
             "勝率順 (高い順)", "銘柄コード順"
         ]
         current_index = sort_options.index(st.session_state.sort_option_key) if st.session_state.sort_option_key in sort_options else 0
@@ -1325,11 +1327,13 @@ if st.session_state.analyzed_data:
 
     sort_key_map = {
         "スコア順 (高い順)": ('score', False), "更新回数順": ('update_count', False), "時価総額順 (高い順)": ('cap_val', False),
-        "RSI順 (低い順)": ('rsi', True), "RSI順 (高い順)": ('rsi', False), "出来高倍率順 (高い順)": ('vol_ratio', False),
+        "RSI順 (低い順)": ('rsi', True), "RSI順 (高い順)": ('rsi', False), 
+        "R/R比順 (高い順)": ('risk_reward', False),  # 💡 【追加】risk_reward (R/R比) を降順 (False)
+        "出来高倍率順 (高い順)": ('vol_ratio', False),
         "勝率順 (高い順)": ('win_rate_pct', False), "銘柄コード順": ('code', True),
     }
     sort_col, ascending = sort_key_map.get(st.session_state.sort_option_key, ('score', False))
-    numeric_cols_for_sort = ['score', 'update_count', 'cap_val', 'rsi', 'vol_ratio', 'win_rate_pct']
+    numeric_cols_for_sort = ['score', 'update_count', 'cap_val', 'rsi', 'vol_ratio', 'win_rate_pct', 'risk_reward'] # 💡 【修正後】'risk_reward' を追加
     for col in numeric_cols_for_sort:
         if col in df.columns: df[col] = pd.to_numeric(df[col], errors='coerce').fillna(-1) 
     df = df.sort_values(by=sort_col, ascending=ascending).reset_index(drop=True)
@@ -1531,4 +1535,3 @@ if st.session_state.analyzed_data:
         実際の投資判断や売買に用いることを目的としていません。
     </div>
     """, unsafe_allow_html=True)
-
