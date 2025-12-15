@@ -130,6 +130,7 @@ st.markdown(f"""
     [data-testid="stSidebar"] > div:first-child {{ width: 250px !important; max-width: 250px !important; }}
     .big-font {{ font-size:18px !important; font-weight: bold; color: #4A4A4A; font-family: "Meiryo", sans-serif; }}
     .status-badge {{ background-color: {status_color}; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; vertical-align: middle; }}
+    .update-badge {{ font-size:10px; font-weight: bold; color: #ff6347; vertical-align: middle; }}
     .center-text {{ text-align: center; font-family: "Meiryo", sans-serif; }}
     .table-container {{ width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; margin-bottom: 20px; }}
     .ai-table {{ width: 100%; border-collapse: collapse; min-width: 1200px; background-color: #ffffff; color: #000000; font-family: "Meiryo", sans-serif; font-size: 13px; }}
@@ -1406,8 +1407,8 @@ if st.session_state.analyzed_data:
     df['No'] = range(1, len(df) + 1) 
     
     def format_no_column(row):
-        is_updated = row.get('is_updated_in_this_run', False) and row['update_count'] > 1
-        if is_updated: return f"{row['No']}<br><span style='font-size:10px; font-weight: bold; color: #ff6347;'>更新済</span>"
+        is_updated = row.get('is_updated_in_this_run', False) and row['update_count'] > 1        
+        if is_updated: return f"{row['No']}<br><span class='update-badge'>更新済</span>"
         else: return f"{row['No']}"
 
     df['No'] = df.apply(format_no_column, axis=1)
