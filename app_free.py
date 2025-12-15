@@ -11,7 +11,8 @@ import numpy as np
 import random 
 import hashlib 
 import os 
-import copy 
+import copy
+import base64 
 
 # --- アイコン設定 ---
 ICON_URL = "https://raw.githubusercontent.com/soutori296/stock-analysis/main/aisan.png"
@@ -482,6 +483,25 @@ def safe_float(val):
         if isinstance(val, (int, float)): return float(val)
         return float(val)
     except: return 0.0
+
+def remove_emojis_and_special_chars(text):
+    # Shift-JISでエラーになる文字を含む広い範囲の絵文字を削除
+    # r"(\u00a9|\u00ae|[\u2000-\u3300]|\ud83c[\ud000-\udfff]|\ud83d[\ud000-\udfff]|\ud83e[\ud000-\udfff])" などのパターンも有効だが、
+    # シンプルに「火」「ロケット」などのユニコード範囲外文字を対象とする
+    emoji_pattern = re.compile("["
+        "\U0001F600-\U0001F64F"  # Emoticons
+        "\U0001F300-\U0001F5FF"  # Symbols & Pictographs
+        "\U0001F680-\U0001F6FF"  # Transport & Map Symbols
+        "\U0001F700-\U0001F77F"  # Alchemical Symbols
+        "\U0001F780-\U0001F7FF"  # Geometric Shapes Extended
+        "\U0001F800-\U0001F8FF"  # Supplemental Arrows-C
+        "\U0001F900-\U0001F9FF"  # Supplemental Symbols and Pictographs
+        "\U0001FA00-\U0001FA6F"  # Chess Symbols
+        "\U0001FA70-\U0001FAFF"  # Symbols and Pictographs Extended-A
+        "\U00002702-\U000027B0"  # Dingbats (一部)
+        "\U000024C2-\U0001F251" 
+        "]+", flags=re.UNICODE)
+    return emoji_pattern.sub(r'', text)
 
 @st.cache_data(ttl=1) 
 def get_stock_info(code):
@@ -1311,7 +1331,15 @@ if st.session_state.analyzed_data:
             if keep: filtered_data.append(d)
     else: filtered_data = data
 
-    df = pd.DataFrame(filtered_data)
+    # 💡 【修正】ここで df と df_download の元を作成し、共通スコープに定義を置く
+    df_raw_for_display = pd.DataFrame(filtered_data) # df_raw_for_displayとして元のdfを保持
+    
+    # ダウンロード用DataFrameをここで定義
+    df_download = df_raw_for_display.copy() 
+    
+    # ここから df.empty のチェックに移るため、df_raw_for_display を利用する
+    df = df_raw_for_display.copy()
+    
     if st.session_state.get('trigger_copy_filtered_data', False):
          st.session_state.trigger_copy_filtered_data = False 
          st.warning("⚠️ 現在、コピー機能は無効化されています。")
@@ -1324,6 +1352,43 @@ if st.session_state.analyzed_data:
         st.markdown(st.session_state.ai_monologue) 
         if st.session_state.ai_monologue or st.session_state.error_messages: st.stop()
         st.stop()
+    
+    # 💡 【追加】ダウンロードボタンの表示ロジック
+    csv_string = df_download.to_csv(index=False, encoding='utf-8-sig') 
+    
+    # 💡 【重要】Base64エンコードされた文字列データURIを作成する
+    # 1. UTF-8 with BOMの文字列をバイトデータにエンコード
+    csv_bytes = csv_string.encode('utf-8-sig')
+    # 2. バイトデータをBase64文字列にエンコード
+    csv_base64_str = base64.b64encode(csv_bytes).decode('utf-8')
+    
+    # MIMEタイプとBase64文字列を組み合わせ、データURIを作成
+    data_uri = f"data:text/csv;charset=utf-8;base64,{csv_base64_str}"
+    
+    # ファイル名
+    filename = f'ai_stock_analysis_{datetime.datetime.now().strftime("%Y%m%d_%H%M%S")}.csv'
+
+    # 💡 カスタムHTMLボタンを作成し、Data URIをダウンロードリンクとして埋め込む
+    st.markdown("##### 📥 データダウンロード (UTF-8 with BOM 適用)")
+    st.markdown(
+        f"""
+        <a href="{data_uri}" download="{filename}" class="st-emotion-cache-1cpx9y3 e1nzilvr1" style="
+            text-decoration: none; 
+            display: inline-block; 
+            width: 100%;
+            text-align: center;
+            border: 1px solid #ddd;
+            padding: 8px 12px;
+            border-radius: 0.5rem;
+            color: #fff;
+            background-color: #007bff;
+            font-weight: 400;
+        ">
+        ✅ フィルター適用済みデータをCSVダウンロード
+        </a>
+        """,
+        unsafe_allow_html=True
+    )
 
     sort_key_map = {
         "スコア順 (高い順)": ('score', False), "更新回数順": ('update_count', False), "時価総額順 (高い順)": ('cap_val', False),
