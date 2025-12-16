@@ -484,10 +484,13 @@ def safe_float(val):
         return float(val)
     except: return 0.0
 
+def clean_html_tags(text):
+    if pd.isna(text) or not isinstance(text, str):
+        return text
+    return re.sub(r'<[^>]+>', '', text).strip()
+
+# 💡【追加】絵文字・特殊文字除去ヘルパー関数（CSV対策用）
 def remove_emojis_and_special_chars(text):
-    # Shift-JISでエラーになる文字を含む広い範囲の絵文字を削除
-    # r"(\u00a9|\u00ae|[\u2000-\u3300]|\ud83c[\ud000-\udfff]|\ud83d[\ud000-\udfff]|\ud83e[\ud000-\udfff])" などのパターンも有効だが、
-    # シンプルに「火」「ロケット」などのユニコード範囲外文字を対象とする
     emoji_pattern = re.compile("["
         "\U0001F600-\U0001F64F"  # Emoticons
         "\U0001F300-\U0001F5FF"  # Symbols & Pictographs
@@ -495,12 +498,13 @@ def remove_emojis_and_special_chars(text):
         "\U0001F700-\U0001F77F"  # Alchemical Symbols
         "\U0001F780-\U0001F7FF"  # Geometric Shapes Extended
         "\U0001F800-\U0001F8FF"  # Supplemental Arrows-C
-        "\U0001F900-\U0001F9FF"  # Supplemental Symbols and Pictographs
+        "\U0001F900-\U0001F9FF"  # Supplemental Symbols & Pictographs
         "\U0001FA00-\U0001FA6F"  # Chess Symbols
         "\U0001FA70-\U0001FAFF"  # Symbols and Pictographs Extended-A
         "\U00002702-\U000027B0"  # Dingbats (一部)
         "\U000024C2-\U0001F251" 
         "]+", flags=re.UNICODE)
+    if pd.isna(text) or not isinstance(text, str): return text
     return emoji_pattern.sub(r'', text)
 
 @st.cache_data(ttl=1) 
@@ -1331,15 +1335,8 @@ if st.session_state.analyzed_data:
             if keep: filtered_data.append(d)
     else: filtered_data = data
 
-    # 💡 【修正】ここで df と df_download の元を作成し、共通スコープに定義を置く
-    df_raw_for_display = pd.DataFrame(filtered_data) # df_raw_for_displayとして元のdfを保持
-    
-    # ダウンロード用DataFrameをここで定義
-    df_download = df_raw_for_display.copy() 
-    
-    # ここから df.empty のチェックに移るため、df_raw_for_display を利用する
-    df = df_raw_for_display.copy()
-    
+    df = pd.DataFrame(filtered_data) # 元の df を定義
+
     if st.session_state.get('trigger_copy_filtered_data', False):
          st.session_state.trigger_copy_filtered_data = False 
          st.warning("⚠️ 現在、コピー機能は無効化されています。")
@@ -1353,23 +1350,90 @@ if st.session_state.analyzed_data:
         if st.session_state.ai_monologue or st.session_state.error_messages: st.stop()
         st.stop()
     
-    # 💡 【追加】ダウンロードボタンの表示ロジック
+    # ----------------------------------------------------
+    # 💡 【CSVダウンロード機能の追加】
+    # ----------------------------------------------------
+    final_csv_columns = [
+        # ... (他のカラムは省略) ...
+        ('momentum', '直近勝率'), 
+        ('backtest_raw', 'MA5実績'), # 💡【修正】MA5BT実績 -> MA5実績 に変更
+        ('per', 'PER'), ('pbr', 'PBR'), 
+        ('comment', 'アイの所感') 
+    ]
+    
+    # df_downloadをフィルター適用後の生のデータで再作成
+    df_download = pd.DataFrame(filtered_data)
+    
+    # 内部データ（辞書型など）を削除
+    internal_keys_to_drop = [
+        'score_factors', 'update_count', 'is_updated_in_this_run', 'run_count', 'batch_order', 'is_low_liquidity', 'is_aoteng', 
+        'atr_val', 'atr_smoothed', 'is_gc', 'is_dc', 'ma25', 'atr_sl_price', 'base_score', 'win_rate_pct', 
+        'bt_trade_count', 'bt_target_pct', 'bt_win_count', 'atr_pct', 'atr_comment', 'code_disp', 'score_disp', 
+        'price_disp', 'buy_disp', 'rr_disp', 'dd_sl_disp', 'target_txt', 'rsi_disp', 'vol_disp_html', 
+        'bt_cell_content', 'per_pbr_disp', 'diff_disp', 'update_disp', 'No' # 表示用カラムもすべて削除
+    ]
+    for col in internal_keys_to_drop:
+        if col in df_download.columns:
+            df_download = df_download.drop(columns=[col])
+    
+    # 2. DataFrameを整形: 必要なカラムのみを選択
+    final_rename_map = {key: name for key, name in final_csv_columns}
+    # (A) カラム選択: 英語名で行う
+    df_download = df_download[[key for key, _ in final_csv_columns if key in df_download.columns]].copy()
+    
+    # 3. カラム名を日本語にリネーム
+    # (B) リネーム: 英語→日本語
+    df_download.rename(columns=final_rename_map, inplace=True)
+    
+    # 4. データクリーンアップと欠損値処理 
+    # (C) 欠損値処理: 日本語名でアクセス！
+    df_download['企業名'].fillna('-', inplace=True) # ← ★ここでKeyError！(Bの後に来るべき)
+    
+# ----------------------------------------------------
+# 💡 【修正後のロジック】: 以下の順序が正解
+# ----------------------------------------------------
+    # ... (内部カラム削除の直後から) ...
+    
+    # 2. DataFrameを整形: 必要なカラムのみを選択
+    final_rename_map = {key: name for key, name in final_csv_columns}
+    
+    # 3. カラム名を日本語にリネーム 💡【移動】リネームが先！
+    df_download.rename(columns=final_rename_map, inplace=True)
+    
+    # 4. カラム選択（順序確定）
+    df_download = df_download[[key for key, _ in final_csv_columns if key in df_download.columns]].copy()
+
+    # 5. データクリーンアップと欠損値処理（日本語名でアクセス！）
+    df_download['企業名'].fillna('-', inplace=True) 
+
+    for index, row in df_download.iterrows():
+         comment = row['アイの所感']
+         if pd.isna(comment) or not isinstance(comment, str) or len(comment) < 10 or 'MA25_SL' not in comment:
+             df_download.loc[index, 'アイの所感'] = 'コメントなし (データ不足/形式エラー)'
+             
+    # 5. 数値の整形（見やすいCSVにするため）
+    df_download['DD率'] = df_download['DD率'].apply(lambda x: f"{x:+.2f}%" if pd.notna(x) else '-')
+    df_download['SL率'] = df_download['SL率'].apply(lambda x: f"{x:+.2f}%" if pd.notna(x) else '-')
+    df_download['R/R比'] = df_download['R/R比'].apply(lambda x: f"{x:.2f}" if pd.notna(x) and x > 0 else '-')
+    df_download['出来高倍率'] = df_download['出来高倍率'].apply(lambda x: f"{x:.2f}")
+    df_download['RSI'] = df_download['RSI'].apply(lambda x: f"{x:.2f}")
+    df_download['5日平均出来高'] = df_download['5日平均出来高'].apply(lambda x: format_volume(x) if pd.notna(x) else '-')
+    df_download['時価総額'] = df_download['時価総額'].apply(lambda x: fmt_market_cap(x) if pd.notna(x) else '-')
+    df_download['現在値'] = df_download['現在値'].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else '-')
+    df_download['想定水準(価格)'] = df_download['想定水準(価格)'].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else '-')
+    df_download['目標_半利確'] = df_download['目標_半利確'].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else '-')
+    df_download['目標_全利確'] = df_download['目標_全利確'].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else '-')
+
+
+    # 6. CSV文字列生成とデータURI作成（UTF-8 with BOM）
     csv_string = df_download.to_csv(index=False, encoding='utf-8-sig') 
-    
-    # 💡 【重要】Base64エンコードされた文字列データURIを作成する
-    # 1. UTF-8 with BOMの文字列をバイトデータにエンコード
     csv_bytes = csv_string.encode('utf-8-sig')
-    # 2. バイトデータをBase64文字列にエンコード
     csv_base64_str = base64.b64encode(csv_bytes).decode('utf-8')
-    
-    # MIMEタイプとBase64文字列を組み合わせ、データURIを作成
     data_uri = f"data:text/csv;charset=utf-8;base64,{csv_base64_str}"
-    
-    # ファイル名
     filename = f'ai_stock_analysis_{datetime.datetime.now().strftime("%Y%m%d_%H%M%S")}.csv'
 
-    # 💡 カスタムHTMLボタンを作成し、Data URIをダウンロードリンクとして埋め込む
-    st.markdown("##### 📥 データダウンロード (UTF-8 with BOM 適用)")
+    # 7. カスタムHTMLボタンの設置 (Data URI方式)
+    st.markdown("##### 📥 データダウンロード (日本語ヘッダー対応)")
     st.markdown(
         f"""
         <a href="{data_uri}" download="{filename}" class="st-emotion-cache-1cpx9y3 e1nzilvr1" style="
@@ -1389,16 +1453,20 @@ if st.session_state.analyzed_data:
         """,
         unsafe_allow_html=True
     )
+    
+    # ----------------------------------------------------
+    # 💡 【ソートロジックの修正】（元のコードから流用しR/R比ソートを追加）
+    # ----------------------------------------------------
 
     sort_key_map = {
         "スコア順 (高い順)": ('score', False), "更新回数順": ('update_count', False), "時価総額順 (高い順)": ('cap_val', False),
         "RSI順 (低い順)": ('rsi', True), "RSI順 (高い順)": ('rsi', False), 
-        "R/R比順 (高い順)": ('risk_reward', False),  # 💡 【追加】risk_reward (R/R比) を降順 (False)
+        "R/R比順 (高い順)": ('risk_reward', False),  # 💡 R/R比ソート追加
         "出来高倍率順 (高い順)": ('vol_ratio', False),
         "勝率順 (高い順)": ('win_rate_pct', False), "銘柄コード順": ('code', True),
     }
     sort_col, ascending = sort_key_map.get(st.session_state.sort_option_key, ('score', False))
-    numeric_cols_for_sort = ['score', 'update_count', 'cap_val', 'rsi', 'vol_ratio', 'win_rate_pct', 'risk_reward'] # 💡 【修正後】'risk_reward' を追加
+    numeric_cols_for_sort = ['score', 'update_count', 'cap_val', 'rsi', 'vol_ratio', 'win_rate_pct', 'risk_reward'] 
     for col in numeric_cols_for_sort:
         if col in df.columns: df[col] = pd.to_numeric(df[col], errors='coerce').fillna(-1) 
     df = df.sort_values(by=sort_col, ascending=ascending).reset_index(drop=True)
