@@ -638,9 +638,10 @@ def run_backtest_precise(df, market_cap):
         total_trades = wins + losses
         win_rate_pct = (wins / total_trades) * 100 if total_trades > 0 else 0.0
         bt_str_new = f'{win_rate_pct:.0f}%' 
-        if total_trades == 0: return "機会なし", 0.0, 0, 0.0, target_pct, 0
-        return bt_str_new, win_rate_pct, total_trades, max_dd_pct, target_pct, wins
-    except Exception as e: return f"計算エラー: {e}", 0.0, 0, 0.0, 0.0, 0
+        # 💡【修正】負け数 (losses) も追加で返す
+        if total_trades == 0: return "機会なし", 0.0, 0, 0.0, target_pct, 0, 0 
+        return bt_str_new, win_rate_pct, total_trades, max_dd_pct, target_pct, wins, losses # 💡【修正】lossesを追加
+    except Exception as e: return f"計算エラー: {e}", 0.0, 0, 0.0, 0.0, 0, 0 # 💡【修正】エラー時も負け数0を追加
 
 run_backtest = run_backtest_precise
 
@@ -799,6 +800,8 @@ def get_stock_data(ticker, current_run_count):
     rsi_mark, momentum_str, p_half, p_full = "⚪", "0%", 0, 0
     buy_target, bt_str, max_dd_pct, win_rate_pct, sl_ma = 0, "計算エラー", 0.0, 0.0, 0 
     bt_cnt = 0; bt_target_pct = 0.0; bt_win_count = 0
+    # 💡【追加】負け数を受け取る変数
+    bt_loss_count = 0 
     current_calculated_score, score_diff, score_to_return = 0, 0, 50 
     base_score = 50 
     market_deduct = 0 
@@ -886,7 +889,8 @@ def get_stock_data(ticker, current_run_count):
         strategy, buy_target, p_half, p_full, sl_ma, is_aoteng, sl_pct = evaluate_strategy_new(
             df, info, vol_ratio, high_250d, atr_smoothed, curr_price, ma5, ma25, ma75, prev_ma5, rsi_val, atr_sl_price
         )
-        bt_str, win_rate_pct, bt_cnt, max_dd_pct, bt_target_pct, bt_win_count = run_backtest(df, info["cap"]) 
+        # 💡【修正】bt_loss_count を追加
+        bt_str, win_rate_pct, bt_cnt, max_dd_pct, bt_target_pct, bt_win_count, bt_loss_count = run_backtest(df, info["cap"])
         dd_data = df.copy().tail(250) 
         dd_data['Peak'] = dd_data['Close'].cummax(); dd_data['DD'] = (dd_data['Close'] / dd_data['Peak']) - 1
         max_dd_val = dd_data['DD'].min(); mdd_day_index = dd_data['DD'].idxmin()
@@ -1067,7 +1071,8 @@ def get_stock_data(ticker, current_run_count):
             "buy": buy_target, "p_half": p_half, "p_full": p_full, "backtest": bt_str, "backtest_raw": bt_raw, "max_dd_pct": max_dd_pct, "sl_pct": sl_pct, "sl_ma": sl_ma,
             "avg_volume_5d": avg_vol_5d, "is_low_liquidity": avg_vol_5d < 1000, "risk_reward": risk_reward_ratio, "risk_value": risk_value, "issued_shares": issued_shares, "liquidity_ratio_pct": liquidity_ratio_pct,
             "atr_val": atr_val, "atr_smoothed": atr_smoothed, "is_gc": is_gc, "is_dc": is_dc, "ma25": ma25, "atr_sl_price": atr_sl_price, "score_diff": score_diff,
-            "base_score": base_score, "is_aoteng": is_aoteng, "run_count": current_run_count, "win_rate_pct": win_rate_pct, "bt_trade_count": bt_cnt, "bt_target_pct": bt_target_pct, "bt_win_count": bt_win_count,
+            "base_score": base_score, "is_aoteng": is_aoteng, "run_count": current_run_count, "win_rate_pct": win_rate_pct, "bt_trade_count": bt_cnt, "bt_win_count": bt_win_count,
+            "bt_loss_count": bt_loss_count, # 💡【追加】負け数を追加
             "score_factors": japanese_score_factors, 
             "atr_pct": atr_pct_val, "atr_comment": atr_comment, 
         }
@@ -1312,7 +1317,7 @@ HEADER_MAP = [
     ('No', 'No', 'center', '40px', '40px'), ('code_disp', 'コード', 'center', '70px', '70px'), ('name', '企業名', 'left', '150px', '150px'), 
     ('cap_disp', '時価総額', 'center', '100px', '100px'), ('score_disp', '点', 'center', '50px', '50px'), ('strategy', '分析戦略', 'center', '80px', '80px'), 
     ('price_disp', '現在値', 'center', '70px', '70px'), ('buy_disp', '想定水準\n（乖離）', 'center', '80px', '80px'), ('rr_disp', 'R/R比', 'center', '50px', '50px'), 
-    ('dd_sl_disp', 'DD率/SL率', 'center', '90px', '90px'), ('target_txt', '利益確定目標値', 'left', '120px', '120px'), ('rsi_disp', 'RSI', 'center', '60px', '60px'), 
+    ('dd_sl_disp', 'DD率/SL率', 'center', '90px', '90px'), ('target_txt', '利益確定目標値', 'left', '130px', '130px'), ('rsi_disp', 'RSI', 'center', '60px', '60px'), 
     ('vol_disp_html', '出来高比\n（5日平均）', 'center', '80px', '80px'), ('bt_cell_content', 'MA5実績', 'center', '70px', '70px'), 
     ('per_pbr_disp', 'PER\nPBR', 'center', '60px', '60px'), ('momentum', '直近勝率', 'center', '60px', '60px'), ('comment', 'アイの所感', 'left', '350px', '350px')
 ]
@@ -1562,7 +1567,7 @@ if st.session_state.analyzed_data:
     df['update_disp'] = df['update_count'].apply(lambda x: f'{x}回目' if x > 1 else '')
     df['code_disp'] = df.apply(lambda row: f"<b>{row['code']}</b>", axis=1)
     df['target_txt'] = df.apply(format_target_txt, axis=1)
-    df['bt_cell_content'] = df.apply(lambda row: f"<b>{row['backtest_raw']}</b><br><span style='font-size:11px;'>({row['bt_win_count']}勝)</span><br><span style='font-size:10px; color:#666;'>(+{row['bt_target_pct']*100:.1f}%抜)</span>" if "エラー" not in row['backtest_raw'] and "機会なし" not in row['backtest_raw'] else row['backtest'], axis=1)
+    df['bt_cell_content'] = df.apply(lambda row: f"<b>{row['backtest_raw']}</b><br><span style='font-size:11px;'>({row['bt_win_count']}勝{row.get('bt_loss_count', 0)}敗)</span><br><span style='font-size:10px; color:#666;'>(+{row['bt_target_pct']*100:.1f}%抜)</span>" if "エラー" not in row['backtest_raw'] and "機会なし" not in row['backtest_raw'] else row['backtest'], axis=1)
     df['per_pbr_disp'] = df.apply(lambda row: f"{row['per']}<br>{row['pbr']}", axis=1)
     df['No'] = range(1, len(df) + 1) 
     
