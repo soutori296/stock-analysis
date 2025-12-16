@@ -1390,9 +1390,9 @@ if st.session_state.analyzed_data:
 
     # 4. データクリーンアップと欠損値処理
     # 💡【最終調整】fillnaはリネーム後に行うため、カラム名が正しいことを保証
-    df_download['企業名'].fillna('-', inplace=True)
-    df_download['分析戦略'].fillna('様子見', inplace=True)
-    df_download['アイの所感'].fillna('コメントなし', inplace=True) 
+    df_download['企業名'] = df_download['企業名'].fillna('-')
+    df_download['分析戦略'] = df_download['分析戦略'].fillna('様子見')
+    df_download['アイの所感'] = df_download['アイの所感'].fillna('コメントなし')
 
     # HTMLタグと絵文字の除去
     cols_to_clean = ['アイの所感', 'MA5実績']
