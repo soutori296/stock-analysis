@@ -1356,12 +1356,26 @@ if st.session_state.analyzed_data:
     
     # 1. CSVに必要なカラムの定義と順序の確定
     final_csv_columns = [
-        ('code', 'コード'), ('name', '企業名'), ('cap_disp', '時価総額'), ('score', '総合点'), 
-        ('strategy', '分析戦略'), ('price', '現在値'), ('buy', '想定水準(価格)'), ('p_half', '目標_半利確'), 
-        ('p_full', '目標_全利確'), ('max_dd_pct', 'DD率'), ('sl_pct', 'SL率'), ('risk_reward', 'R/R比'),
-        ('rsi', 'RSI'), ('vol_ratio', '出来高倍率'), ('avg_volume_5d', '5日平均出来高'), 
-        ('momentum', '直近勝率'), ('backtest_raw', 'MA5実績'), ('per', 'PER'), ('pbr', 'PBR'), 
-        ('comment', 'アイの所感') 
+        ('code', 'コード'),             # 1
+        ('name', '企業名'),             # 2
+        ('cap_disp', '時価総額'),       # 3
+        ('score', '総合点'),            # 4
+        ('strategy', '分析戦略'),       # 5
+        ('price', '現在値'),            # 6
+        ('buy', '想定水準(価格)'),      # 7
+        ('p_half', '目標_半利確'),      # 8
+        ('p_full', '目標_全利確'),      # 9
+        ('max_dd_pct', 'DD率'),         # 10
+        ('sl_pct', 'SL率'),             # 11
+        ('risk_reward', 'R/R比'),       # 12
+        ('rsi', 'RSI'),                 # 13
+        ('vol_ratio', '出来高倍率'),      # 14
+        ('avg_volume_5d', '5日平均出来高'), # 15
+        ('momentum', '直近勝率'),       # 16
+        ('backtest_raw', 'MA5実績'),    # 17
+        ('per', 'PER'),                 # 18
+        ('pbr', 'PBR'),                 # 19
+        ('comment', 'アイの所感')       # 20 (最後に)
     ]
     
     # 2. DataFrameの初期化と不要カラムの削除
@@ -1400,7 +1414,18 @@ if st.session_state.analyzed_data:
         if col in df_download.columns:
              df_download[col] = df_download[col].apply(clean_html_tags)
              df_download[col] = df_download[col].apply(remove_emojis_and_special_chars)
-             
+
+    # 💡【追加】PER/PBRの整形ヘルパー
+    def fmt_val(val):
+        if pd.isna(val) or val == '-' or val == '': return '-'
+        if isinstance(val, str):
+            val = val.replace('倍', '').replace(',', '').strip()
+            if not val or val == '-': return '-'
+        try:
+            return float(val)
+        except:
+            return '-'
+                 
     # 5. 数値の整形
     df_download['DD率'] = df_download['DD率'].apply(lambda x: f"{x:+.2f}%" if pd.notna(x) else '-')
     df_download['SL率'] = df_download['SL率'].apply(lambda x: f"{x:+.2f}%" if pd.notna(x) else '-')
