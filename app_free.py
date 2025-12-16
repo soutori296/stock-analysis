@@ -1351,67 +1351,57 @@ if st.session_state.analyzed_data:
         st.stop()
     
     # ----------------------------------------------------
-    # 💡 【CSVダウンロード機能の追加】
+    # 💡 【CSVダウンロード機能の最終安全版】
     # ----------------------------------------------------
+    
+    # 1. CSVに必要なカラムの定義と順序の確定
     final_csv_columns = [
-        # ... (他のカラムは省略) ...
-        ('momentum', '直近勝率'), 
-        ('backtest_raw', 'MA5実績'), # 💡【修正】MA5BT実績 -> MA5実績 に変更
-        ('per', 'PER'), ('pbr', 'PBR'), 
+        ('code', 'コード'), ('name', '企業名'), ('cap_disp', '時価総額'), ('score', '総合点'), 
+        ('strategy', '分析戦略'), ('price', '現在値'), ('buy', '想定水準(価格)'), ('p_half', '目標_半利確'), 
+        ('p_full', '目標_全利確'), ('max_dd_pct', 'DD率'), ('sl_pct', 'SL率'), ('risk_reward', 'R/R比'),
+        ('rsi', 'RSI'), ('vol_ratio', '出来高倍率'), ('avg_volume_5d', '5日平均出来高'), 
+        ('momentum', '直近勝率'), ('backtest_raw', 'MA5実績'), ('per', 'PER'), ('pbr', 'PBR'), 
         ('comment', 'アイの所感') 
     ]
     
-    # df_downloadをフィルター適用後の生のデータで再作成
-    df_download = pd.DataFrame(filtered_data)
+    # 2. DataFrameの初期化と不要カラムの削除
+    df_download = df.copy() # dfをコピー
     
-    # 内部データ（辞書型など）を削除
     internal_keys_to_drop = [
         'score_factors', 'update_count', 'is_updated_in_this_run', 'run_count', 'batch_order', 'is_low_liquidity', 'is_aoteng', 
         'atr_val', 'atr_smoothed', 'is_gc', 'is_dc', 'ma25', 'atr_sl_price', 'base_score', 'win_rate_pct', 
         'bt_trade_count', 'bt_target_pct', 'bt_win_count', 'atr_pct', 'atr_comment', 'code_disp', 'score_disp', 
         'price_disp', 'buy_disp', 'rr_disp', 'dd_sl_disp', 'target_txt', 'rsi_disp', 'vol_disp_html', 
-        'bt_cell_content', 'per_pbr_disp', 'diff_disp', 'update_disp', 'No' # 表示用カラムもすべて削除
+        'bt_cell_content', 'per_pbr_disp', 'diff_disp', 'update_disp', 'No' 
     ]
     for col in internal_keys_to_drop:
         if col in df_download.columns:
             df_download = df_download.drop(columns=[col])
-    
-    # 2. DataFrameを整形: 必要なカラムのみを選択
-    final_rename_map = {key: name for key, name in final_csv_columns}
-    # (A) カラム選択: 英語名で行う
-    df_download = df_download[[key for key, _ in final_csv_columns if key in df_download.columns]].copy()
-    
-    # 3. カラム名を日本語にリネーム
-    # (B) リネーム: 英語→日本語
-    df_download.rename(columns=final_rename_map, inplace=True)
-    
-    # 4. データクリーンアップと欠損値処理 
-    # (C) 欠損値処理: 日本語名でアクセス！
-    df_download['企業名'].fillna('-', inplace=True) # ← ★ここでKeyError！(Bの後に来るべき)
-    
-# ----------------------------------------------------
-# 💡 【修正後のロジック】: 以下の順序が正解
-# ----------------------------------------------------
-    # ... (内部カラム削除の直後から) ...
-    
-    # 2. DataFrameを整形: 必要なカラムのみを選択
+
+    # 3. カラム名のリネームと順序確定
     final_rename_map = {key: name for key, name in final_csv_columns}
     
-    # 3. カラム名を日本語にリネーム 💡【移動】リネームが先！
+    # 💡【最終調整】リネーム
     df_download.rename(columns=final_rename_map, inplace=True)
     
-    # 4. カラム選択（順序確定）
-    df_download = df_download[[key for key, _ in final_csv_columns if key in df_download.columns]].copy()
+    # 💡【最終調整】順序確定 (リネーム後の日本語名で選択)
+    df_download = df_download[[col for col in [name for _, name in final_csv_columns] if col in df_download.columns]].copy()
 
-    # 5. データクリーンアップと欠損値処理（日本語名でアクセス！）
-    df_download['企業名'].fillna('-', inplace=True) 
 
-    for index, row in df_download.iterrows():
-         comment = row['アイの所感']
-         if pd.isna(comment) or not isinstance(comment, str) or len(comment) < 10 or 'MA25_SL' not in comment:
-             df_download.loc[index, 'アイの所感'] = 'コメントなし (データ不足/形式エラー)'
+    # 4. データクリーンアップと欠損値処理
+    # 💡【最終調整】fillnaはリネーム後に行うため、カラム名が正しいことを保証
+    df_download['企業名'].fillna('-', inplace=True)
+    df_download['分析戦略'].fillna('様子見', inplace=True)
+    df_download['アイの所感'].fillna('コメントなし', inplace=True) 
+
+    # HTMLタグと絵文字の除去
+    cols_to_clean = ['アイの所感', 'MA5実績']
+    for col in cols_to_clean:
+        if col in df_download.columns:
+             df_download[col] = df_download[col].apply(clean_html_tags)
+             df_download[col] = df_download[col].apply(remove_emojis_and_special_chars)
              
-    # 5. 数値の整形（見やすいCSVにするため）
+    # 5. 数値の整形
     df_download['DD率'] = df_download['DD率'].apply(lambda x: f"{x:+.2f}%" if pd.notna(x) else '-')
     df_download['SL率'] = df_download['SL率'].apply(lambda x: f"{x:+.2f}%" if pd.notna(x) else '-')
     df_download['R/R比'] = df_download['R/R比'].apply(lambda x: f"{x:.2f}" if pd.notna(x) and x > 0 else '-')
@@ -1425,7 +1415,7 @@ if st.session_state.analyzed_data:
     df_download['目標_全利確'] = df_download['目標_全利確'].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else '-')
 
 
-    # 6. CSV文字列生成とデータURI作成（UTF-8 with BOM）
+    # 6. CSV文字列生成とData URIの作成
     csv_string = df_download.to_csv(index=False, encoding='utf-8-sig') 
     csv_bytes = csv_string.encode('utf-8-sig')
     csv_base64_str = base64.b64encode(csv_bytes).decode('utf-8')
