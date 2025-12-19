@@ -704,11 +704,10 @@ def create_signals_pro_bull(df, info, vol_ratio_in):
     if ma5 == 0 or close == 0 or open_price == 0 or high == 0 or low == 0 or prev_close == 0:
         return {"strategy": "様子見", "buy": 0, "p_half": 0, "p_full": 0, "sl_ma": 0, "signal_success": False}
 
-    # 【門番】株価がMA5の下、または出来高増（1.5倍）で下げているなら即除外
+    # 【門番】株価がMA5の下、または出来高増で下げているなら即除外
     if close < ma5 or (close < prev_close and vol_ratio >= 1.5):
         return {"strategy": "様子見", "buy": 0, "p_half": 0, "p_full": 0, "sl_ma": 0, "signal_success": False}
 
-    # 元のロジック条件
     is_gap_up = open_price > prev_close * 1.01 
     if is_gap_up or high >= ma5 * 1.01 or close > ma5 * 1.01 or close < prev_close * 0.995: 
         return {"strategy": "様子見", "buy": 0, "p_half": 0, "p_full": 0, "sl_ma": 0, "signal_success": False}
@@ -774,7 +773,7 @@ def evaluate_strategy_new(df, info, vol_ratio, high_250d, atr_val, curr_price, m
     buy_target = int(ma5) if ma5 > 0 else 0
     p_half, p_full, sl_ma, is_aoteng = 0, 0, atr_sl_price, False
 
-    # 【絶対条件】株価がMA5の下なら順張り系は拒否
+    # 【絶対条件】株価がMA5の下なら順張り系は一切出さない
     if curr_price < ma5:
          if signals_bear["signal_success"] and signals_bear["strategy"] == "🚀逆ロジ":
               strategy, buy_target, p_half, p_full, sl_ma = signals_bear["strategy"], signals_bear["buy"], signals_bear["p_half"], signals_bear["p_full"], signals_bear["sl_ma"]
@@ -790,14 +789,17 @@ def evaluate_strategy_new(df, info, vol_ratio, high_250d, atr_val, curr_price, m
               if ma5 > ma25 > ma75: 
                    strategy, buy_target = "🔥順張り", int(ma5)
                    category_str = get_market_cap_category(info["cap"])
+                   half_pct = get_target_pct_new(category_str, is_half=True)
+                   full_pct = get_target_pct_new(category_str, is_half=False)
                    is_ath = high_250d > 0 and curr_price > high_250d
                    if is_ath and rsi_val < 80 and vol_ratio >= 1.5:
-                        is_aoteng = True; max_h = df['High'].iloc[-1]
-                        atr_tp = max(0, max_h - (atr_val * 2.5))
-                        p_full, p_half, sl_ma = int(np.floor(atr_tp)), 0, int(np.floor(atr_tp))
+                        is_aoteng = True
+                        max_high_today = df['High'].iloc[-1]
+                        atr_trailing_price = max(0, max_high_today - (atr_val * 2.5))
+                        p_full, p_half, sl_ma = int(np.floor(atr_trailing_price)), 0, int(np.floor(atr_trailing_price))
                    else:
-                        p_half = int(np.floor(buy_target * (1 + get_target_pct_new(category_str, True))))
-                        p_full = int(np.floor(buy_target * (1 + get_target_pct_new(category_str, False))))
+                        p_half = int(np.floor(buy_target * (1 + half_pct)))
+                        p_full = int(np.floor(buy_target * (1 + full_pct)))
 
     sl_pct = ((curr_price / sl_ma) - 1) * 100 if curr_price > 0 and sl_ma > 0 else 0.0
     return strategy, buy_target, p_half, p_full, sl_ma, is_aoteng, sl_pct
@@ -809,7 +811,15 @@ def get_stock_data(ticker, current_run_count):
     stock_code = f"{ticker}.JP" 
     info = get_stock_info(ticker) 
     issued_shares = info.get("issued_shares", 0.0)
-    score_factors_inner = {"base": 50, "strategy_bonus": 0, "rr_score": 0, "rsi_penalty": 0, "vol_bonus": 0, "liquidity_penalty": 0, "atr_penalty": 0, "gc_dc": 0, "market_overheat": 0, "sl_risk_deduct": 0, "aoteng_bonus": 0, "dd_score_low_risk_bonus": 0, "dd_score_continuous_deduct": 0, "dd_score_high_risk_deduct": 0, "RSIスイートスポット": 0, "momentum_bonus": 0, "intraday_vol_deduct": 0, "intraday_ma_gap_deduct": 0, "dd_recovery_bonus": 0, "dd_continuous_penalty": 0, "短期トレンド崩壊(株価<MA5)": 0, "大口売り抜け懸念": 0}
+    
+    score_factors_inner = {
+        "base": 50, "strategy_bonus": 0, "rr_score": 0, "rsi_penalty": 0, "vol_bonus": 0, 
+        "liquidity_penalty": 0, "atr_penalty": 0, "gc_dc": 0, "market_overheat": 0, 
+        "sl_risk_deduct": 0, "aoteng_bonus": 0, "dd_score_low_risk_bonus": 0, 
+        "dd_score_continuous_deduct": 0, "dd_score_high_risk_deduct": 0, "RSIスイートスポット": 0, # ←名称変更
+        "momentum_bonus": 0, "intraday_vol_deduct": 0, "intraday_ma_gap_deduct": 0, 
+        "dd_recovery_bonus": 0, "dd_continuous_penalty": 0, "短期トレンド崩壊(株価<MA5)": 0, "大口売り抜け懸念": 0
+    }
     
     try:
         csv_url = f"https://stooq.com/q/d/l/?s={stock_code}&i=d"
@@ -829,7 +839,6 @@ def get_stock_data(ticker, current_run_count):
             else:
                 df.loc[df.index[-1], ['Close', 'Volume']] = [curr_price, info.get('volume', df.iloc[-1]['Volume'])]
 
-        # 指標再計算
         df['SMA5'] = df['Close'].rolling(5).mean()
         df['SMA25'] = df['Close'].rolling(25).mean()
         df['SMA75'] = df['Close'].rolling(75).mean()
@@ -852,31 +861,35 @@ def get_stock_data(ticker, current_run_count):
             df, info, vol_ratio, high_250d, atr_smoothed, curr_price, ma5, ma25, ma75, prev['SMA5'], rsi_val, atr_sl_price
         )
 
-        risk_reward_v = 0.0
+        risk_reward_value = 0.0
         if buy_target > 0 and sl_ma > 0 and (p_full > buy_target or is_aoteng):
-            risk_v = buy_target - sl_ma
-            if risk_v > 0:
-                if is_aoteng: risk_reward_v = 5.0
+            risk_val = buy_target - sl_ma
+            if risk_val > 0:
+                if is_aoteng: risk_reward_value = 5.0
                 else:
                     target_avg = (p_half + p_full) / 2 if p_half > 0 else p_full
-                    reward_v = target_avg - buy_target
-                    if reward_v > 0: risk_reward_v = reward_v / risk_v
+                    reward_val = target_avg - buy_target
+                    if reward_val > 0: risk_reward_value = reward_val / risk_val
 
-        # スコアリング
         score = 50
         if curr_price < ma5: score_factors_inner["短期トレンド崩壊(株価<MA5)"] = -25; score -= 25
         if vol_ratio >= 1.5 and curr_price < prev['Close']: score_factors_inner["大口売り抜け懸念"] = -15; score -= 15
-        if "順" in strategy: score += 15
-        elif "逆" in strategy: score += 10
-        if 55 <= rsi_val <= 65: score += 10; score_factors_inner["RSIスイートスポット"] = 10
-        rr_s = 20 if risk_reward_v >= 2.0 else (-25 if 0 < risk_reward_v < 1.0 else 0)
-        score += rr_s; score_factors_inner["rr_score"] = rr_s
+        
+        strategy_bonus = 15 if "順" in strategy else (10 if "逆" in strategy else 0)
+        score += strategy_bonus; score_factors_inner["strategy_bonus"] = strategy_bonus
+        
+        # スイートスポット判定 (55-65)
+        if 55 <= rsi_val <= 65:
+            score += 10; score_factors_inner["RSIスイートスポット"] = 10
+            
+        rr_score = 20 if risk_reward_value >= 2.0 else (-25 if 0 < risk_reward_value < 1.0 else 0)
+        score += rr_score; score_factors_inner["rr_score"] = rr_score
 
         market_deduct = -20 if market_25d_ratio >= 125.0 else 0
         score_to_return = max(0, min(100, score + market_deduct))
 
         if rsi_val <= 30: rsi_mark = "🔵"
-        elif 55 <= rsi_val <= 65: rsi_mark = "🟢"
+        elif 55 <= rsi_val <= 65: rsi_mark = "🟢" # スイートスポット
         elif rsi_val >= 70: rsi_mark = "🔴"
         else: rsi_mark = "⚪"
         
@@ -885,7 +898,8 @@ def get_stock_data(ticker, current_run_count):
         if pre_market_score is None:
              st.session_state.score_history[ticker] = {'pre_market_score': base_score_val + market_deduct, 'current_score': score_to_return}
              score_diff = score_to_return - (base_score_val + market_deduct)
-        else: score_diff = score_to_return - pre_market_score
+        else:
+             score_diff = score_to_return - pre_market_score
 
         bt_str, win_rate_pct, bt_cnt, max_dd_bt, bt_target_pct, bt_win_count, bt_loss_count = run_backtest(df, info["cap"])
 
@@ -895,7 +909,7 @@ def get_stock_data(ticker, current_run_count):
             "vol_ratio": vol_ratio, "vol_disp": f"{vol_ratio:.1f}倍", "momentum": f"{(df['Close'].diff().tail(5) > 0).sum()/5*100:.0f}%", 
             "strategy": strategy, "score": score_to_return, "buy": buy_target, "p_half": p_half, "p_full": p_full,
             "backtest": bt_str, "backtest_raw": bt_str, "max_dd_pct": max_dd_bt, "sl_pct": sl_pct, "sl_ma": sl_ma,
-            "avg_volume_5d": last['Vol_SMA5'], "risk_reward": risk_reward_v, "score_diff": score_diff, "is_aoteng": is_aoteng, 
+            "avg_volume_5d": last['Vol_SMA5'], "risk_reward": risk_reward_value, "score_diff": score_diff, "is_aoteng": is_aoteng, 
             "bt_win_count": bt_win_count, "bt_loss_count": bt_loss_count, "bt_target_pct": bt_target_pct, 
             "score_factors": {k:v for k,v in score_factors_inner.items() if v != 0}, 
             "atr_pct": (atr_smoothed/curr_price*100) if curr_price > 0 else 0, "atr_comment": "通常", 
@@ -912,56 +926,73 @@ def batch_analyze_with_ai(data_list):
             genai.configure(api_key=api_key)
             model = genai.GenerativeModel(model_name)
         except Exception: pass
-    if not model: return {}, "AIモデル未設定"
-    
-    # 内部項目をプロ用語に変換するマップ
-    f_map = {"strategy_bonus": "戦略的優位性", "rr_score": "上値期待値", "RSIスイートスポット": "理想的上向きの勢い", "短期トレンド崩壊(株価<MA5)": "目先の需給崩壊", "大口売り抜け懸念": "大口の売り抜け懸念"}
+    if not model: return {}, "⚠️ AIモデル未設定"
     
     data_for_ai = ""
     for d in data_list:
-        rr = d.get('risk_reward', 0)
-        rr_disp = "青天" if d.get('is_aoteng') else (f"{rr:.1f}" if rr >= 0.1 else "-")
-        ma_div = (d['price']/d.get('buy', 1)-1)*100 if d.get('buy', 1) > 0 else 0
-        factors = [f_map.get(k, k) for k in d.get('score_factors', {}).keys() if "base" not in k]
-        f_str = "、".join(factors) if factors else "特筆事項なし"
+        price = d['price'] if d['price'] is not None else 0
+        rr_disp = "青天" if d.get('is_aoteng') else (f"{d.get('risk_reward', 0):.1f}" if d.get('risk_reward', 0) >= 0.1 else "-")
+        ma_div = (price/d.get('buy', 1)-1)*100 if d.get('buy', 1) > 0 and price > 0 else 0
+        atr_sl = d.get('atr_sl_price', 0)
+        ma25_sl = d.get('ma25', 0) * 0.995 
         
-        data_for_ai += f"ID:{d['code']} | 名:{d['name']} | 点:{d['score']} | 戦略:{d['strategy']} | RSI:{d['rsi']:.1f} | 乖離:{ma_div:+.1f}% | RR:{rr_disp} | 理由:{f_str} | SL_MA25:{d.get('ma25', 0)*0.995:,.0f} | SL_ATR:{d.get('atr_sl_price', 0):,.0f}\n"
+        # 【重要】AIを混乱させる数値（base:50など）を完全に排除。理由（日本語）のみを抽出
+        raw_factors = d.get('score_factors', {}).keys()
+        relevant_factors = [k for k in raw_factors if "base" not in k and "基礎点" not in k]
+        f_str = "、".join(relevant_factors) if relevant_factors else "特筆すべき異常なし"
+        
+        data_for_ai += f"ID:{d['code']} | 名称:{d['name']} | 点数:{d['score']} | 戦略:{d['strategy']} | RSI:{d['rsi']:.1f} | 乖離率:{ma_div:+.1f}% | 判定理由:{f_str} | SL_MA25:{ma25_sl:,.0f} | SL_ATR:{atr_sl:,.0f}\n"
 
     global market_25d_ratio
-    prompt = f"""あなたはプロトレーダー「アイ」。以下のデータに基づき100文字以内で所感を作成してください。
+    r25 = market_25d_ratio
+    m_alert = f"市場25日騰落レシオ: {r25:.2f}%。"
 
-【出力絶対ルール】
-1. 回答形式： ID:コード | <b>[銘柄名]</b>｜コメント
-2. 「RSIスイートスポット」の銘柄は理想的な勢いとして高く評価してください。
-3. 20点以下の銘柄（需給崩壊）は、POが良くても厳しく警告してください。
-4. Markdown太字禁止。HTMLの<b>のみ使用。
-5. 最後に「END_OF_LIST」と書き、続けて「アイの独り言」を1行。
+    prompt = f"""あなたは「アイ」という名前のプロトレーダー（30代女性、冷静沈着）。以下の【市場環境】と【銘柄データ】に基づき、各銘柄に100文字以内の所感コメントを作成してください。
 
-【市場環境】レシオ {market_25d_ratio:.2f}%
+【市場環境】{m_alert}
+
+【生成コメントの原則（絶対厳守）】
+1. <b>最大文字数はプレフィックスを含めて100文字以内。</b>「base:50」や「基礎点」といった内部用語は絶対に出力しないでください。
+2. Markdownの太字（**）は禁止。HTMLの太字（<b>）のみ使用。
+3. コメントの先頭は必ず「<b>[銘柄名]</b>｜」という形式で始めてください。
+4. 要因に「短期トレンド崩壊」がある銘柄（ADワークス等の例）については、「POは維持しているが目先の需給が壊れている」と判断し、安易な買いを避けるよう厳しく警告してください。
+5. 文末には「MA25_SL（X円）かATR_SL（Y円）のどちらかを終値で割れば撤退」という基準を必ず含めてください。
+6. 投資助言ではなく、プロとしての客観的な見解（丁寧語）に徹してください。
+
 【銘柄データ】
 {data_for_ai}
+
+【出力形式】ID:コード | コメント
+（例）ID:9984 | <b>ソフトバンクグループ</b>｜RSIは中立。MA25_SL（6,500円）かATR_SL（6,400円）を終値で割れば撤退。
+
+最後に「END_OF_LIST」と書き、続けて「アイの独り言」を1行記述してください。
 """
     try:
         res = model.generate_content(prompt)
         text = res.text
-        comments = {}; monologue = "冷静な視点を。"
-        parts = text.split("END_OF_LIST")
-        comment_block = parts[0]
-        if len(parts) > 1: monologue = parts[1].strip().replace("**", "")
+        comments = {}; monologue = "冷静な視点を保ち、規律ある取引を。"
+        
+        if "END_OF_LIST" in text:
+            parts = text.split("END_OF_LIST", 1)
+            comment_block = parts[0]
+            monologue = parts[1].strip().replace("**", "")
+        else:
+            comment_block = text
 
         import re
         lines = comment_block.strip().split("\n")
         for line in lines:
             line = line.strip()
-            # 4桁のコードを基準に内容を抽出
-            match = re.search(r"(\d{4,})\D+(.*)", line)
+            # 強力な正規表現：IDの後のコードを抽出し、それ以降を全てコメントとして保存
+            match = re.search(r"ID[:：]?\s*(\w+)\s*[|｜:：]\s*(.*)", line)
             if match:
                 c_code = match.group(1).strip()
                 c_content = match.group(2).strip().replace("**", "")
-                if any(str(d['code']) == c_code for d in data_list):
-                    comments[c_code] = c_content
+                comments[c_code] = c_content
+
         return comments, monologue
-    except: return {}, "AI解析エラー"
+    except:
+        return {}, "AI解析エラー（再実行してください）"
 
 def merge_new_data(new_data_list):
     existing_map = {d['code']: d for d in st.session_state.analyzed_data}
