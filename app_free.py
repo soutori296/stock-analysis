@@ -811,15 +811,7 @@ def get_stock_data(ticker, current_run_count):
     stock_code = f"{ticker}.JP" 
     info = get_stock_info(ticker) 
     issued_shares = info.get("issued_shares", 0.0)
-    
-    score_factors_inner = {
-        "base": 50, "strategy_bonus": 0, "rr_score": 0, "rsi_penalty": 0, "vol_bonus": 0, 
-        "liquidity_penalty": 0, "atr_penalty": 0, "gc_dc": 0, "market_overheat": 0, 
-        "sl_risk_deduct": 0, "aoteng_bonus": 0, "dd_score_low_risk_bonus": 0, 
-        "dd_score_continuous_deduct": 0, "dd_score_high_risk_deduct": 0, "RSIスイートスポット": 0, # ←名称変更
-        "momentum_bonus": 0, "intraday_vol_deduct": 0, "intraday_ma_gap_deduct": 0, 
-        "dd_recovery_bonus": 0, "dd_continuous_penalty": 0, "短期トレンド崩壊(株価<MA5)": 0, "大口売り抜け懸念": 0
-    }
+    score_factors_inner = {"base": 50, "strategy_bonus": 0, "rr_score": 0, "rsi_penalty": 0, "vol_bonus": 0, "liquidity_penalty": 0, "atr_penalty": 0, "gc_dc": 0, "market_overheat": 0, "sl_risk_deduct": 0, "aoteng_bonus": 0, "dd_score_low_risk_bonus": 0, "dd_score_continuous_deduct": 0, "dd_score_high_risk_deduct": 0, "RSIスイートスポット": 0, "momentum_bonus": 0, "intraday_vol_deduct": 0, "intraday_ma_gap_deduct": 0, "dd_recovery_bonus": 0, "dd_continuous_penalty": 0, "短期トレンド崩壊(株価<MA5)": 0, "大口売り抜け懸念": 0}
     
     try:
         csv_url = f"https://stooq.com/q/d/l/?s={stock_code}&i=d"
@@ -874,14 +866,9 @@ def get_stock_data(ticker, current_run_count):
         score = 50
         if curr_price < ma5: score_factors_inner["短期トレンド崩壊(株価<MA5)"] = -25; score -= 25
         if vol_ratio >= 1.5 and curr_price < prev['Close']: score_factors_inner["大口売り抜け懸念"] = -15; score -= 15
-        
-        strategy_bonus = 15 if "順" in strategy else (10 if "逆" in strategy else 0)
-        score += strategy_bonus; score_factors_inner["strategy_bonus"] = strategy_bonus
-        
-        # スイートスポット判定 (55-65)
-        if 55 <= rsi_val <= 65:
-            score += 10; score_factors_inner["RSIスイートスポット"] = 10
-            
+        if "順" in strategy: score += 15
+        elif "逆" in strategy: score += 10
+        if 55 <= rsi_val <= 65: score += 10; score_factors_inner["RSIスイートスポット"] = 10
         rr_score = 20 if risk_reward_value >= 2.0 else (-25 if 0 < risk_reward_value < 1.0 else 0)
         score += rr_score; score_factors_inner["rr_score"] = rr_score
 
@@ -889,7 +876,7 @@ def get_stock_data(ticker, current_run_count):
         score_to_return = max(0, min(100, score + market_deduct))
 
         if rsi_val <= 30: rsi_mark = "🔵"
-        elif 55 <= rsi_val <= 65: rsi_mark = "🟢" # スイートスポット
+        elif 55 <= rsi_val <= 65: rsi_mark = "🟢"
         elif rsi_val >= 70: rsi_mark = "🔴"
         else: rsi_mark = "⚪"
         
@@ -898,8 +885,7 @@ def get_stock_data(ticker, current_run_count):
         if pre_market_score is None:
              st.session_state.score_history[ticker] = {'pre_market_score': base_score_val + market_deduct, 'current_score': score_to_return}
              score_diff = score_to_return - (base_score_val + market_deduct)
-        else:
-             score_diff = score_to_return - pre_market_score
+        else: score_diff = score_to_return - pre_market_score
 
         bt_str, win_rate_pct, bt_cnt, max_dd_bt, bt_target_pct, bt_win_count, bt_loss_count = run_backtest(df, info["cap"])
 
