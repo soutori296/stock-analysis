@@ -914,59 +914,68 @@ def batch_analyze_with_ai(data_list):
         except Exception: pass
     if not model: return {}, "AIモデル未設定"
     
+    # 英語の内部項目をAIが使いやすい日本語に変換するマップ
+    factor_map = {
+        "strategy_bonus": "戦略的優位性",
+        "rr_score": "リスクリワード（上値期待値）",
+        "rsi_penalty": "RSI過熱感",
+        "vol_bonus": "出来高の勢い",
+        "liquidity_penalty": "流動性リスク",
+        "atr_penalty": "ボラティリティ過大",
+        "gc_dc": "トレンド転換の兆し",
+        "market_overheat": "市場全体への警戒",
+        "sl_risk_deduct": "ストップロスの近さ",
+        "aoteng_bonus": "青天井圏の強気",
+        "dd_score_low_risk_bonus": "低ドローダウン（安定性）",
+        "RSIスイートスポット": "理想的な上昇モメンタム",
+        "短期トレンド崩壊(株価<MA5)": "目先の需給崩壊（要警戒）",
+        "大口売り抜け懸念": "大口のディストリビューション懸念"
+    }
+    
     data_for_ai = ""
     for d in data_list:
         price = d['price'] if d['price'] is not None else 0
-        rr = d.get('risk_reward', 0)
-        rr_disp = "青天" if d.get('is_aoteng') else (f"{rr:.1f}" if rr >= 0.1 else "-")
-        ma_div = (price/d.get('buy', 1)-1)*100 if d.get('buy', 1) > 0 and price > 0 else 0
+        rr_disp = "青天" if d.get('is_aoteng') else (f"{d.get('risk_reward', 0):.1f}" if d.get('risk_reward', 0) >= 0.1 else "-")
         
-        # 理由から不要語を除去しつつ、スイートスポットを強調
-        factors = [k for k in d.get('score_factors', {}).keys() if "base" not in k]
-        f_str = "、".join(factors) if factors else "特筆事項なし"
+        # 不要な単語を除去し、日本語に翻訳してからAIに渡す
+        reasons = [factor_map.get(k, k) for k in d.get('score_factors', {}).keys() if "base" not in k]
+        f_str = "、".join(reasons) if reasons else "特筆事項なし"
         
-        # AIがRSIの質を判断しやすいよう、ラベルを付与
-        rsi_val = d['rsi']
-        rsi_status = "スイートスポット(理想的勢い)" if 55 <= rsi_val <= 65 else ("過熱気味" if rsi_val >= 70 else "中立")
-        
-        data_for_ai += f"ID:{d['code']} | 名:{d['name']} | 点:{d['score']} | 戦略:{d['strategy']} | RSI:{rsi_val:.1f}({rsi_status}) | 乖離:{ma_div:+.1f}% | RR:{rr_disp} | 要因:{f_str} | SL_MA25:{d.get('ma25', 0)*0.995:,.0f} | SL_ATR:{d.get('atr_sl_price', 0):,.0f}\n"
+        data_for_ai += f"ID:{d['code']} | 名:{d['name']} | 点:{d['score']} | 戦略:{d['strategy']} | RSI:{d['rsi']:.1f} | R/R比:{rr_disp} | 理由:{f_str} | SL_MA25:{d.get('ma25', 0)*0.995:,.0f} | SL_ATR:{d.get('atr_sl_price', 0):,.0f}\n"
 
     global market_25d_ratio
-    prompt = f"""あなたはプロトレーダー「アイ」。以下のデータに基づき、100文字以内で各銘柄の所感を作成してください。
+    prompt = f"""あなたはプロトレーダー「アイ」（30代女性、冷静・知性的）。以下のデータに基づき、各銘柄100文字以内で「所感」を作成してください。
 
-【生成コメントの原則】
-1. <b>最大100文字。</b>「RSIは中立圏内」などの定型文は避け、点数に見合った具体性のある表現にすること。
-2. <b>RSI 55.0〜65.0（スイートスポット）の銘柄</b>は、「上昇の勢いが極めて健全」「トレンドの質が高い」など、積極的に評価してください。
-3. 90点以上の超高評価銘柄（マツオカ等）は、その優位性を強調してください。
-4. 逆に10点台（KG情報等）や「短期トレンド崩壊」がある銘柄は、POが綺麗でも「需給の悪化」を厳しく指摘してください。
-5. 撤退基準（MA25_SLとATR_SL）を末尾に明記すること。
-6. Markdown太字禁止。HTMLの<b>のみ使用。
+【出力の絶対ルール】
+1. 回答形式： ID:コード | <b>[銘柄名]</b>｜コメント
+2. プロらしい表現を使うこと。「rr_score」や「strategy_bonus」等のシステム用語をそのまま書くのは厳禁。
+3. リスク（短期トレンド崩壊など）がある銘柄は、他の指標が良くても冷静に「今は待つべき」と警告すること。
+4. RSIスイートスポットは「上昇の質が良い」と評価すること。
+5. 最後に必ず「END_OF_LIST」と書き、アイの独り言を1行。
 
-【市場環境】レシオ {market_25d_ratio:.2f}%
+【市場レシオ】{market_25d_ratio:.2f}%
 【銘柄データ】
 {data_for_ai}
-
-最後に必ず「END_OF_LIST」と書き、アイの独り言を1行記述してください。
 """
     try:
         res = model.generate_content(prompt)
         text = res.text
-        comments = {}; monologue = "冷静な判断を。"
-        if "END_OF_LIST" in text:
-            parts = text.split("END_OF_LIST", 1)
-            comment_block = parts[0]
-            monologue = parts[1].strip().replace("**", "")
-        else: comment_block = text
+        comments = {}; monologue = "市場を冷静に観察しましょう。"
+        parts = text.split("END_OF_LIST")
+        comment_block = parts[0]
+        if len(parts) > 1: monologue = parts[1].strip().replace("**", "")
 
         import re
         lines = comment_block.strip().split("\n")
         for line in lines:
             line = line.strip()
-            match = re.search(r"ID[:：]?\s*(\w+)\s*[|｜:：]\s*(.*)", line)
+            # 4桁のコードを基準に抽出
+            match = re.search(r"(\d{4})\D+(.*)", line)
             if match:
                 c_code = match.group(1).strip()
                 c_content = match.group(2).strip().replace("**", "")
-                comments[c_code] = c_content
+                if any(str(d['code']) == c_code for d in data_list):
+                    comments[c_code] = c_content
         return comments, monologue
     except: return {}, "AI解析エラー"
 
