@@ -1020,8 +1020,15 @@ def get_stock_data(ticker, current_run_count):
         
         # 戦略ボーナス
         strategy_bonus = 0
-        if "順ロジ" in strategy or "順張り" in strategy: strategy_bonus = 15 
-        if "逆ロジ" in strategy or "逆張り" in strategy: strategy_bonus = 10
+        # 厳選された「🚀」系は高く評価
+        if "🚀" in strategy: 
+            strategy_bonus = 15 
+        # 普通の「🔥順張り」や「🌊逆張り」は少し抑える
+        elif "順張り" in strategy: 
+            strategy_bonus = 10  # 15から10へ減点
+        elif "逆張り" in strategy: 
+            strategy_bonus = 5   # 10から5へ減点（逆張りはリスク高いため厳しく）
+            
         score += strategy_bonus; score_factors_inner["strategy_bonus"] = strategy_bonus
         
         # RSI中立ボーナス
