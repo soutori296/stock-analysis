@@ -203,6 +203,46 @@ st.markdown(f"""
         .ai-table th:nth-child(17), .ai-table td:nth-child(17) {{ width: 350px !important; min-width: 350px !important; }}
         .ai-table th:nth-child(3), .ai-table td:nth-child(3) {{ width: 80px !important; min-width: 80px !important; }} 
     }}
+
+    /* --- バッジ用CSS (横スクロール・ツールチップ対応版) --- */
+    .badge-container {{
+        margin-top: 3px;
+        display: flex;
+        flex-wrap: nowrap;       /* 重要: 折り返しを禁止 */
+        gap: 3px;                /* バッジ間の隙間 */
+        overflow-x: auto;        /* はみ出たら横スクロール */
+        -webkit-overflow-scrolling: touch; /* スマホで滑らかに */
+        padding-bottom: 2px;
+        max-width: 100%;
+        scrollbar-width: none;   /* Firefox用スクロールバー隠し */
+    }}
+    /* Chrome/Safari用スクロールバー隠し */
+    .badge-container::-webkit-scrollbar {{
+        display: none;
+    }}
+    
+    .factor-badge {{
+        display: inline-block;
+        font-size: 9px;
+        padding: 1px 4px;
+        border-radius: 2px;
+        font-weight: normal;
+        border: 1px solid transparent;
+        line-height: 1.1;
+        white-space: nowrap;     /* 文字の折り返しも禁止 */
+        flex-shrink: 0;          /* 縮小禁止 */
+    }}
+    .badge-plus {{
+        color: #1b5e20;
+        background-color: #e8f5e9;
+        border-color: #c8e6c9;
+    }}
+    .badge-minus {{
+        color: #b71c1c;
+        background-color: #ffcdd2;
+        border-color: #ef9a9a;
+    }}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -1780,23 +1820,138 @@ if st.session_state.analyzed_data:
     df_50_to_74 = df[(df['score'] >= 50) & (df['score'] <= 74)].copy()
     df_below_50 = df[df['score'] < 50].copy()
 
+    FACTOR_META = {
+        # --- 重要トレンド・シグナル ---
+        "新高値ブレイク加点": {"char": "新", "prio": 10},
+        "スクイーズ（充電中）加点": {"char": "充", "prio": 20},
+        "週足上昇トレンド加点": {"char": "週", "prio": 30},
+        "週足下落トレンド減点": {"char": "週", "prio": 30},
+        "戦略優位性ボーナス": {"char": "戦", "prio": 40}, # 順ロジ/逆ロジ/順張り
+        "青天井ボーナス": {"char": "青", "prio": 50},
+
+        # --- リスク ---
+        "流動性ペナルティ": {"char": "板", "prio": 60},
+        "市場過熱ペナルティ": {"char": "市", "prio": 60},
+        "リスクリワード評価(マイナス)": {"char": "損", "prio": 70}, # japanese_score_factorsキー要確認
+        "DD率 高リスク減点": {"char": "落", "prio": 80},
+        
+        # --- テクニカル ---
+        "リスクリワード評価": {"char": "Ｒ", "prio": 90},
+        "RSI過熱/底打ちペナルティ": {"char": "熱", "prio": 100},
+        "RSI底割れ (逆張り)": {"char": "底", "prio": 100},
+        "RSI過熱 (順張り)": {"char": "熱", "prio": 100}, 
+        
+        # --- 補足 ---
+        "出来高急増ボーナス": {"char": "出", "prio": 110},
+        "直近モメンタムボーナス": {"char": "勢", "prio": 120},
+        "GC/DC評価": {"char": "Ｇ", "prio": 130},
+        "RSI中立ゾーンボーナス": {"char": "適", "prio": 140},
+        "DD率 低リスクボーナス": {"char": "安", "prio": 160},
+        "DDリカバリー速度評価": {"char": "復", "prio": 170},
+        "DD連続性リスク評価": {"char": "崩", "prio": 180},
+        "ボラティリティペナルティ": {"char": "凪", "prio": 190},
+    }
+
     def generate_html_table(data_frame, title, score_range):
         if data_frame.empty: return ""
-        header_html = "".join([f'<th class-="has-tooltip" data-tooltip="{h[1]}" style="width:{h[4]}; min-width:{h[3]}; text-align:{h[2]};">{h[1]}</th>' for h in HEADER_MAP])
+        
+        # 【修正1】ヘッダーのツールチップを削除（シンプルなthタグにする）
+        header_html = "".join([f'<th style="width:{h[4]}; min-width:{h[3]}; text-align:{h[2]};">{h[1]}</th>' for h in HEADER_MAP])
+        
         rows_html = []
+        
+        raw_data_map = {d['code']: d for d in st.session_state.analyzed_data}
+
         for index, row in data_frame.iterrows():
             if row.get('is_low_liquidity'): bg_class = 'bg-low-liquidity'
             elif row.get('is_aoteng'): bg_class = 'bg-aoteng'
             elif row.get('score', 0) >= 75: bg_class = 'bg-triage-high'
             else: bg_class = ''
+            
             row_cells = []
             for col_key, _, col_align, _, _ in HEADER_MAP:
                 cell_data = row[col_key]             
-                if col_key == 'code_disp': cell_html = f'<td class="{bg_class} td-{col_align}">{cell_data}</td>'
-                elif col_key == 'comment': cell_html = f'<td class="{bg_class} td-{col_align}"><div class="comment-scroll-box">{cell_data}</div></td>'
-                else: cell_html = f'<td class="{bg_class} td-{col_align}">{cell_data}</td>'
+                
+                if col_key == 'name':
+                    badges_html = ""
+                    raw_row = raw_data_map.get(row['code'])
+                    if raw_row and 'score_factors' in raw_row:
+                        factors = raw_row['score_factors']
+                        
+                        candidates = []
+                        for key, val in factors.items():
+                            if val == 0: continue
+                            
+                            meta = None
+                            if key in FACTOR_META:
+                                meta = FACTOR_META[key]
+                            else:
+                                for k, m in FACTOR_META.items():
+                                    if k in key:
+                                        meta = m
+                                        break
+                            
+                            if meta:
+                                candidates.append({
+                                    "name": key,
+                                    "char": meta["char"],
+                                    "prio": meta["prio"],
+                                    "val": val,
+                                    "abs_val": abs(val)
+                                })
+                        
+                        # --- バランス選抜ロジック ---
+                        plus_c = [c for c in candidates if c['val'] > 0]
+                        minus_c = [c for c in candidates if c['val'] < 0]
+                        
+                        plus_c.sort(key=lambda x: (-x["abs_val"], x["prio"]))
+                        minus_c.sort(key=lambda x: (-x["abs_val"], x["prio"]))
+                        
+                        max_slots = 6
+                        half_slots = 3
+                        
+                        final_plus = []
+                        final_minus = []
+                        
+                        if len(plus_c) <= half_slots and len(minus_c) <= half_slots:
+                            final_plus = plus_c
+                            final_minus = minus_c
+                        elif len(plus_c) > half_slots and len(minus_c) < half_slots:
+                            slots_for_plus = max_slots - len(minus_c)
+                            final_plus = plus_c[:slots_for_plus]
+                            final_minus = minus_c
+                        elif len(minus_c) > half_slots and len(plus_c) < half_slots:
+                            slots_for_minus = max_slots - len(plus_c)
+                            final_plus = plus_c
+                            final_minus = minus_c[:slots_for_minus]
+                        else:
+                            final_plus = plus_c[:half_slots]
+                            final_minus = minus_c[:half_slots]
+                        
+                        display_badges = final_plus + final_minus
+                        
+                        badge_spans = []
+                        for b in display_badges:
+                            css_class = "badge-plus" if b["val"] > 0 else "badge-minus"
+                            # 【修正2】バッジには title 属性（ツールチップ）を付ける
+                            tooltip_text = f"{b['name']}: {b['val']:+}点"
+                            badge_spans.append(f'<span class="factor-badge {css_class}" title="{tooltip_text}">{b["char"]}</span>')
+                        
+                        if badge_spans:
+                            badges_html = f'<div class="badge-container">{"".join(badge_spans)}</div>'
+                    
+                    cell_html = f'<td class="{bg_class} td-{col_align}">{cell_data}{badges_html}</td>'
+                
+                elif col_key == 'code_disp': 
+                    cell_html = f'<td class="{bg_class} td-{col_align}">{cell_data}</td>'
+                elif col_key == 'comment': 
+                    cell_html = f'<td class="{bg_class} td-{col_align}"><div class="comment-scroll-box">{cell_data}</div></td>'
+                else: 
+                    cell_html = f'<td class="{bg_class} td-{col_align}">{cell_data}</td>'
+                
                 row_cells.append(cell_html)
             rows_html.append(f'<tr>{"".join(row_cells)}</tr>')
+            
         table_html = f"""
         <h4 style="margin-top: 1.5rem; margin-bottom: 0.5rem;">{title} ({len(data_frame)}件)</h4>
         <div class="table-container">
