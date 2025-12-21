@@ -894,10 +894,14 @@ def get_stock_data(ticker, current_run_count):
         ma75 = last['SMA75'] if not pd.isna(last['SMA75']) else 0; prev_ma5 = prev['SMA5'] if not pd.isna(prev['SMA5']) else ma5
         prev_ma25 = prev['SMA25'] if not pd.isna(prev['SMA25']) else ma25
         high_250d = df['High'].tail(250).max() if len(df) >= 250 else 0
+        
+        # GC/DC判定 (閾値を0.5%に厳格化)
         is_gc_raw = (ma5 > ma25) and (prev_ma5 <= prev_ma25); is_dc_raw = (ma5 < ma25) and (prev_ma5 >= prev_ma25)
         ma_diff_pct = abs((ma5 - ma25) / ma25) * 100 if ma25 > 0 else 100
         is_gc, is_dc = is_gc_raw, is_dc_raw
-        if ma_diff_pct < 0.1: is_gc, is_dc = False, False
+        if ma_diff_pct < 0.5: # 誤判定防止のため0.1から0.5へ引き上げ
+            is_gc, is_dc = False, False
+            
         atr_val = last['ATR'] if not pd.isna(last['ATR']) else 0
         atr_smoothed = last['ATR_SMA3'] if not pd.isna(last['ATR_SMA3']) else atr_val 
         
@@ -981,7 +985,7 @@ def get_stock_data(ticker, current_run_count):
         if is_in_dd and len(recent_75d_dd) - 1 >= dd_start_index: dd_75d_count += 1
         
         # ==============================================================================
-        # スコア計算
+        # スコア計算 (重複排除・上限設定版)
         # ==============================================================================
         score = 50; total_structural_deduction = 0
         avg_vol_5d = last['Vol_SMA5'] if not pd.isna(last['Vol_SMA5']) else 0
@@ -1018,25 +1022,86 @@ def get_stock_data(ticker, current_run_count):
         
         score += total_structural_deduction; score_factors_inner["total_deduction"] += total_structural_deduction
         
-        # 戦略ボーナス
+        # -------------------------------------------------------------
+        # 💡【重要】トレンド・戦略系の加点計算（上限キャップ付き）
+        # -------------------------------------------------------------
+        trend_strategy_sum = 0
+        
+        # 1. 週足トレンドフィルター
+        if not is_weekly_up:
+            score -= 20
+            score_factors_inner["weekly_trend_penalty"] = -20
+        else:
+            trend_strategy_sum += 10
+            score_factors_inner["weekly_trend_bonus"] = 10
+            
+        # 2. ブレイクアウト判定
+        if is_breakout:
+            trend_strategy_sum += 15
+            score_factors_inner["breakout_bonus"] = 15
+            if "順" in strategy: 
+                strategy = "🚀ブレイク"
+                buy_target = int(curr_price)
+                if not is_aoteng:
+                    category_str_b = get_market_cap_category(info["cap"])
+                    half_pct_b = get_target_pct_new(category_str_b, is_half=True)
+                    full_pct_b = get_target_pct_new(category_str_b, is_half=False)
+                    p_half = int(np.floor(buy_target * (1 + half_pct_b))) 
+                    p_full = int(np.floor(buy_target * (1 + full_pct_b)))
+                    sl_ma = int(np.floor(buy_target * 0.97))
+                else:
+                    if atr_sl_price > 0: sl_ma = int(atr_sl_price)
+                    p_half = 0; p_full = sl_ma
+                if sl_ma > 0 and curr_price > 0:
+                    sl_pct = ((curr_price / sl_ma) - 1) * 100
+            
+        # 3. ボリンバ・スクイーズ
+        if is_squeeze:
+            trend_strategy_sum += 10
+            score_factors_inner["squeeze_bonus"] = 10
+
+        # 4. 戦略ボーナス（メリハリ化）
         strategy_bonus = 0
-        # 厳選された「🚀」系は高く評価
         if "🚀" in strategy: 
             strategy_bonus = 15 
-        # 普通の「🔥順張り」や「🌊逆張り」は少し抑える
         elif "順張り" in strategy: 
-            strategy_bonus = 10  # 15から10へ減点
+            strategy_bonus = 10 # 減点
         elif "逆張り" in strategy: 
-            strategy_bonus = 5   # 10から5へ減点（逆張りはリスク高いため厳しく）
-            
-        score += strategy_bonus; score_factors_inner["strategy_bonus"] = strategy_bonus
+            strategy_bonus = 5  # 減点
         
-        # RSI中立ボーナス
+        trend_strategy_sum += strategy_bonus
+        score_factors_inner["strategy_bonus"] = strategy_bonus
+        
+        # 5. 青天井ボーナス
+        aoteng_bonus = 0
+        if is_aoteng and rsi_val < 80 and vol_ratio > 1.5: 
+            aoteng_bonus = 15 
+            trend_strategy_sum += aoteng_bonus
+            score_factors_inner["aoteng_bonus"] = aoteng_bonus
+            
+        # 6. GC/DC評価
+        is_final_cross = (status != "場中(進行中)") 
+        gc_dc_score = 0
+        if is_final_cross:
+            if is_gc: 
+                gc_dc_score = 15
+                trend_strategy_sum += gc_dc_score
+            elif is_dc: 
+                score -= 10 # DCは即時減点
+                score_factors_inner["gc_dc"] = -10
+        
+        # 💡【キャップ適用】トレンド・戦略系の合計加点は最大25点まで
+        capped_trend_score = min(trend_strategy_sum, 25)
+        score += capped_trend_score
+        
+        # -------------------------------------------------------------
+        
+        # RSI中立ボーナス (これはオシレーター系なのでキャップ対象外)
         rsi_mid_bonus = 0
         if 55 <= rsi_val <= 65: rsi_mid_bonus = 10
         score += rsi_mid_bonus; score_factors_inner["rsi_mid_bonus"] = rsi_mid_bonus
         
-        # 出来高ボーナス
+        # 出来高ボーナス (これも需給なので対象外)
         vol_bonus_raw = 0
         if vol_ratio > 1.5: vol_bonus_raw += 10;
         if vol_ratio > 3.0: vol_bonus_raw += 5;
@@ -1052,18 +1117,29 @@ def get_stock_data(ticker, current_run_count):
         if up_days >= 4: momentum_bonus = 5
         score += momentum_bonus; score_factors_inner["momentum_bonus"] = momentum_bonus
         
-        # 青天井ボーナス
-        aoteng_bonus = 0
-        if is_aoteng and rsi_val < 80 and vol_ratio > 1.5: aoteng_bonus = 15 
-        score += aoteng_bonus; score_factors_inner["aoteng_bonus"] = aoteng_bonus
+        # R/R比の再計算
+        if not is_aoteng and p_full > 0 and p_full <= buy_target: p_full = 0
+        if not is_aoteng and p_full < p_half: p_full = p_half
+        if not is_aoteng and p_half > 0 and p_half <= buy_target: p_half = 0
         
-        # GC/DC評価
-        is_final_cross = (status != "場中(進行中)") 
-        gc_dc_score = 0
-        if is_final_cross:
-            if is_gc: gc_dc_score = 15 
-            elif is_dc: gc_dc_score = -10
-        score += gc_dc_score; score_factors_inner["gc_dc"] = gc_dc_score
+        entry_price_for_rr = buy_target
+        if entry_price_for_rr > 0 and sl_ma > 0 and (p_half > 0 or is_aoteng or p_full > 0): 
+            if is_aoteng: 
+                risk_value_raw = entry_price_for_rr - sl_ma
+                if risk_value_raw > 0: risk_reward_ratio = 50.0; risk_value = risk_value_raw 
+            else:
+                 avg_target = (p_half + p_full) / 2 if p_half > 0 and p_full > 0 else (p_full if p_full > 0 and p_half == 0 else 0)
+                 reward_value = avg_target - entry_price_for_rr
+                 risk_value = entry_price_for_rr - sl_ma 
+                 if risk_value > 0 and reward_value > 0: risk_reward_ratio = min(reward_value / risk_value, 50.0)
+                 min_risk_threshold = entry_price_for_rr * 0.01 
+                 is_rr_buffer_zone = (0.95 <= risk_reward_ratio <= 1.05)
+                 if not is_rr_buffer_zone and risk_value >= min_risk_threshold:
+                     if risk_reward_ratio >= 2.0: rr_score_value = 20 
+                     elif risk_reward_ratio >= 1.5: rr_score_value = 10 
+                 if risk_reward_ratio < 1.0 and not is_rr_buffer_zone: rr_score_value -= 25
+                 
+        score += rr_score_value; score_factors_inner["rr_score"] = rr_score_value
         
         # DD関連スコア
         dd_abs = abs(max_dd_pct); 
@@ -1104,83 +1180,6 @@ def get_stock_data(ticker, current_run_count):
              score += intraday_ma_gap_deduct
              score_factors_inner["intraday_ma_gap_deduct"] = intraday_ma_gap_deduct
 
-        # ==============================================================================
-        # 💡【機能追加のスコア反映 & 目標値再計算】
-        # ==============================================================================
-        
-        # 1. 週足トレンドフィルター
-        if not is_weekly_up:
-            score -= 20
-            score_factors_inner["weekly_trend_penalty"] = -20
-        else:
-            score += 10
-            score_factors_inner["weekly_trend_bonus"] = 10
-            
-        # 2. ブレイクアウト判定
-        if is_breakout:
-            score += 15
-            score_factors_inner["breakout_bonus"] = 15
-            if "順" in strategy: 
-                strategy = "🚀ブレイク"
-                buy_target = int(curr_price)
-                
-                if not is_aoteng:
-                    # 通常のブレイク：固定ターゲットと固定SL(-3%)
-                    category_str_b = get_market_cap_category(info["cap"])
-                    half_pct_b = get_target_pct_new(category_str_b, is_half=True)
-                    full_pct_b = get_target_pct_new(category_str_b, is_half=False)
-                    p_half = int(np.floor(buy_target * (1 + half_pct_b))) 
-                    p_full = int(np.floor(buy_target * (1 + full_pct_b)))
-                    sl_ma = int(np.floor(buy_target * 0.97))
-                else:
-                    # 青天井(青天)ブレイク：
-                    # AIコメントと整合性を取るため、ATR_SL(1.5倍)を損切りラインとして強制適用する
-                    # (元々のp_fullには2.5倍の深いSLが入っているため上書きする)
-                    if atr_sl_price > 0:
-                        sl_ma = int(atr_sl_price)
-                        # p_fullもこれに合わせておくとターゲット欄のSL表示も揃う
-                        p_full = sl_ma 
-                    p_half = 0 
-                    
-                # SLが変更されたので、乖離率(sl_pct)も再計算する
-                if sl_ma > 0 and curr_price > 0:
-                    sl_pct = ((curr_price / sl_ma) - 1) * 100
-            
-        # 3. ボリンバ・スクイーズ
-        if is_squeeze:
-            score += 10
-            score_factors_inner["squeeze_bonus"] = 10
-
-        # --- R/R比の再計算 (ブレイクアウトでターゲットが変わった可能性があるため) ---
-        if p_full < p_half: p_full = p_half
-        if p_half > 0 and p_half <= buy_target: p_half = 0
-        
-        # 【修正】青天井以外で、目標値が現在値以下なら0にする
-        if not is_aoteng and p_full > 0 and p_full <= buy_target: p_full = 0
-        
-        entry_price_for_rr = buy_target
-        
-        if entry_price_for_rr > 0 and sl_ma > 0 and (p_half > 0 or is_aoteng or p_full > 0): 
-            if is_aoteng: 
-                risk_value_raw = entry_price_for_rr - sl_ma
-                if risk_value_raw > 0: risk_reward_ratio = 50.0; risk_value = risk_value_raw 
-            else:
-                 avg_target = (p_half + p_full) / 2 if p_half > 0 and p_full > 0 else (p_full if p_full > 0 and p_half == 0 else 0)
-                 reward_value = avg_target - entry_price_for_rr
-                 risk_value = entry_price_for_rr - sl_ma 
-                 if risk_value > 0 and reward_value > 0: risk_reward_ratio = min(reward_value / risk_value, 50.0)
-                 
-                 min_risk_threshold = entry_price_for_rr * 0.01 
-                 is_rr_buffer_zone = (0.95 <= risk_reward_ratio <= 1.05)
-                 
-                 # R/R加点ロジック
-                 if not is_rr_buffer_zone and risk_value >= min_risk_threshold:
-                     if risk_reward_ratio >= 2.0: rr_score_value = 20 
-                     elif risk_reward_ratio >= 1.5: rr_score_value = 10 
-                 if risk_reward_ratio < 1.0 and not is_rr_buffer_zone: rr_score_value -= 25
-                 
-        score += rr_score_value; score_factors_inner["rr_score"] = rr_score_value
-
         # ----------------------------------------------------------------------
         
         current_calculated_score = max(0, min(100, score)) 
@@ -1217,15 +1216,12 @@ def get_stock_data(ticker, current_run_count):
         japanese_score_factors = {
             "基礎点": score_factors_inner["base"], 
             "戦略優位性ボーナス": score_factors_inner["strategy_bonus"],
-            
-            # 追加機能の表示
             "週足上昇トレンド加点": score_factors_inner.get("weekly_trend_bonus", 0),
             "週足下落トレンド減点": score_factors_inner.get("weekly_trend_penalty", 0),
             "新高値ブレイク加点": score_factors_inner.get("breakout_bonus", 0),
             "スクイーズ（充電中）加点": score_factors_inner.get("squeeze_bonus", 0),
-            
             "RSI中立ゾーンボーナス": score_factors_inner["rsi_mid_bonus"], "出来高急増ボーナス": score_factors_inner["vol_bonus"], 
-            "直近モメンタムボーナス": score_factors_inner["momentum_bonus"], "GC/DC評価": score_factors_inner["gc_dc"],
+            "直近モメンタムボーナス": score_factors_inner["momentum_bonus"], "GC/DC評価": score_factors_inner["gc_dc"] if score_factors_inner["gc_dc"] > 0 else 0, # GC加点分のみ表示
             "青天井ボーナス": score_factors_inner["aoteng_bonus"], "リスクリワード評価": score_factors_inner["rr_score"],
             "DD率 低リスクボーナス": score_factors_inner["dd_score_low_risk_bonus"], "DD率 連続減点": score_factors_inner["dd_score_continuous_deduct"],
             "DD率 高リスク減点": score_factors_inner["dd_score_high_risk_deduct"], "DDリカバリー速度評価": score_factors_inner["dd_recovery_bonus"], 
