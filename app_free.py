@@ -555,12 +555,20 @@ def get_stock_info(code):
         res = fetch_with_retry(url) 
         res.encoding = res.apparent_encoding
         html = res.text.replace("\n", "")
+        
+        # 銘柄名
         m_name = re.search(r'<title>(.*?)【', html)
         if m_name: data["name"] = re.sub(r'[\(\（].*?[\)\）]', '', m_name.group(1).strip()).replace("<br>", " ").strip()
-        m_price = re.search(r'現在値</th>\s*<td[^>]*>([0-9,]+)</td>', html)
+        
+        # 現在値または終値 (小数点を許可するように [\d,.]+ に修正)
+        m_price = re.search(r'(?:現在値|終値)</th>\s*<td[^>]*>([\d,.]+)</td>', html)
         if m_price: data["price"] = safe_float_convert(m_price.group(1))
-        m_vol = re.search(r'出来高</th>\s*<td[^>]*>([0-9,]+).*?株</td>', html)
+        
+        # 出来高
+        m_vol = re.search(r'出来高</th>\s*<td[^>]*>([\d,.]+).*?株</td>', html)
         if m_vol: data["volume"] = safe_float_convert(m_vol.group(1))
+        
+        # 時価総額
         m_cap = re.search(r'時価総額</th>\s*<td[^>]*>(.*?)</td>', html)
         if m_cap:
             cap_str = re.sub(r'<[^>]+>', '', m_cap.group(1)).strip().replace('\n', '').replace('\r', '') 
@@ -570,13 +578,15 @@ def get_stock_info(code):
                 trillion = safe_float_convert(parts[0])
                 billion = 0
                 if len(parts) > 1 and "億" in parts[1]:
-                    b_match = re.search(r'([0-9,]+)', parts[1])
+                    b_match = re.search(r'([\d,.]+)', parts[1])
                     if b_match: billion = safe_float_convert(b_match.group(1))
                 val = trillion * 10000 + billion
             elif "億" in cap_str:
-                b_match = re.search(r'([0-9,]+)', cap_str)
+                b_match = re.search(r'([\d,.]+)', cap_str)
                 if b_match: val = safe_float_convert(b_match.group(1))
             data["cap"] = val
+            
+        # PER/PBR
         i3_match = re.search(r'<div id="stockinfo_i3">.*?<tbody>(.*?)</tbody>', html)
         if i3_match:
             tbody = i3_match.group(1)
@@ -585,20 +595,26 @@ def get_stock_info(code):
             if len(tds) >= 2:
                 data["per"] = clean_tag_and_br(tds[0])
                 data["pbr"] = clean_tag_and_br(tds[1])
+                
+        # 始値・高値・安値・終値 (ここも小数点を許可するように [\d,.]+ に修正)
         ohlc_map = {"始値": "open", "高値": "high", "安値": "low", "終値": "close"}
-        ohlc_tbody_match = re.search(r'<table[^>]*>.*?<tbody>\s*(<tr>.*?</tr>\s*){4}.*?</tbody>', html, re.DOTALL)
-        if ohlc_tbody_match:
-            ohlc_tbody = ohlc_tbody_match.group(0)
-            for key, val_key in ohlc_map.items():
-                m = re.search(fr'<th[^>]*>{key}</th>\s*<td[^>]*>([0-9,]+)</td>', ohlc_tbody)
-                if m:
-                    try: data[val_key] = float(m.group(1).replace(",", "").strip())
-                    except ValueError: pass
-        m_issued = re.search(r'発行済株式数.*?<td>([0-9,]+).*?株</td>', html)
+        # OHLCが含まれるテーブルを特定して抽出
+        ohlc_table_match = re.search(r'<(?:h2|div)[^>]*>\s*12月\d+日.*?<table[^>]*>(.*?)</table>', html, re.DOTALL)
+        ohlc_content = ohlc_table_match.group(1) if ohlc_table_match else html
+        
+        for key, val_key in ohlc_map.items():
+            # [0-9,.]+ に変更することで 1,939.5 等にマッチさせる
+            m = re.search(fr'<th[^>]*>{key}</th>\s*<td[^>]*>([\d,.]+)</td>', ohlc_content)
+            if m:
+                data[val_key] = safe_float_convert(m.group(1))
+                
+        # 発行済株式数
+        m_issued = re.search(r'発行済株式数.*?<td>([\d,.]+).*?株</td>', html)
         if m_issued: data["issued_shares"] = safe_float_convert(m_issued.group(1))
+        
         return data
     except Exception as e:
-        st.session_state.error_messages.append(f"データ取得エラー (コード:{code}): Kabutanアクセス/解析失敗。詳細: {e}")
+        st.session_state.error_messages.append(f"データ取得エラー (コード:{code}): Kabutan解析失敗。詳細: {e}")
         return data
 
 @st.cache_data(ttl=300, show_spinner="市場25日騰落レシオを取得中...")
@@ -1787,17 +1803,20 @@ if st.session_state.analyzed_data:
         atr_html = f"<br><span style='font-size:10px; color:{atr_color};'>ATR:{atr:.0f}円<br>({pct:.1f}%)</span>"
         return rsi_disp + atr_html
 
-    df['rsi_disp'] = df.apply(format_rsi_atr, axis=1)
-
     def format_price_disp(price_val):
-        if price_val is None: return "-"
-        if price_val == int(price_val): return f"{int(price_val):,}"
+        if price_val is None or (isinstance(price_val, float) and math.isnan(price_val)):
+            return "-"
+        
+        # 小数点以下が0（整数）かどうかの判定
+        if price_val % 1 == 0:
+            return f"{int(price_val):,}"
         else:
-            if int(price_val) >= 1000: return f"{price_val:,.2f}"
-            else: return f"{price_val:.2f}" 
+            # 小数点がある場合、小数点第1位までを表示 (カンマ区切り)
+            # 例: 980.6 / 1,939.5
+            return f"{price_val:,.1f}"
 
     df['price_disp'] = df.apply(lambda row: format_price_disp(row['price']), axis=1)
-    df['diff_disp'] = df.apply(lambda row: f"({row['price'] - row['buy']:+,.0f})" if row['price'] and row['buy'] and (row['price'] - row['buy']) != 0 else "(0)", axis=1)
+    df['diff_disp'] = df.apply(lambda row: f"({row['price'] - row['buy']:+,.1f})" if row['price'] and row['buy'] and (row['price'] - row['buy']) != 0 else "(0)", axis=1)
     df['buy_disp'] = df.apply(lambda row: f"{row['buy']:,.0f}<br>{row['diff_disp']}" if "🚀" not in row['strategy'] else f"<span style='color:#1977d2; font-weight:bold; background-color:#E3F2FD; padding:1px 3px;'>{row['buy']:,.0f}</span><br><span style='font-size:10px;color:#1976d2; font-weight:bold;'>{row['diff_disp']}</span>", axis=1)
     df['vol_disp_html'] = df.apply(lambda row: f"<b>{row['vol_ratio']:.1f}倍</b><br>({format_volume(row['avg_volume_5d'])})" if row['vol_ratio'] > 1.5 else f"{row['vol_ratio']:.1f}倍<br>({format_volume(row['avg_volume_5d'])})", axis=1)
     df['rr_disp'] = df.apply(lambda row: "青天" if row['is_aoteng'] else (f"{row['risk_reward']:.1f}" if row['risk_reward'] >= 0.1 else "-"), axis=1)
