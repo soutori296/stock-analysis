@@ -128,121 +128,90 @@ def format_volume(volume):
 # --- CSSスタイル ---
 st.markdown(f"""
 <style> 
+    /* サイドバー幅 */
     [data-testid="stSidebar"] > div:first-child {{ width: 250px !important; max-width: 250px !important; }}
+    
+    /* タイトルとアイコンのサイズ調整 */
+    .custom-title {{ 
+        font-size: 1.8rem !important; 
+        font-weight: bold;
+        display: flex;
+        align-items: center;
+        gap: 15px;
+        margin-bottom: 10px;
+    }}
+    .custom-title img {{ 
+        height: 60px !important;  /* アイコンの高さを60pxに固定 */
+        width: auto !important; 
+        vertical-align: middle;
+        object-fit: contain;
+    }}
+
     .big-font {{ font-size:18px !important; font-weight: bold; color: #4A4A4A; font-family: "Meiryo", sans-serif; }}
     .status-badge {{ background-color: {status_color}; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; vertical-align: middle; }}
+    
     .update-badge {{ 
         font-size: 10px; 
         font-weight: bold; 
         color: #ff6347; 
-        display: inline-block; /* 💡 必ずブロック化 */
-        vertical-align: middle; /* 💡 垂直方向を揃える */
+        display: inline-block;
+        vertical-align: middle;
         line-height: 1.0; 
-        margin-left: 5px; /* 数字と更新済の間にスペースを確保 */
+        margin-left: 5px;
     }}
-    .center-text {{ text-align: center; font-family: "Meiryo", sans-serif; }}
+
+    /* テーブル設定 */
     .table-container {{ width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; margin-bottom: 20px; }}
     .ai-table {{ width: 100%; border-collapse: collapse; min-width: 1200px; background-color: #ffffff; color: #000000; font-family: "Meiryo", sans-serif; font-size: 13px; }}
     .ai-table th {{ background-color: #e0e0e0; color: #000000; border: 1px solid #999; padding: 4px 2px; text-align: center; vertical-align: middle; font-weight: bold; white-space: normal !important; position: relative; line-height: 1.2; }}
     .ai-table td {{ background-color: #ffffff; color: #000000; border: 1px solid #ccc; padding: 4px 2px; vertical-align: top; line-height: 1.4; text-align: center; }}
-    .td-center {{ text-align: center !important; }}
-    .td-right {{ text-align: right !important; }}
+    
     .td-left {{ text-align: left !important; }}
-    .td-bold {{ font-weight: bold; }}
-    .td-blue {{ color: #0056b3; font-weight: bold; }}
     .bg-aoteng {{ background-color: #E6F0FF !important; }} 
     .bg-low-liquidity {{ background-color: #FFE6E6 !important; }} 
     .bg-triage-high {{ background-color: #FFFFCC !important; }} 
+    
     .comment-scroll-box {{ max-height: 70px; overflow-y: auto; padding-right: 5px; white-space: normal; text-align: left !important; line-height: 1.4; margin: 0; }}
-    .ai-table td:nth-child(3) {{ text-align: left !important; }} 
-    .ai-table td:nth-child(17) {{ text-align: left !important; }} 
-    .ai-table th:nth-child(1), .ai-table td:nth-child(1) {{ width: 40px; min-width: 40px; }}
-    .ai-table th:nth-child(2), .ai-table td:nth-child(2) {{ width: 70px; min-width: 70px; }} 
-    .ai-table th:nth-child(3), .ai-table td:nth-child(3) {{ width: 120px; min-width: 120px; }} 
-    .ai-table th:nth-child(4), .ai-table td:nth-child(4) {{ width: 100px; min-width: 100px; }} 
-    .ai-table th:nth-child(5), .ai-table td:nth-child(5) {{ width: 50px; min-width: 50px; }} 
-    .ai-table th:nth-child(6), .ai-table td:nth-child(6) {{ width: 80px; min-width: 80px; }} 
-    .ai-table th:nth-child(7), .ai-table td:nth-child(7) {{ width: 70px; min-width: 70px; }} 
-    .ai-table th:nth-child(8), .ai-table td:nth-child(8) {{ width: 80px; min-width: 80px; }} 
-    .ai-table th:nth-child(9), .ai-table td:nth-child(9) {{ width: 50px; min-width: 50px; }} 
-    .ai-table th:nth-child(10), .ai-table td:nth-child(10) {{ width: 60px; min-width: 60px; }} 
-    .ai-table th:nth-child(11), .ai-table td:nth-child(11) {{ width: 120px; min-width: 120px; }} 
-    .ai-table th:nth-child(12), .ai-table td:nth-child(12) {{ width: 60px; min-width: 60px; }} 
-    .ai-table th:nth-child(13), .ai-table td:nth-child(13) {{ width: 70px; min-width: 70px; }} 
-    .ai-table th:nth-child(14), .ai-table td:nth-child(14) {{ width: 60px; min-width: 60px; }} 
-    .ai-table th:nth-child(15), .ai-table td:nth-child(15) {{ width: 60px; min-width: 60px; }} 
-    .ai-table th:nth-child(16), .ai-table td:nth-child(16) {{ width: 60px; min-width: 60px; }} 
-    .ai-table th:nth-child(17), .ai-table td:nth-child(17) {{ width: 480px; min-width: 480px; }} 
-    .ai-table th.has-tooltip:hover::after {{ content: attr(data-tooltip); position: absolute; top: 100%; left: 50%; transform: translateX(-50%); padding: 8px 12px; background-color: #333; color: white; border-radius: 4px; font-size: 12px; font-weight: normal; white-space: normal; min-width: 250px; max-width: 350px; z-index: 10; text-align: left; line-height: 1.5; box-shadow: 0 4px 8px rgba(0,0,0,0.3); }}
-    .ai-table th.has-tooltip {{ cursor: help; }} 
-    .custom-title {{ font-size: 1.5rem !important; }}
-    .custom-title img {{ height: auto; max-height: 60px; margin-right: 15px; vertical-align: middle; }}
-    .big-font {{ font-size: 16px !important; }}
-    [data-testid="stAlert"] {{ padding-top: 5px !important; padding-bottom: 5px !important; margin-top: 0px !important; margin-bottom: 2px !important; }}
-    [data-testid="stTextInput"], [data-testid="stNumberInput"], [data-testid="stSelectbox"] {{ margin-top: 0px !important; margin-bottom: 5px !important; }}
-    label[data-testid^="stWidgetLabel"] {{ margin-top: 0px !important; margin-bottom: 0px !important; padding: 0 !important; }}
-    [data-testid="stCheckbox"] {{ margin-top: 0px; margin-bottom: 0px; padding-top: 4px; }}
-    [data-testid="stSidebar"] [data-testid="stVerticalBlock"] > div:nth-child(2) > div:nth-child(4) [data-testid="stVerticalBlock"] > div > div:nth-child(2) [data-testid="stCheckbox"], [data-testid="stSidebar"] [data-testid="stVerticalBlock"] > div:nth-child(4) > div:nth-child(2) [data-testid="stVerticalBlock"] > div > div:nth-child(2) [data-testid="stCheckbox"] {{ transform: translateY(28px); }}
-    [data-testid="stTextarea"] {{ margin-top: 0px !important; margin-bottom: 5px !important; }}
-    .st-emotion-cache-1pxe8jp.e1nzilvr4 {{ margin-top: 10px !important; margin-bottom: 5px !important; }}
-    hr {{ margin-top: 5px !important; margin-bottom: 5px !important; }}
-    @media (max-width: 768px) {{
-        .ai-table {{ min-width: 1000px; }}
-        .ai-table th:nth-child(1), .ai-table td:nth-child(1) {{ width: 40px !important; min-width: 40px !important; }} 
-        .ai-table th:nth-child(2), .ai-table td:nth-child(2) {{ width: 50px !important; min-width: 50px !important; }} 
-        .ai-table th:nth-child(5), .ai-table td:nth-child(5) {{ width: 40px !important; min-width: 40px !important; }} 
-        .ai-table th:nth-child(6), .ai-table td:nth-child(6) {{ width: 60px !important; min-width: 60px !important; }} 
-        .ai-table th:nth-child(7), .ai-table td:nth-child(7) {{ width: 55px !important; min-width: 55px !important; }} 
-        .ai-table th:nth-child(8), .ai-table td:nth-child(8) {{ width: 60px !important; min-width: 60px !important; }} 
-        .ai-table th:nth-child(9), .ai-table td:nth-child(9) {{ width: 35px !important; min-width: 35px !important; }} 
-        .ai-table th:nth-child(11), .ai-table td:nth-child(11) {{ width: 100px !important; min-width: 100px !important; }} 
-        .ai-table th:nth-child(12), .ai-table td:nth-child(12) {{ width: 45px !important; min-width: 45px !important; }} 
-        .ai-table th:nth-child(13), .ai-table td:nth-child(13) {{ width: 50px !important; min-width: 50px !important; }} 
-        .ai-table th:nth-child(14), .ai-table td:nth-child(14) {{ width: 50px !important; min-width: 50px !important; }} 
-        .ai-table th:nth-child(16), .ai-table td:nth-child(16) {{ width: 40px !important; min-width: 40px !important; }} 
-        .ai-table th:nth-child(17), .ai-table td:nth-child(17) {{ width: 350px !important; min-width: 350px !important; }}
-        .ai-table th:nth-child(3), .ai-table td:nth-child(3) {{ width: 80px !important; min-width: 80px !important; }} 
-    }}
 
-    /* --- バッジ用CSS (横スクロール・ツールチップ対応版) --- */
+    /* --- バッジ用CSS --- */
     .badge-container {{
-        margin-top: 3px;
+        margin-top: 4px;        /* 銘柄名との間隔を少し広げる */
         display: flex;
-        flex-wrap: nowrap;       /* 重要: 折り返しを禁止 */
-        gap: 3px;                /* バッジ間の隙間 */
-        overflow-x: auto;        /* はみ出たら横スクロール */
-        -webkit-overflow-scrolling: touch; /* スマホで滑らかに */
-        padding-bottom: 2px;
+        flex-wrap: wrap;        /* 6個並んで苦しい時は自動で折り返し */
+        gap: 3px;               /* 隙間を3pxに微増 */
         max-width: 100%;
-        scrollbar-width: none;   /* Firefox用スクロールバー隠し */
-    }}
-    /* Chrome/Safari用スクロールバー隠し */
-    .badge-container::-webkit-scrollbar {{
-        display: none;
+        padding-bottom: 2px;
     }}
     
     .factor-badge {{
-        display: inline-block;
-        font-size: 9px;
-        padding: 1px 4px;
-        border-radius: 2px;
-        font-weight: normal;
-        border: 1px solid transparent;
-        line-height: 1.1;
-        white-space: nowrap;     /* 文字の折り返しも禁止 */
-        flex-shrink: 0;          /* 縮小禁止 */
+        display: inline-flex;    /* flexで中央配置 */
+        align-items: center;     /* 垂直方向中央 */
+        justify-content: center; /* 水平方向中央 */
+        width: 22px;            /* 18pxから21pxへ拡大 */
+        height: 22px;           /* 18pxから21pxへ拡大 */
+        font-size: 12px;        /* 文字も12pxに大きく */
+        font-weight: bold;
+        border-radius: 4px;     /* 少し丸みを増やす */
+        border: 1.5px solid;
+        line-height: 1;         /* 文字の浮き上がり防止 */
+        white-space: nowrap;
+        flex-shrink: 0;
+        text-align: center;
+        box-sizing: border-box; /* 枠線を含めたサイズ計算 */
     }}
+    
+    /* 高コントラスト・濃い文字色 */
     .badge-plus {{
-        color: #1b5e20;
-        background-color: #e8f5e9;
-        border-color: #c8e6c9;
+        color: #004d00;         /* 濃い緑 */
+        background-color: #ccffcc; /* 明るい緑 */
+        border-color: #008000;  /* 枠線 */
     }}
+    
     .badge-minus {{
-        color: #b71c1c;
-        background-color: #ffcdd2;
-        border-color: #ef9a9a;
+        color: #800000;         /* 濃い赤 */
+        background-color: #ffcccc; /* 明るい赤 */
+        border-color: #cc0000;  /* 枠線 */
     }}
-
 </style>
 """, unsafe_allow_html=True)
 
