@@ -187,8 +187,8 @@ st.markdown(f"""
         display: inline-flex;    /* flexで中央配置 */
         align-items: center;     /* 垂直方向中央 */
         justify-content: center; /* 水平方向中央 */
-        width: 22px;            /* 18pxから21pxへ拡大 */
-        height: 22px;           /* 18pxから21pxへ拡大 */
+        width: 22px;            /* 18pxから2pxへ拡大 */
+        height: 22px;           /* 18pxから22pxへ拡大 */
         font-size: 12px;        /* 文字も12pxに大きく */
         font-weight: bold;
         border-radius: 4px;     /* 少し丸みを増やす */
@@ -198,6 +198,7 @@ st.markdown(f"""
         flex-shrink: 0;
         text-align: center;
         box-sizing: border-box; /* 枠線を含めたサイズ計算 */
+        cursor: default !important;
     }}
     
     /* 高コントラスト・濃い文字色 */
