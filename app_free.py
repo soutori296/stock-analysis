@@ -1526,7 +1526,7 @@ HEADER_MAP = [
     ('price_disp', '現在値', 'center', '70px', '70px'), ('buy_disp', '想定水準\n（乖離）', 'center', '80px', '80px'), ('rr_disp', 'R/R比', 'center', '50px', '50px'), 
     ('dd_sl_disp', 'DD率　\nSL率', 'center', '60px', '60px'), ('target_txt', '利益確定目標値', 'left', '130px', '130px'), ('rsi_disp', 'RSI', 'center', '60px', '60px'), 
     ('vol_disp_html', '出来高比\n(5日平均)', 'center', '70px', '70px'), ('bt_cell_content', 'MA5実績', 'center', '70px', '70px'), 
-    ('per_pbr_disp', 'PER\nPBR', 'center', '60px', '60px'), ('momentum', '直近勝率', 'center', '60px', '60px'), ('comment', 'アイの所感', 'left', '350px', '350px')
+    ('per_pbr_disp', 'PER　\nPBR', 'center', '60px', '60px'), ('momentum', '直近勝率', 'center', '60px', '60px'), ('comment', 'アイの所感', 'left', '350px', '350px')
 ]
 
 st.markdown("---")
