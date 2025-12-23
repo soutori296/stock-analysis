@@ -1525,7 +1525,7 @@ HEADER_MAP = [
     ('cap_disp', '時価総額', 'center', '100px', '100px'), ('score_disp', '点', 'center', '50px', '50px'), ('strategy', '分析戦略', 'center', '80px', '80px'), 
     ('price_disp', '現在値', 'center', '70px', '70px'), ('buy_disp', '想定水準\n（乖離）', 'center', '80px', '80px'), ('rr_disp', 'R/R比', 'center', '50px', '50px'), 
     ('dd_sl_disp', 'DD率　\nSL率', 'center', '60px', '60px'), ('target_txt', '利益確定目標値', 'left', '130px', '130px'), ('rsi_disp', 'RSI', 'center', '60px', '60px'), 
-    ('vol_disp_html', '出来高比\n（5日平均）', 'center', '80px', '80px'), ('bt_cell_content', 'MA5実績', 'center', '70px', '70px'), 
+    ('vol_disp_html', '出来高比\n(5日平均)', 'center', '70px', '70px'), ('bt_cell_content', 'MA5実績', 'center', '70px', '70px'), 
     ('per_pbr_disp', 'PER\nPBR', 'center', '60px', '60px'), ('momentum', '直近勝率', 'center', '60px', '60px'), ('comment', 'アイの所感', 'left', '350px', '350px')
 ]
 
@@ -1749,7 +1749,30 @@ if st.session_state.analyzed_data:
         return "-"
         
     df = df.copy() 
+
+    # --- 1. 表示用ヘルパー関数群 (インデント修正済) ---
+    def get_rsi_mark_local(val):
+        if val <= 30: return "🔵"
+        elif 55 <= val <= 65: return "🟢"
+        elif val >= 70: return "🔴"
+        else: return "⚪"
+
+    def format_rsi_atr_combined(row):
+        """RSIとATRを合体させて表示用のHTMLを作る"""
+        mark = get_rsi_mark_local(row['rsi'])
+        rsi_html = f"{mark}{row['rsi']:.1f}"
+        atr = row['atr_smoothed']
+        pct = row['atr_pct']
+        # ATRの色設定（高コントラスト版）
+        atr_color = "#555" 
+        if pct >= 5.0: atr_color = "#800000" # 濃い赤
+        elif pct >= 3.0: atr_color = "#cc5500" # 濃いオレンジ
+        # ATRのHTML (小数点第1位 :.1f / 太字 font-weight: bold)
+        atr_html = f"<br><span style='font-size:10px; color:{atr_color}; font-weight: bold;'>ATR:{atr:,.1f}円<br>({pct:.1f}%)</span>"
+        return rsi_html + atr_html
+
     def format_score_disp(row, market_status_label):
+        """スコア（点数）の表示を整える"""
         score = row['score']; diff = row['score_diff']; diff_span = ""
         if "場中" in market_status_label:
             diff_color = '#666' 
@@ -1762,33 +1785,36 @@ if st.session_state.analyzed_data:
         elif score >= 50: return f"<span style='font-weight:bold;'>{score:.0f}</span>{diff_span}"
         else: return f"{score:.0f}{diff_span}"
 
-    df['score_disp'] = df.apply(lambda row: format_score_disp(row, status_label), axis=1)
-    
-    def format_rsi_atr(row):
-        rsi = row['rsi']; rsi_disp = row['rsi_disp']
-        atr = row['atr_smoothed']; pct = row['atr_pct']
-        atr_color = "#666"
-        if pct >= 5.0: atr_color = "red"
-        elif pct >= 3.0: atr_color = "#e67e22" 
-        atr_html = f"<br><span style='font-size:10px; color:{atr_color};'>ATR:{atr:.0f}円<br>({pct:.1f}%)</span>"
-        return rsi_disp + atr_html
-
     def format_price_disp(price_val):
+        """現在値の表示（小数点第1位対応）"""
         if price_val is None or (isinstance(price_val, float) and math.isnan(price_val)):
             return "-"
-        
-        # 小数点以下が0（整数）かどうかの判定
         if price_val % 1 == 0:
             return f"{int(price_val):,}"
         else:
-            # 小数点がある場合、小数点第1位までを表示 (カンマ区切り)
-            # 例: 980.6 / 1,939.5
             return f"{price_val:,.1f}"
 
-    df['price_disp'] = df.apply(lambda row: format_price_disp(row['price']), axis=1)
+    # --- 2. 各列への適用処理 ---
+
+    # RSI & ATR
+    df['rsi_disp'] = df.apply(format_rsi_atr_combined, axis=1)
+    
+    # スコア
+    df['score_disp'] = df.apply(lambda row: format_score_disp(row, status_label), axis=1)
+    
+    # 現在値
+    df['price_disp'] = df['price'].apply(format_price_disp)
+    
+    # 乖離 (ここも小数点第1位に対応)
     df['diff_disp'] = df.apply(lambda row: f"({row['price'] - row['buy']:+,.1f})" if row['price'] and row['buy'] and (row['price'] - row['buy']) != 0 else "(0)", axis=1)
+    
+    # 想定水準
     df['buy_disp'] = df.apply(lambda row: f"{row['buy']:,.0f}<br>{row['diff_disp']}" if "🚀" not in row['strategy'] else f"<span style='color:#1977d2; font-weight:bold; background-color:#E3F2FD; padding:1px 3px;'>{row['buy']:,.0f}</span><br><span style='font-size:10px;color:#1976d2; font-weight:bold;'>{row['diff_disp']}</span>", axis=1)
+    
+    # 出来高
     df['vol_disp_html'] = df.apply(lambda row: f"<b>{row['vol_ratio']:.1f}倍</b><br>({format_volume(row['avg_volume_5d'])})" if row['vol_ratio'] > 1.5 else f"{row['vol_ratio']:.1f}倍<br>({format_volume(row['avg_volume_5d'])})", axis=1)
+    
+    # その他基本項目
     df['rr_disp'] = df.apply(lambda row: "青天" if row['is_aoteng'] else (f"{row['risk_reward']:.1f}" if row['risk_reward'] >= 0.1 else "-"), axis=1)
     df['dd_sl_disp'] = df.apply(lambda row: f"{row['max_dd_pct']:+.1f}%<br>{row['sl_pct']:+.1f}%", axis=1)
     df['update_disp'] = df['update_count'].apply(lambda x: f'{x}回目' if x > 1 else '')
@@ -1796,41 +1822,32 @@ if st.session_state.analyzed_data:
     df['target_txt'] = df.apply(format_target_txt, axis=1)
     df['bt_cell_content'] = df.apply(lambda row: f"<b>{row['backtest_raw']}</b><br><span style='font-size:11px;'>({row['bt_win_count']}勝{row.get('bt_loss_count', 0)}敗)</span><br><span style='font-size:10px; color:#666;'>(+{row['bt_target_pct']*100:.1f}%抜)</span>" if "エラー" not in row['backtest_raw'] and "機会なし" not in row['backtest_raw'] else row['backtest'], axis=1)
     df['per_pbr_disp'] = df.apply(lambda row: f"{row['per']}<br>{row['pbr']}", axis=1)
-    df['No'] = range(1, len(df) + 1) 
     
-    def format_no_column(row):
-        is_updated = row.get('is_updated_in_this_run', False) and row['update_count'] > 1
-        if is_updated: return f"{row['No']} <span class='update-badge'>更新済</span>"
-        else: return f"{row['No']}"
-
-    df['No'] = df.apply(format_no_column, axis=1)
+    # Noと更新バッジ
+    df['No_val'] = range(1, len(df) + 1) 
+    df['No'] = df.apply(lambda row: f"{row['No_val']} <span class='update-badge'>更新済</span>" if row.get('is_updated_in_this_run', False) and row['update_count'] > 1 else f"{row['No_val']}", axis=1)
     
+    # スコアグループ分け
     df_above_75 = df[df['score'] >= 75].copy()
     df_50_to_74 = df[(df['score'] >= 50) & (df['score'] <= 74)].copy()
     df_below_50 = df[df['score'] < 50].copy()
 
+    # --- 3. バッジ定義マトリックス ---
     FACTOR_META = {
-        # --- 重要トレンド・シグナル ---
         "新高値ブレイク加点": {"char": "新", "prio": 10},
         "スクイーズ（充電中）加点": {"char": "充", "prio": 20},
         "週足上昇トレンド加点": {"char": "週", "prio": 30},
         "週足下落トレンド減点": {"char": "週", "prio": 30},
-        "戦略優位性ボーナス": {"char": "戦", "prio": 40}, # 順ロジ/逆ロジ/順張り
+        "戦略優位性ボーナス": {"char": "戦", "prio": 40},
         "青天井ボーナス": {"char": "青", "prio": 50},
-
-        # --- リスク ---
         "流動性ペナルティ": {"char": "板", "prio": 60},
         "市場過熱ペナルティ": {"char": "市", "prio": 60},
-        "リスクリワード評価(マイナス)": {"char": "損", "prio": 70}, # japanese_score_factorsキー要確認
+        "リスクリワード評価(マイナス)": {"char": "損", "prio": 70},
         "DD率 高リスク減点": {"char": "落", "prio": 80},
-        
-        # --- テクニカル ---
         "リスクリワード評価": {"char": "Ｒ", "prio": 90},
         "RSI過熱/底打ちペナルティ": {"char": "熱", "prio": 100},
         "RSI底割れ (逆張り)": {"char": "底", "prio": 100},
         "RSI過熱 (順張り)": {"char": "熱", "prio": 100}, 
-        
-        # --- 補足 ---
         "出来高急増ボーナス": {"char": "出", "prio": 110},
         "直近モメンタムボーナス": {"char": "勢", "prio": 120},
         "GC/DC評価": {"char": "Ｇ", "prio": 130},
