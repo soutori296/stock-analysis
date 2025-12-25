@@ -587,164 +587,6 @@ def get_stock_info(code):
         st.session_state.error_messages.append(f"データ取得エラー (コード:{code}): Kabutan解析失敗。詳細: {e}")
         return data
 
-def calculate_score_and_logic(df, info, vol_ratio, status):
-    if len(df) < 80:
-        return 50, {}, "様子見", 0, 0, 0, 0, False, 0, 50, 0, "通常レンジ", "0%"
-
-    df = df.copy()
-    # --- 基本指標 ---
-    df['SMA5'] = df['Close'].rolling(5).mean()
-    df['SMA25'] = df['Close'].rolling(25).mean()
-    df['SMA75'] = df['Close'].rolling(75).mean()
-    df['Vol_SMA5'] = df['Volume'].rolling(5).mean()
-    df['High_Low'] = df['High'] - df['Low']
-    df['High_PrevClose'] = abs(df['High'] - df['Close'].shift(1))
-    df['Low_PrevClose'] = abs(df['Low'] - df['Close'].shift(1))
-    df['TR'] = df[['High_Low', 'High_PrevClose', 'Low_PrevClose']].max(axis=1)
-    df['ATR'] = df['TR'].rolling(14).mean()
-    df['ATR_SMA3'] = df['ATR'].rolling(3).mean()
-    delta = df['Close'].diff()
-    gain = (delta.where(delta > 0, 0)).rolling(14).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
-    rs = gain / loss
-    df['RSI'] = 100 - (100 / (1 + rs))
-
-    last = df.iloc[-1]
-    prev = df.iloc[-2]
-    curr_price = last['Close']
-    ma5, ma25, ma75 = last['SMA5'], last['SMA25'], last['SMA75']
-    prev_ma5, prev_ma25 = prev['SMA5'], prev['SMA25']
-    rsi_val = last['RSI']
-    atr_smoothed = last['ATR_SMA3']
-    high_250d = df['High'].tail(250).max()
-    
-    # 損切り基準価格の事前計算
-    atr_sl_calc = max(0, curr_price - max(atr_smoothed * 1.5, curr_price * 0.01))
-
-    # --- モメンタム ---
-    recent = df['Close'].diff().tail(5)
-    up_days = (recent > 0).sum()
-    momentum_str = f"{(up_days / 5) * 100:.0f}%"
-
-    # --- 先にフラグ判定（重要：evaluate_strategy_newより前に持ってくる） ---
-    is_breakout = False
-    if len(df) >= 60:
-        h60 = df['High'].rolling(60).max().shift(1).iloc[-1]
-        if curr_price > h60: 
-            is_breakout = True
-
-    is_squeeze = False
-    if len(df) >= 120:
-        bb_mid = df['Close'].rolling(20).mean()
-        bb_width = (4 * df['Close'].rolling(20).std()) / bb_mid
-        if bb_width.iloc[-1] <= bb_width.rolling(120).min().iloc[-1] * 1.1: is_squeeze = True
-
-    # --- 戦略判定 ---
-    strategy, buy_target, p_half, p_full, sl_ma, is_aoteng, sl_pct = evaluate_strategy_new(
-        df, info, vol_ratio, high_250d, atr_smoothed, curr_price, ma5, ma25, ma75, prev_ma5, rsi_val, atr_sl_calc
-    )
-
-    # 【復活・修正】ブレイクアウト判定なら、戦略を書き換え、基準を「今」にする
-    if is_breakout and "順" in strategy: 
-        strategy = "🚀ブレイク"
-        buy_target = curr_price  # これで乖離が (0) になります
-        
-        if not is_aoteng:
-            category = get_market_cap_category(info["cap"])
-            p_half = int(np.floor(buy_target * (1 + get_target_pct_new(category, True))))
-            p_full = int(np.floor(buy_target * (1 + get_target_pct_new(category, False))))
-            # ブレイク時はATRベースか3%下のどちらか深い方を採用
-            sl_ma = int(np.floor(min(atr_sl_calc, buy_target * 0.97)))
-            sl_pct = ((curr_price / sl_ma) - 1) * 100 if sl_ma > 0 else 0
-
-    # --- 特殊フラグ計算 ---
-    is_gc = (ma5 > ma25) and (prev_ma5 <= prev_ma25) and (abs(ma5-ma25)/ma25 > 0.005)
-    is_dc = (ma5 < ma25) and (prev_ma5 >= prev_ma25) and (abs(ma5-ma25)/ma25 > 0.005)
-    
-    is_weekly_up = True
-    try:
-        df_w = df.resample('W-FRI').agg({'Close': 'last'})
-        if len(df_w) >= 13:
-            df_w['SMA13'] = df_w['Close'].rolling(13).mean()
-            is_weekly_up = df_w['Close'].iloc[-1] >= df_w['SMA13'].iloc[-1]
-    except: pass
-
-    # --- DD/リカバリー計算 ---
-    dd_data = df.tail(250).copy()
-    dd_data['Peak'] = dd_data['Close'].cummax()
-    dd_data['DD'] = (dd_data['Close'] / dd_data['Peak']) - 1
-    max_dd_val = dd_data['DD'].min()
-    mdd_day_index = dd_data['DD'].idxmin()
-    recovery_check = dd_data[dd_data.index >= mdd_day_index]
-    recovery_days = 999
-    for i, (_, row_d) in enumerate(recovery_check.iterrows()):
-        if row_d['Close'] >= row_d['Peak'] * 0.95: recovery_days = i; break
-
-    # ==========================================================================
-    # 🎯 スコアリング開始
-    # ==========================================================================
-    score = 50
-    factors = {"基礎点": 50}
-    
-    # 1. トレンド・戦略系 (Capped at 35)
-    trend_sum = 0
-    if is_weekly_up: trend_sum += 5; factors["週足上昇"] = 5
-    else: score -= 20; factors["週足下落"] = -20
-    
-    if is_breakout: trend_sum += 15; factors["新高値ブレイク"] = 15
-    if is_squeeze: trend_sum += 10; factors["スクイーズ"] = 10
-    if "🚀" in strategy: trend_sum += 15; factors["戦略優位性"] = 15
-    if is_aoteng and rsi_val < 80 and vol_ratio > 1.5: trend_sum += 15; factors["青天井"] = 15
-    
-    # 【大型堅調】
-    is_large_cap = info.get("cap", 0) >= 3000
-    if is_large_cap and len(df) >= 25:
-        recent_25 = df.tail(25)
-        mdd_25 = ((recent_25['Close'] / recent_25['Close'].cummax()) - 1).min()
-        if mdd_25 > -0.03: trend_sum += 10; factors["大型堅調"] = 10
-        elif (recent_25['Close'] >= recent_25['SMA25']).all(): trend_sum += 5; factors["大型堅調"] = 5
-    
-    score += min(trend_sum, 35)
-
-    # 2. リスクリワード (R/R)
-    if buy_target > 0 and sl_ma > 0 and not is_aoteng:
-        avg_target = (p_half + p_full) / 2 if p_half > 0 else p_full
-        risk = buy_target - sl_ma
-        reward = avg_target - buy_target
-        if risk > 0 and reward > 0:
-            rr = reward / risk
-            if rr >= 2.0: score += 20; factors["高R/R比"] = 20
-            elif rr < 1.0: score -= 25; factors["低R/R比"] = -25
-
-    # 3. ドローダウン系
-    dd_abs = abs(max_dd_val * 100)
-    if dd_abs < 1.0: score += 5; factors["低DD率"] = 5
-    elif dd_abs > 10.0: score -= 20; factors["高DDリスク"] = -20
-    
-    if recovery_days <= 20: score += 5; factors["早期回復"] = 5
-    elif recovery_days >= 100: score -= 10; factors["回復遅延"] = -10
-
-    # 4. テクニカル / 出来高
-    if is_gc: score += 5; factors["GC発生"] = 5
-    elif is_dc: score -= 10; factors["DC発生"] = -10
-    
-    if 55 <= rsi_val <= 65: score += 5; factors["RSI適正"] = 5
-    if vol_ratio > 1.5: score += 10; factors["出来高急増"] = 10
-    if up_days >= 4: score += 5; factors["直近勢い"] = 5
-
-    # 5. 構造的・市場リスク
-    if last['Vol_SMA5'] < 1000: score -= 30; factors["流動性欠如"] = -30
-    atr_p = (atr_smoothed / curr_price) * 100
-    if atr_p < 0.5: score -= 10; factors["低ボラ"] = -10
-    
-    if get_25day_ratio() >= 125.0: score -= 20; factors["市場過熱"] = -20
-
-    # ATRコメント作成
-    atr_comment = "ボラティリティが危険水域です。" if atr_p >= 5.0 else ("値動きが荒くなっています。" if atr_p >= 3.0 else "通常レンジ内です。")
-    if is_squeeze: atr_comment += " ⚡スクイーズ発生中。"
-
-    return score, factors, strategy, buy_target, p_half, p_full, sl_ma, is_aoteng, sl_pct, rsi_val, atr_smoothed, atr_comment, momentum_str
-
 @st.cache_data(ttl=300, show_spinner="市場25日騰落レシオを取得中...")
 def get_25day_ratio():
     url = "https://nikkeiyosoku.com/up_down_ratio/"
@@ -973,13 +815,161 @@ def evaluate_strategy_new(df, info, vol_ratio, high_250d, atr_val, curr_price, m
     sl_pct = ((curr_price / sl_ma) - 1) * 100 if curr_price > 0 and sl_ma > 0 else 0.0
     return strategy, buy_target, p_half, p_full, sl_ma, is_aoteng, sl_pct
 
+def calculate_score_and_logic(df, info, vol_ratio, status):
+    if len(df) < 80:
+        return 50, {}, "様子見", 0, 0, 0, 0, False, 0, 50, 0, "通常レンジ", "0%"
+
+    df = df.copy()
+    # --- 指標計算 ---
+    df['SMA5'] = df['Close'].rolling(5).mean()
+    df['SMA25'] = df['Close'].rolling(25).mean()
+    df['SMA75'] = df['Close'].rolling(75).mean()
+    df['Vol_SMA5'] = df['Volume'].rolling(5).mean()
+    df['High_Low'] = df['High'] - df['Low']
+    df['High_PrevClose'] = abs(df['High'] - df['Close'].shift(1))
+    df['Low_PrevClose'] = abs(df['Low'] - df['Close'].shift(1))
+    df['TR'] = df[['High_Low', 'High_PrevClose', 'Low_PrevClose']].max(axis=1)
+    df['ATR'] = df['TR'].rolling(14).mean()
+    df['ATR_SMA3'] = df['ATR'].rolling(3).mean()
+    delta = df['Close'].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(14).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
+    rs = gain / loss
+    df['RSI'] = 100 - (100 / (1 + rs))
+
+    last = df.iloc[-1]
+    prev = df.iloc[-2]
+    curr_price = last['Close']
+    ma5, ma25, ma75 = last['SMA5'], last['SMA25'], last['SMA75']
+    prev_ma5, prev_ma25 = prev['SMA5'], prev['SMA25']
+    rsi_val = last['RSI']
+    atr_smoothed = last['ATR_SMA3']
+    high_250d = df['High'].tail(250).max()
+    
+    # 損切り用ATRの事前計算
+    atr_sl_calc = max(0, curr_price - max(atr_smoothed * 1.5, curr_price * 0.01))
+
+    # --- フラグ判定 ---
+    is_breakout = False
+    if len(df) >= 60:
+        h60 = df['High'].rolling(60).max().shift(1).iloc[-1]
+        if curr_price > h60: is_breakout = True
+
+    is_squeeze = False
+    if len(df) >= 120:
+        bb_mid = df['Close'].rolling(20).mean()
+        bb_width = (4 * df['Close'].rolling(20).std()) / bb_mid
+        if bb_width.iloc[-1] <= bb_width.rolling(120).min().iloc[-1] * 1.1: is_squeeze = True
+
+    # --- 戦略判定 ---
+    # まずは基本戦略(5MAベース)を取得
+    strategy, buy_target, p_half, p_full, sl_ma, is_aoteng, sl_pct = evaluate_strategy_new(
+        df, info, vol_ratio, high_250d, atr_smoothed, curr_price, ma5, ma25, ma75, prev_ma5, rsi_val, atr_sl_calc
+    )
+
+    # 🚀 【ここが最重要：ブレイクアウトの上書き】
+    if is_breakout and ("順" in strategy or "ロジ" in strategy):
+        strategy = "🚀ブレイク"
+        buy_target = curr_price  # 想定価格を「今」にする (乖離を0にする)
+        
+        # ブレイク時は、目標値と損切りも「現在値」から再計算する
+        if not is_aoteng:
+            category = get_market_cap_category(info["cap"])
+            p_half = int(np.floor(buy_target * (1 + get_target_pct_new(category, True))))
+            p_full = int(np.floor(buy_target * (1 + get_target_pct_new(category, False))))
+            # ブレイクの損切りは、計算したATR_SLか現在値-3%の「浅い方」を採用
+            sl_ma = int(np.floor(max(atr_sl_calc, buy_target * 0.97)))
+            sl_pct = ((curr_price / sl_ma) - 1) * 100 if sl_ma > 0 else 0
+
+    # モメンタム
+    recent = df['Close'].diff().tail(5)
+    up_days = (recent > 0).sum()
+    momentum_str = f"{(up_days / 5) * 100:.0f}%"
+
+    # 特殊フラグ
+    is_gc = (ma5 > ma25) and (prev_ma5 <= prev_ma25) and (abs(ma5-ma25)/ma25 > 0.005)
+    is_dc = (ma5 < ma25) and (prev_ma5 >= prev_ma25) and (abs(ma5-ma25)/ma25 > 0.005)
+    
+    is_weekly_up = True
+    try:
+        df_w = df.resample('W-FRI').agg({'Close': 'last'})
+        if len(df_w) >= 13:
+            df_w['SMA13'] = df_w['Close'].rolling(13).mean()
+            is_weekly_up = df_w['Close'].iloc[-1] >= df_w['SMA13'].iloc[-1]
+    except: pass
+
+    # DD/リカバリー
+    dd_data = df.tail(250).copy()
+    dd_data['Peak'] = dd_data['Close'].cummax()
+    dd_data['DD'] = (dd_data['Close'] / dd_data['Peak']) - 1
+    max_dd_val = dd_data['DD'].min()
+    mdd_day_index = dd_data['DD'].idxmin()
+    recovery_check = dd_data[dd_data.index >= mdd_day_index]
+    recovery_days = 999
+    for i, (_, row_d) in enumerate(recovery_check.iterrows()):
+        if row_d['Close'] >= row_d['Peak'] * 0.95: recovery_days = i; break
+
+    # ==========================================================================
+    # 🎯 スコアリング
+    # ==========================================================================
+    score = 50
+    factors = {"基礎点": 50}
+    
+    trend_sum = 0
+    if is_weekly_up: trend_sum += 5; factors["週足上昇"] = 5
+    else: score -= 20; factors["週足下落"] = -20
+    
+    if is_breakout: trend_sum += 15; factors["新高値ブレイク"] = 15
+    if is_squeeze: trend_sum += 10; factors["スクイーズ"] = 10
+    if "🚀" in strategy: trend_sum += 15; factors["戦略優位性"] = 15
+    if is_aoteng and rsi_val < 80 and vol_ratio > 1.5: trend_sum += 15; factors["青天井"] = 15
+    
+    is_large_cap = info.get("cap", 0) >= 3000
+    if is_large_cap and len(df) >= 25:
+        mdd_25 = ((df['Close'].tail(25) / df['Close'].tail(25).cummax()) - 1).min()
+        if mdd_25 > -0.03: trend_sum += 10; factors["大型堅調"] = 10
+        elif (df['Close'].tail(25) >= df['SMA25'].tail(25)).all(): trend_sum += 5; factors["大型堅調"] = 5
+    
+    score += min(trend_sum, 35)
+
+    if buy_target > 0 and sl_ma > 0 and not is_aoteng:
+        risk = buy_target - sl_ma
+        reward = ((p_half + p_full) / 2 if p_half > 0 else p_full) - buy_target
+        if risk > 0 and reward > 0:
+            rr = reward / risk
+            if rr >= 2.0: score += 20; factors["高R/R比"] = 20
+            elif rr < 1.0: score -= 25; factors["低R/R比"] = -25
+
+    dd_abs = abs(max_dd_val * 100)
+    if dd_abs < 1.0: score += 5; factors["低DD率"] = 5
+    elif dd_abs > 10.0: score -= 15; factors["高DDリスク"] = -15 
+    
+    if recovery_days <= 20: score += 5; factors["早期回復"] = 5
+
+    if get_25day_ratio() >= 125.0:
+        score -= 10; factors["市場過熱"] = -10
+
+    if is_gc: score += 5; factors["GC発生"] = 5
+    elif is_dc: score -= 10; factors["DC発生"] = -10
+    if 55 <= rsi_val <= 65: score += 5; factors["RSI適正"] = 5
+    if vol_ratio > 1.5: score += 10; factors["出来高急増"] = 10
+    if last['Vol_SMA5'] < 1000: score -= 30; factors["流動性欠如"] = -30
+    
+    atr_p = (atr_smoothed / curr_price) * 100
+    if atr_p < 0.5: score -= 10; factors["低ボラ"] = -10
+
+    atr_comment = "ボラティリティが危険水域です。" if atr_p >= 5.0 else ("値動きが荒くなっています。" if atr_p >= 3.0 else "通常レンジ内です。")
+    if is_squeeze: atr_comment += " ⚡スクイーズ発生中。"
+
+    return score, factors, strategy, buy_target, p_half, p_full, sl_ma, is_aoteng, sl_pct, rsi_val, atr_smoothed, atr_comment, momentum_str
+
 @st.cache_data(ttl=1) 
 def get_stock_data(ticker, current_run_count):
     status, jst_now_local = get_market_status() 
     ticker = str(ticker).strip().upper()
     info = get_stock_info(ticker) 
     
-    # 100円未満の低位株はスキップ（高リスク回避）
+    # 低位株スキップ
     if info.get("price") is not None and info["price"] < 100:
         st.session_state.error_messages.append(f"分析スキップ (コード:{ticker}): 株価100円未満のため。")
         return None
@@ -1010,24 +1000,18 @@ def get_stock_data(ticker, current_run_count):
         vol_weight = get_volume_weight(jst_now_local, info["cap"])
         v_ratio = info['volume'] / (avg_vol_5d * vol_weight) if vol_weight > 0 and avg_vol_5d > 0 else 1.0
 
-        # 4. 市場環境による減点確定
-        market_25d = get_25day_ratio()
-        market_deduct = -20 if market_25d >= 125.0 else 0
-
-        # 5. 【重要】詳細スコアリングエンジンの実行
-        # タプルを正確に受け取る
+        # 4. 【重要】詳細スコアリングエンジンの実行
+        # 市場減点(市場過熱)もこの内部ですべて計算されるように一本化しました
         raw_score, factors, strategy, buy_target, p_half, p_full, sl_ma, is_aoteng, sl_pct, rsi_val, atr_smoothed, atr_comment, momentum_str = calculate_score_and_logic(df, info, v_ratio, status)
         
-        # 市場減点を加味した最終スコア
-        current_score = max(0, min(100, raw_score + market_deduct))
+        # 外側での追加減算は行わず、計算エンジンの結果をそのまま採用（二重減点を防止）
+        current_score = max(0, min(100, raw_score))
 
-        # AIコメント用に各損切りラインの具体的な「価格」を確定させる
-        # ATRベースの損切り価格
+        # 5. AIコメント用に各損切りラインの具体的な「価格」を確定させる
         current_atr_sl = max(0, curr_price - max(atr_smoothed * 1.5, curr_price * 0.01))
-        # 25日線（のわずか下）の価格
         current_ma25 = df['SMA25'].iloc[-1] if not pd.isna(df['SMA25'].iloc[-1]) else 0
 
-        # 6. 差分計算（セッション初診時との比較）
+        # 6. シンプルな差分計算（セッション初診時との比較）
         if ticker not in st.session_state.score_history:
             st.session_state.score_history[ticker] = {'pre_market_score': current_score}
         
@@ -1035,7 +1019,7 @@ def get_stock_data(ticker, current_run_count):
         score_diff = current_score - pre_score
         st.session_state.score_history[ticker]['current_score'] = current_score
 
-        # 7. R/R比（リスクリワード）の数値化
+        # 7. R/R比（リスクリワード）の再計算
         risk_reward_ratio = 0.0
         if buy_target > 0 and sl_ma > 0:
             risk_val = buy_target - sl_ma
@@ -1050,7 +1034,7 @@ def get_stock_data(ticker, current_run_count):
         # 8. バックテストの実行
         bt_str, win_rate_pct, bt_cnt, max_dd_pct, bt_target_pct, bt_win_count, bt_loss_count = run_backtest(df, info["cap"])
 
-        # 9. すべてのデータを辞書にまとめて返却（UIとAIの両方で使用）
+        # 9. すべてのデータを辞書にまとめて返却
         return {
             "code": ticker,
             "name": info["name"],
@@ -1072,9 +1056,9 @@ def get_stock_data(ticker, current_run_count):
             "backtest_raw": bt_str,
             "max_dd_pct": max_dd_pct,
             "sl_pct": sl_pct,
-            "sl_ma": sl_ma,                # 現在の戦略が採用しているロスカット価格
-            "ma25": current_ma25,          # AIがMA25_SLとして参照する価格
-            "atr_sl_price": current_atr_sl, # AIがATR_SLとして参照する価格
+            "sl_ma": sl_ma,
+            "ma25": current_ma25,
+            "atr_sl_price": current_atr_sl,
             "avg_volume_5d": avg_vol_5d,
             "is_low_liquidity": avg_vol_5d < 1000,
             "is_aoteng": is_aoteng,
