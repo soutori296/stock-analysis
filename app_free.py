@@ -1051,20 +1051,35 @@ def batch_analyze_with_ai(data_list):
             model = genai.GenerativeModel(model_name)
         except Exception: pass
     if not model: return {}, f"⚠️ AIモデル ({model_name}) が設定されていません。APIキーを確認してください。"
+    
     data_for_ai = ""
     for d in data_list:
         price = d['price'] if d['price'] is not None else 0
-        p_half = d['p_half']; p_full = d['p_full']; rr_val = d.get('risk_reward', 0.0)
-        if d.get('is_aoteng'): rr_disp = "青天" 
-        elif rr_val >= 0.1: rr_disp = f"{rr_val:.1f}"
-        else: rr_disp = "-" 
-        ma_div = (price/d.get('buy', 1)-1)*100 if d.get('buy', 1) > 0 and price > 0 else 0
-        mdd = d.get('max_dd_pct', 0.0); sl_ma = d.get('sl_ma', 0); 
-        atr_sl_price = d.get('atr_sl_price', 0)
-        ma25_sl_price = d.get('ma25', 0) * 0.995 
-        low_liquidity_status = "致命的低流動性:警告(1000株未満)" if d.get('avg_volume_5d', 0) < 1000 else "流動性:問題なし"
-        atr_msg = d.get('atr_comment', '') 
-        data_for_ai += f"ID:{d['code']}: 名称:{d['name']} | 点:{d['score']} | 戦略:{d['strategy']} | RSI:{d['rsi']:.1f} | 乖離:{ma_div:+.1f}% | R/R:{rr_disp} | MDD:{mdd:+.1f}% | SL_R/R:{sl_ma:,.0f} | SL_ATR:{atr_sl_price:,.0f} | SL_MA25:{ma25_sl_price:,.0f} | LIQUIDITY:{low_liquidity_status} | ATR_MSG:{atr_msg}\n"
+        rr_val = d.get('risk_reward', 0.0)
+        rr_disp = "青天" if d.get('is_aoteng') else (f"{rr_val:.1f}" if rr_val >= 0.1 else "-")
+        
+        # 乖離の計算
+        buy_price = d.get('buy', 0)
+        ma_div = (price / buy_price - 1) * 100 if buy_price > 0 else 0
+        
+        mdd = d.get('max_dd_pct', 0.0)
+        
+        # --- ここを修正：計算結果から正しい価格を抽出 ---
+        sl_final = d.get('sl_ma', 0)           # 採用されている損切り価格
+        atr_sl = d.get('atr_sl_price', 0)      # 計算されたATR損切り価格
+        ma25_val = d.get('ma25', 0)            # 25日線
+        ma25_sl = ma25_val * 0.995 if ma25_val > 0 else 0
+        
+        low_liq = "致命的低流動性:警告" if d.get('avg_volume_5d', 0) < 1000 else "流動性:問題なし"
+        atr_msg = d.get('atr_comment', '')
+        
+        # AIに送るテキストの組み立て
+        data_for_ai += (
+            f"ID:{d['code']}: 名称:{d['name']} | 点:{d['score']} | 戦略:{d['strategy']} | "
+            f"RSI:{d['rsi']:.1f} | 乖離:{ma_div:+.1f}% | R/R:{rr_disp} | MDD:{mdd:+.1f}% | "
+            f"SL_R/R:{sl_final:,.1f} | SL_ATR:{atr_sl:,.1f} | SL_MA25:{ma25_sl:,.1f} | "
+            f"LIQUIDITY:{low_liq} | ATR_MSG:{atr_msg}\n"
+        )
     global market_25d_ratio
     r25 = market_25d_ratio
     market_alert_info = f"市場25日騰落レシオ: {r25:.2f}%。"
