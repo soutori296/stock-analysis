@@ -336,7 +336,6 @@ with st.sidebar:
         reload_button_clicked = col_reload.button("🔄再診", on_click=reanalyze_all_data_logic, use_container_width=True, disabled=is_reload_disabled)
         
         if st.session_state.is_running_continuous:
-             st.markdown("---")
              if st.button("🛑分析中止", use_container_width=True, key='cancel_continuous_key_large'):
                  st.session_state.is_running_continuous = False
                  st.session_state.wait_start_time = None
@@ -1645,3 +1644,4 @@ if st.session_state.analyzed_data:
         実際の投資判断や売買に用いることを目的としていません。
     </div>
     """, unsafe_allow_html=True)
+
