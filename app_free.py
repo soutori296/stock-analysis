@@ -617,17 +617,45 @@ def calculate_score_and_logic(df, info, vol_ratio, status):
     rsi_val = last['RSI']
     atr_smoothed = last['ATR_SMA3']
     high_250d = df['High'].tail(250).max()
-    atr_sl_price = max(0, curr_price - max(atr_smoothed * 1.5, curr_price * 0.01))
+    
+    # 損切り基準価格の事前計算
+    atr_sl_calc = max(0, curr_price - max(atr_smoothed * 1.5, curr_price * 0.01))
 
     # --- モメンタム ---
     recent = df['Close'].diff().tail(5)
     up_days = (recent > 0).sum()
     momentum_str = f"{(up_days / 5) * 100:.0f}%"
 
+    # --- 先にフラグ判定（重要：evaluate_strategy_newより前に持ってくる） ---
+    is_breakout = False
+    if len(df) >= 60:
+        h60 = df['High'].rolling(60).max().shift(1).iloc[-1]
+        if curr_price > h60: 
+            is_breakout = True
+
+    is_squeeze = False
+    if len(df) >= 120:
+        bb_mid = df['Close'].rolling(20).mean()
+        bb_width = (4 * df['Close'].rolling(20).std()) / bb_mid
+        if bb_width.iloc[-1] <= bb_width.rolling(120).min().iloc[-1] * 1.1: is_squeeze = True
+
     # --- 戦略判定 ---
     strategy, buy_target, p_half, p_full, sl_ma, is_aoteng, sl_pct = evaluate_strategy_new(
-        df, info, vol_ratio, high_250d, atr_smoothed, curr_price, ma5, ma25, ma75, prev_ma5, rsi_val, atr_sl_price
+        df, info, vol_ratio, high_250d, atr_smoothed, curr_price, ma5, ma25, ma75, prev_ma5, rsi_val, atr_sl_calc
     )
+
+    # 【復活・修正】ブレイクアウト判定なら、戦略を書き換え、基準を「今」にする
+    if is_breakout and "順" in strategy: 
+        strategy = "🚀ブレイク"
+        buy_target = curr_price  # これで乖離が (0) になります
+        
+        if not is_aoteng:
+            category = get_market_cap_category(info["cap"])
+            p_half = int(np.floor(buy_target * (1 + get_target_pct_new(category, True))))
+            p_full = int(np.floor(buy_target * (1 + get_target_pct_new(category, False))))
+            # ブレイク時はATRベースか3%下のどちらか深い方を採用
+            sl_ma = int(np.floor(min(atr_sl_calc, buy_target * 0.97)))
+            sl_pct = ((curr_price / sl_ma) - 1) * 100 if sl_ma > 0 else 0
 
     # --- 特殊フラグ計算 ---
     is_gc = (ma5 > ma25) and (prev_ma5 <= prev_ma25) and (abs(ma5-ma25)/ma25 > 0.005)
@@ -640,19 +668,6 @@ def calculate_score_and_logic(df, info, vol_ratio, status):
             df_w['SMA13'] = df_w['Close'].rolling(13).mean()
             is_weekly_up = df_w['Close'].iloc[-1] >= df_w['SMA13'].iloc[-1]
     except: pass
-
-    is_breakout = False
-    if len(df) >= 60:
-        h60 = df['High'].rolling(60).max().shift(1).iloc[-1]
-        if curr_price > h60: 
-            is_breakout = True
-            if "順" in strategy: strategy = "🚀ブレイク"
-
-    is_squeeze = False
-    if len(df) >= 120:
-        bb_mid = df['Close'].rolling(20).mean()
-        bb_width = (4 * df['Close'].rolling(20).std()) / bb_mid
-        if bb_width.iloc[-1] <= bb_width.rolling(120).min().iloc[-1] * 1.1: is_squeeze = True
 
     # --- DD/リカバリー計算 ---
     dd_data = df.tail(250).copy()
@@ -725,9 +740,7 @@ def calculate_score_and_logic(df, info, vol_ratio, status):
     if get_25day_ratio() >= 125.0: score -= 20; factors["市場過熱"] = -20
 
     # ATRコメント作成
-    atr_comment = "通常レンジ内です。"
-    if atr_p >= 5.0: atr_comment = "ボラティリティが危険水域です。"
-    elif atr_p >= 3.0: atr_comment = "値動きが荒くなっています。"
+    atr_comment = "ボラティリティが危険水域です。" if atr_p >= 5.0 else ("値動きが荒くなっています。" if atr_p >= 3.0 else "通常レンジ内です。")
     if is_squeeze: atr_comment += " ⚡スクイーズ発生中。"
 
     return score, factors, strategy, buy_target, p_half, p_full, sl_ma, is_aoteng, sl_pct, rsi_val, atr_smoothed, atr_comment, momentum_str
@@ -965,44 +978,34 @@ def get_stock_data(ticker, current_run_count):
     status, jst_now_local = get_market_status() 
     ticker = str(ticker).strip().upper()
     info = get_stock_info(ticker) 
-    
-    if info.get("price") is not None and info["price"] < 100:
-        return None
+    if info.get("price") is not None and info["price"] < 100: return None
 
     try:
-        # 1. データ取得
         csv_url = f"https://stooq.com/q/d/l/?s={ticker}.JP&i=d"
         res = fetch_with_retry(csv_url)
         df = pd.read_csv(io.BytesIO(res.content), parse_dates=True, index_col=0).sort_index()
         
-        # 2. 当日データの結合
         curr_price = info.get("price")
         if status == "場中(進行中)" and info.get("open") and curr_price:
             today_dt = pd.to_datetime(jst_now_local.strftime("%Y-%m-%d"))
-            new_row = pd.Series({
-                'Open': info['open'], 'High': info['high'], 'Low': info['low'], 
-                'Close': curr_price, 'Volume': info['volume']
-            }, name=today_dt)
+            new_row = pd.Series({'Open': info['open'], 'High': info['high'], 'Low': info['low'], 'Close': curr_price, 'Volume': info['volume']}, name=today_dt)
             if df.index[-1].date() < today_dt.date():
                 df = pd.concat([df, new_row.to_frame().T])
             else:
                 df.loc[df.index[-1]] = new_row
 
-        # 3. 出来高計算
         df['Vol_SMA5'] = df['Volume'].rolling(5).mean()
         avg_vol_5d = df['Vol_SMA5'].iloc[-1] if not pd.isna(df['Vol_SMA5'].iloc[-1]) else 0
         vol_weight = get_volume_weight(jst_now_local, info["cap"])
         v_ratio = info['volume'] / (avg_vol_5d * vol_weight) if vol_weight > 0 and avg_vol_5d > 0 else 1.0
 
-        # 4. 市場環境
         market_25d = get_25day_ratio()
         market_deduct = -20 if market_25d >= 125.0 else 0
 
-        # 5. スコア計算実行
+        # 計算エンジン呼び出し
         raw_score, factors, strategy, buy_target, p_half, p_full, sl_ma, is_aoteng, sl_pct, rsi_val, atr_smoothed, atr_comment, momentum_str = calculate_score_and_logic(df, info, v_ratio, status)
         current_score = max(0, min(100, raw_score + market_deduct))
 
-        # 6. 差分計算（セッション初診時を基準とする）
         if ticker not in st.session_state.score_history:
             st.session_state.score_history[ticker] = {'pre_market_score': current_score}
         
@@ -1010,13 +1013,13 @@ def get_stock_data(ticker, current_run_count):
         score_diff = current_score - pre_score
         st.session_state.score_history[ticker]['current_score'] = current_score
 
-        # 7. R/R比とバックテスト
+        # R/R比
         risk_reward_ratio = 0.0
         if buy_target > 0 and sl_ma > 0:
             risk_value = buy_target - sl_ma
             if is_aoteng: risk_reward_ratio = 50.0 
             else:
-                avg_target = (p_half + p_full) / 2 if p_half > 0 and p_full > 0 else (p_full if p_full > 0 else 0)
+                avg_target = (p_half + p_full) / 2 if p_half > 0 else p_full
                 reward_value = avg_target - buy_target
                 if risk_value > 0 and reward_value > 0: risk_reward_ratio = reward_value / risk_value
 
@@ -1032,9 +1035,8 @@ def get_stock_data(ticker, current_run_count):
             "bt_trade_count": bt_cnt, "bt_win_count": bt_win_count, "bt_loss_count": bt_loss_count, "bt_target_pct": bt_target_pct,
             "score_factors": factors, "atr_smoothed": atr_smoothed, "atr_pct": (atr_smoothed/curr_price*100 if curr_price>0 else 0),
             "atr_comment": atr_comment, "run_count": current_run_count, "risk_reward": risk_reward_ratio,
-            "momentum": momentum_str
+            "momentum": momentum_str, "ma25": df['SMA25'].iloc[-1] if 'SMA25' in df.columns else 0 # AIコメント用
         }
-
     except Exception as e:
         st.session_state.error_messages.append(f"データ処理エラー (コード:{ticker}) 詳細: {e}")
         return None
