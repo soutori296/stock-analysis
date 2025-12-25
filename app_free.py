@@ -587,9 +587,9 @@ def get_stock_info(code):
 def calculate_score_and_logic(df, info, vol_ratio, status):
     """
     データセットに基づいて、戦略判定とスコアリングを行うエンジン
-    【最終確定版：終値75日新高値なら強制的に現在値同期】
+    【修正版：ブレイクアウト時は判定の最後で想定株価を現在値へ強制上書きする】
     """
-    # --- 0. 変数の初期化 (Pylanceエラー防止) ---
+    # --- 0. 変数の初期化 ---
     is_weekly_up = True
     is_breakout = False
     is_squeeze = False
@@ -599,6 +599,7 @@ def calculate_score_and_logic(df, info, vol_ratio, status):
         return 50, {}, "様子見", 0, 0, 0, 0, False, 0, 50, 0, "通常レンジ", "0%"
 
     df = df.copy()
+    
     # --- 1. 基本指標計算 ---
     df['SMA5'] = df['Close'].rolling(5).mean()
     df['SMA25'] = df['Close'].rolling(25).mean()
@@ -610,31 +611,80 @@ def calculate_score_and_logic(df, info, vol_ratio, status):
     df['TR'] = df[['High_Low', 'High_PrevClose', 'Low_PrevClose']].max(axis=1)
     df['ATR'] = df['TR'].rolling(14).mean()
     df['ATR_SMA3'] = df['ATR'].rolling(3).mean()
+    
+    # RSI計算
     delta = df['Close'].diff()
     gain = (delta.where(delta > 0, 0)).rolling(14).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
     rs = gain / loss
     df['RSI'] = 100 - (100 / (1 + rs))
 
+    # 最新データの取得
     last = df.iloc[-1]
     prev = df.iloc[-2]
+    
+    # 【重要】現在値（終値）の確定
     curr_price = round(float(last['Close']), 1)
+    
     ma5, ma25, ma75 = last['SMA5'], last['SMA25'], last['SMA75']
     prev_ma5, prev_ma25 = prev['SMA5'], prev['SMA25']
     rsi_val = last['RSI']
     atr_smoothed = last['ATR_SMA3']
-    high_250d = df['High'].tail(250).max()
+    
+    # 250日高値（当日を除いた過去250日の最高値）
+    high_250d = df['High'].iloc[:-1].tail(250).max()
+
+    # ATRベースの損切りライン（暫定）
     atr_sl_calc = round(curr_price - max(atr_smoothed * 1.5, curr_price * 0.01), 1)
+
+    # --- 2. 戦略判定（ベース：押し目買い用） ---
+    # まず通常のロジック（順張り・逆張り・押し目など）で一旦ターゲットを計算
+    strategy, buy_target, p_half, p_full, sl_ma, is_aoteng, sl_pct = evaluate_strategy_new(
+        df, info, vol_ratio, high_250d, atr_smoothed, curr_price, ma5, ma25, ma75, prev_ma5, rsi_val, atr_sl_calc
+    )
 
     # ==========================================================================
     # 🚩 【核心】ブレイクアウト判定（終値確定ベース・75日）
-    # 今日の終値（curr_price）が、昨日までの75日間の最高値を超えているか
+    # 条件：今日の終値が、昨日までの75日間の最高値を超えていること
     # ==========================================================================
     if len(df) >= 76:
         # 今日の行(last)を除いた、昨日までの75日間の最高値を取得
         lookback_75_high = df['High'].iloc[:-1].tail(75).max()
+        
+        # 場中のヒゲではなく、現在の価格（終値）がブレイクしているか
         if curr_price > lookback_75_high:
             is_breakout = True
+
+    # ==========================================================================
+    # 🚀 【絶対優先】ブレイクアウト時の強制上書き処理
+    # is_breakoutがTrueなら、これまでの計算を無視して現在値に同期させる
+    # ==========================================================================
+    if is_breakout:
+        strategy = "🚀ブレイク"
+        buy_target = curr_price  # <--- 【ここです】ターゲットを現在値で上書き（乖離0へ）
+        
+        # カテゴリ取得（時価総額別リターン計算用）
+        cat = get_market_cap_category(info.get("cap", 0))
+        
+        if is_aoteng:
+            # 青天井（ATH）判定済みの場合の特例処理
+            max_high_today = df['High'].iloc[-1]
+            atr_trailing = max(0, max_high_today - (atr_smoothed * 2.5))
+            sl_ma = round(atr_trailing, 1) # トレーリングストップ
+            p_full = sl_ma # 青天井はSLを目標表示欄に流用
+            p_half = 0
+        else:
+            # 通常のブレイクアウト：現在値を基準に利確目標を再計算
+            p_half = round(buy_target * (1 + get_target_pct_new(cat, True)), 1)
+            p_full = round(buy_target * (1 + get_target_pct_new(cat, False)), 1)
+            
+            # 損切りラインも現在値基準で再計算（ATR倍率 or 3%ルール）
+            sl_ma = round(max(atr_sl_calc, buy_target * 0.97), 1)
+
+        # SL乖離率の更新
+        sl_pct = ((curr_price / sl_ma) - 1) * 100 if sl_ma > 0 else 0.0
+
+    # --- 3. その他のテクニカル判定 ---
 
     # スクイーズ判定
     if len(df) >= 120:
@@ -650,29 +700,7 @@ def calculate_score_and_logic(df, info, vol_ratio, status):
             is_weekly_up = df_w['Close'].iloc[-1] >= df_w['SMA13'].iloc[-1]
     except: is_weekly_up = True
 
-    # --- 戦略判定（ベース：押し目買い用） ---
-    strategy, buy_target, p_half, p_full, sl_ma, is_aoteng, sl_pct = evaluate_strategy_new(
-        df, info, vol_ratio, high_250d, atr_smoothed, curr_price, ma5, ma25, ma75, prev_ma5, rsi_val, atr_sl_calc
-    )
-
-    # ==========================================================================
-    # 🚀 【絶対優先】ブレイクアウト強制上書き
-    # 新高値なら他の条件（RSIやMA乖離）をすべて無視して現在値に同期させる
-    # ==========================================================================
-    if is_breakout:
-        strategy = "🚀ブレイク"
-        buy_target = curr_price  # 現在値と完全に一致させる（これで乖離が0.0になる）
-        
-        if not is_aoteng:
-            cat = get_market_cap_category(info.get("cap", 0))
-            # 利確目標を「現在の株価」から再計算
-            p_half = round(buy_target * (1 + get_target_pct_new(cat, True)), 1)
-            p_full = round(buy_target * (1 + get_target_pct_new(cat, False)), 1)
-            # 損切り価格も「現在値」から算出
-            sl_ma = round(max(atr_sl_calc, buy_target * 0.97), 1)
-            sl_pct = ((curr_price / sl_ma) - 1) * 100 if sl_ma > 0 else 0
-
-    # --- 📉 ショック（急落）判定ロジック ---
+    # 急落（ショック）判定
     dd_75 = df.tail(75).copy()
     max_1d_drop = dd_75['Close'].pct_change(1).min()
     max_3d_drop = dd_75['Close'].pct_change(3).min()
@@ -705,6 +733,7 @@ def calculate_score_and_logic(df, info, vol_ratio, status):
     
     score += min(trend_sum, 35)
 
+    # R/R比による加点・減点
     if buy_target > 0 and sl_ma > 0 and not is_aoteng:
         risk = buy_target - sl_ma
         reward = ((p_half + p_full) / 2 if p_half > 0 else p_full) - buy_target
@@ -940,8 +969,12 @@ def evaluate_strategy_new(df, info, vol_ratio, high_250d, atr_val, curr_price, m
               full_pct = get_target_pct_new(category_str, is_half=False)
               p_half_candidate = int(np.floor(buy_target * (1 + half_pct))) 
               p_full_candidate = int(np.floor(buy_target * (1 + full_pct)))
+              
+              # 250日新高値（青天井）判定
+              # 呼び出し元で計算した「当日を含まない過去250日高値」と比較する
               is_ath = high_250d > 0 and curr_price > high_250d
               is_rsi_ok = rsi_val < 80; is_volume_ok = vol_ratio >= 1.5
+              
               if is_ath and is_rsi_ok and is_volume_ok:
                    is_aoteng = True; max_high_today = df['High'].iloc[-1]; 
                    atr_trailing_price = max_high_today - (atr_val * 2.5); atr_trailing_price = max(0, atr_trailing_price)
@@ -968,14 +1001,38 @@ def get_stock_data(ticker, current_run_count):
         res = fetch_with_retry(csv_url)
         df = pd.read_csv(io.BytesIO(res.content), parse_dates=True, index_col=0).sort_index()
         
+        # --- 【修正箇所】日付比較によるデータ結合ロジックの強化 ---
+        # Stooq(CSV)の最終日と、現在のJST日付を比較し、
+        # CSVが古い（今日の分がない）場合は、Kabutan(info)の最新値で足を追加・更新する
         curr_price = info.get("price")
-        if status == "場中(進行中)" and info.get("open") and curr_price:
+        
+        # データの整合性チェック（Kabutanから有効な値が取れているか）
+        has_live_data = info.get("open") is not None and curr_price is not None and info.get("high") is not None and info.get("low") is not None
+        
+        if has_live_data:
             today_dt = pd.to_datetime(jst_now_local.strftime("%Y-%m-%d"))
-            new_row = pd.Series({'Open': info['open'], 'High': info['high'], 'Low': info['low'], 'Close': curr_price, 'Volume': info['volume']}, name=today_dt)
-            if df.index[-1].date() < today_dt.date():
+            last_csv_dt = df.index[-1] if not df.empty else pd.to_datetime("2000-01-01")
+            
+            # 作成する最新行データ
+            new_row_vals = {
+                'Open': info['open'], 
+                'High': info['high'], 
+                'Low': info['low'], 
+                'Close': curr_price, 
+                'Volume': info['volume'] if info['volume'] is not None else 0
+            }
+            new_row = pd.Series(new_row_vals, name=today_dt)
+
+            # 1. CSVの最終日が今日より前なら -> 今日の分を追加
+            if last_csv_dt.date() < today_dt.date():
+                # 市場が開いている時間、または引け後でまだCSVが更新されていない場合
                 df = pd.concat([df, new_row.to_frame().T])
-            else:
+            
+            # 2. CSVの最終日が今日と同じなら -> 最新値で上書き（場中の更新など）
+            elif last_csv_dt.date() == today_dt.date():
                 df.loc[df.index[-1]] = new_row
+
+        # -------------------------------------------------------
 
         df['Vol_SMA5'] = df['Volume'].rolling(5).mean()
         avg_vol_5d = df['Vol_SMA5'].iloc[-1] if not pd.isna(df['Vol_SMA5'].iloc[-1]) else 0
@@ -983,7 +1040,6 @@ def get_stock_data(ticker, current_run_count):
         v_ratio = info['volume'] / (avg_vol_5d * vol_weight) if vol_weight > 0 and avg_vol_5d > 0 else 1.0
 
         market_25d = get_25day_ratio()
-        market_deduct = -20 if market_25d >= 125.0 else 0
 
         # スコア計算エンジン呼び出し
         raw_score, factors, strategy, buy_target, p_half, p_full, sl_ma, is_aoteng, sl_pct, rsi_val, atr_smoothed, atr_comment, momentum_str = calculate_score_and_logic(df, info, v_ratio, status)
@@ -1023,7 +1079,7 @@ def get_stock_data(ticker, current_run_count):
             "win_rate_pct": win_rate_pct, "bt_win_count": bt_win_count, "bt_loss_count": bt_loss_count, "bt_target_pct": bt_target_pct,
             "score_factors": factors, "atr_smoothed": atr_smoothed, "atr_comment": atr_comment, "momentum": momentum_str,
             "risk_reward": risk_reward_calc,
-            "atr_pct": atr_pct_val  # ← 【修正】ここが抜けていたため追加しました
+            "atr_pct": atr_pct_val
         }
     except Exception as e:
         st.session_state.error_messages.append(f"エラー (コード:{ticker}): {e}")
