@@ -12,15 +12,15 @@ import random
 import hashlib 
 import os 
 import copy
-import base64 
+import base64
 
-# --- アイコン設定 ---
-ICON_URL = "https://raw.githubusercontent.com/soutori296/stock-analysis/main/aisan.png"
+# --- アイコン設定 (テスター用は空、または標準絵文字を使用) ---
+ICON_URL = "" 
 
 # ==============================================================================
 # 【最優先】ページ設定
 # ==============================================================================
-st.set_page_config(page_title="教えて！AIさん 2", page_icon=ICON_URL, layout="wide") 
+st.set_page_config(page_title="検証用分析ツール", page_icon="📊", layout="wide") 
 
 # --- 環境変数チェック ---
 IS_LOCAL_SKIP_AUTH = os.environ.get("SKIP_AUTH", "false").lower() == 'true'
@@ -48,7 +48,7 @@ except Exception:
     is_password_set = False
 
 # --- 外部説明書URL ---
-MANUAL_URL = "https://soutori296.stars.ne.jp/SoutoriWebShop/ai2_manual.html" 
+MANUAL_URL = "" 
 
 # --- セッションステート初期化 ---
 if 'analyzed_data' not in st.session_state: st.session_state.analyzed_data = []
@@ -125,119 +125,72 @@ def format_volume(volume):
     if volume < 10000: return f'{volume:,.0f}株'
     else: return f'{round(volume / 10000):,.0f}万株'
 
-# --- CSSスタイル ---
+# --- CSSスタイル (アイコン・バッジ・高コントラスト統合版) ---
 st.markdown(f"""
 <style> 
-    /* サイドバー幅 */
     [data-testid="stSidebar"] > div:first-child {{ width: 250px !important; max-width: 250px !important; }}
-    
-    /* タイトルとアイコンのサイズ調整 */
-    .custom-title {{ 
-        font-size: 1.8rem !important; 
-        font-weight: bold;
-        display: flex;
-        align-items: center;
-        gap: 15px;
-        margin-bottom: 10px;
-    }}
-    .custom-title img {{ 
-        height: 60px !important;  /* アイコンの高さを60pxに固定 */
-        width: auto !important; 
-        vertical-align: middle;
-        object-fit: contain;
-    }}
-
+    .custom-title {{ font-size: 1.8rem !important; font-weight: bold; display: flex; align-items: center; gap: 15px; margin-bottom: 10px; }}
+    .custom-title img {{ height: 60px !important; width: auto !important; vertical-align: middle; object-fit: contain; }}
     .big-font {{ font-size:18px !important; font-weight: bold; color: #4A4A4A; font-family: "Meiryo", sans-serif; }}
     .status-badge {{ background-color: {status_color}; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; vertical-align: middle; }}
-    
-    .update-badge {{ 
-        font-size: 10px; 
-        font-weight: bold; 
-        color: #ff6347; 
-        display: inline-block;
-        vertical-align: middle;
-        line-height: 1.0; 
-        margin-left: 5px;
-    }}
-
-    /* テーブル設定 */
+    .update-badge {{ font-size: 10px; font-weight: bold; color: #ff6347; display: inline-block; vertical-align: middle; line-height: 1.0; margin-left: 5px; }}
     .table-container {{ width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; margin-bottom: 20px; }}
     .ai-table {{ width: 100%; border-collapse: collapse; min-width: 1200px; background-color: #ffffff; color: #000000; font-family: "Meiryo", sans-serif; font-size: 13px; }}
-    .ai-table th {{ background-color: #e0e0e0; color: #000000; border: 1px solid #999; padding: 4px 2px; text-align: center; vertical-align: middle; font-weight: bold; white-space: normal !important; position: relative; line-height: 1.2; }}
+    .ai-table th {{ background-color: #e0e0e0; color: #000000; border: 1px solid #999; padding: 4px 2px; text-align: center; vertical-align: middle; font-weight: bold; line-height: 1.2; }}
     .ai-table td {{ background-color: #ffffff; color: #000000; border: 1px solid #ccc; padding: 4px 2px; vertical-align: top; line-height: 1.4; text-align: center; }}
-    
     .td-left {{ text-align: left !important; }}
     .bg-aoteng {{ background-color: #E6F0FF !important; }} 
     .bg-low-liquidity {{ background-color: #FFE6E6 !important; }} 
     .bg-triage-high {{ background-color: #FFFFCC !important; }} 
-    
     .comment-scroll-box {{ max-height: 70px; overflow-y: auto; padding-right: 5px; white-space: normal; text-align: left !important; line-height: 1.4; margin: 0; }}
 
     /* --- バッジ用CSS --- */
     .badge-container {{
-        margin-top: 4px;        /* 銘柄名との間隔を少し広げる */
+        margin-top: 4px;
         display: flex;
-        flex-wrap: wrap;        /* 6個並んで苦しい時は自動で折り返し */
-        gap: 3px;               /* 隙間を3pxに微増 */
+        flex-wrap: wrap;
+        gap: 3px;
         max-width: 100%;
         padding-bottom: 2px;
     }}
-    
     .factor-badge {{
-        display: inline-flex;    /* flexで中央配置 */
-        align-items: center;     /* 垂直方向中央 */
-        justify-content: center; /* 水平方向中央 */
-        width: 22px;            /* 18pxから2pxへ拡大 */
-        height: 22px;           /* 18pxから22pxへ拡大 */
-        font-size: 12px;        /* 文字も12pxに大きく */
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 22px;
+        height: 22px;
+        font-size: 12px;
         font-weight: bold;
-        border-radius: 4px;     /* 少し丸みを増やす */
+        border-radius: 4px;
         border: 1.5px solid;
-        line-height: 1;         /* 文字の浮き上がり防止 */
+        line-height: 1;
         white-space: nowrap;
         flex-shrink: 0;
         text-align: center;
-        box-sizing: border-box; /* 枠線を含めたサイズ計算 */
+        box-sizing: border-box;
         cursor: default !important;
     }}
-    
-    /* 高コントラスト・濃い文字色 */
-    .badge-plus {{
-        color: #004d00;         /* 濃い緑 */
-        background-color: #ccffcc; /* 明るい緑 */
-        border-color: #008000;  /* 枠線 */
-    }}
-    
-    .badge-minus {{
-        color: #800000;         /* 濃い赤 */
-        background-color: #ffcccc; /* 明るい赤 */
-        border-color: #cc0000;  /* 枠線 */
-    }}
+    .badge-plus {{ color: #004d00; background-color: #ccffcc; border-color: #008000; }}
+    .badge-minus {{ color: #800000; background-color: #ffcccc; border-color: #cc0000; }}
 </style>
 """, unsafe_allow_html=True)
 
 # --- タイトル ---
-st.markdown(f"""
+st.markdown("""
 <div class="custom-title">
-    <img src="{ICON_URL}" alt="AI Icon"> 教えて！AIさん 2
+    📊 検証用分析ツール (Internal)
 </div>
 """, unsafe_allow_html=True)
 
 st.markdown(f"""
 <p class="big-font">
-    あなたの提示した銘柄についてアイが分析を行い、<b>判断の参考となる見解</b>を提示します。<br>
+    提示された銘柄について分析します。<span style="color: red; font-weight: bold;">なお、実際の売買はしないでください。</span><br>
     <span class="status-badge">{status_label}</span>
 </p>
 """, unsafe_allow_html=True)
 
-with st.expander("📘 取扱説明書 (データ仕様・判定基準)"):
-    st.markdown(f"""
-    <p>
-        詳細な分析ロジック、スコア配点、時価総額別の目標リターンについては、<br>
-        以下の外部マニュアルリンクをご参照ください。<br>
-        <b><a href="{MANUAL_URL}" target="_blank">🔗 詳細ロジックマニュアルを開く</a></b>
-    </p>
-    """, unsafe_allow_html=True)
+with st.expander("📘 利用方法について"):
+    st.info("詳しい使い方は、フォルダに同梱されている「利用マニュアル.html」をダブルクリックしてご確認ください。")
 
 # --- コールバック関数定義 ---
 def clear_all_data_confirm():
@@ -264,17 +217,13 @@ def toggle_continuous_run():
 with st.sidebar:
     
     # ----------------------------------------------------
-    # 【修正2】ブラウザ保存対応のログインフォーム
+    # 認証フォーム
     # ----------------------------------------------------
     if not st.session_state.authenticated:
         st.header("🔑 認証")
         
         with st.form("login_form"):
-            
-            # 1. アプリパスワード (ユーザー名として保存させるため type="default")
             user_password = st.text_input("ユーザー名", type="default", key='username_field')
-            
-            # 2. APIキー (パスワードとして保存させるため type="password")
             has_secret_api = False
             try:
                 if "GEMINI_API_KEY" in st.secrets: has_secret_api = True
@@ -283,7 +232,6 @@ with st.sidebar:
             api_placeholder = "secrets設定済なら空欄でOK" if has_secret_api else "APIキー (パスワードとして保存)"
             input_api_key = st.text_input("Key", type="password", placeholder=api_placeholder, key='password_field')
             
-            # ★警告対策: use_container_width=True を維持（2025年末まで有効）
             submitted = st.form_submit_button("ログイン", use_container_width=True)
             
             if submitted:
@@ -291,7 +239,6 @@ with st.sidebar:
                     st.session_state.authenticated = True
                     if input_api_key:
                         st.session_state.gemini_api_key_input = input_api_key
-                    
                     st.success("認証成功！保存ポップアップを確認してください...")
                     time.sleep(2.0) 
                     st.rerun() 
@@ -303,20 +250,26 @@ with st.sidebar:
     # 認証成功後の表示項目
     # ----------------------------------------------------
     api_key = None
+
     if st.session_state.authenticated:
         if IS_LOCAL_SKIP_AUTH:
-             st.info("✅ ローカルモード")
+            st.info("✅ ローカルモード")
         else:
-             st.success("✅ ユーザー認証済")
-             
-        if "GEMINI_API_KEY" in st.secrets:
-            api_key = st.secrets["GEMINI_API_KEY"]
-            st.info("🔑 Key: OK")
+            st.success("✅ ユーザー認証済")
+
+        # --- Gemini API Key 判定 ---
+        secret_key_candidate = st.secrets.get("GEMINI_API_KEY", "")
+
+        if not secret_key_candidate:
+            if st.session_state.get('gemini_api_key_input'):
+                api_key = st.session_state.gemini_api_key_input
+                st.info("🔑 Key: OK (入力済)")
+            else:
+                st.warning("⚠️ Gemini APIキーが未設定です。")
+                api_key = None
         else:
-            default_val = st.session_state.get('gemini_api_key_input', "")
-            api_key = st.text_input("Key", value=default_val, type="password", key='gemini_api_key_input_field')
-            if api_key:
-                st.session_state.gemini_api_key_input = api_key
+            api_key = secret_key_candidate
+            st.info("🔑 Key: OK（設定済）")
 
         model_options = ["gemma-3-12b-it", "gemini-2.5-flash"]
         st.session_state.selected_model_name = st.selectbox(
@@ -325,13 +278,15 @@ with st.sidebar:
             index=model_options.index(st.session_state.selected_model_name) if st.session_state.selected_model_name in model_options else 0,
             key='model_select_key' 
         )
+        st.markdown("<br>", unsafe_allow_html=True)
         st.markdown("---")
-        
+        st.markdown("<br>", unsafe_allow_html=True)
+
         sort_options = [
             "スコア順 (高い順)", "更新回数順", "時価総額順 (高い順)", 
             "RSI順 (低い順)", "RSI順 (高い順)", 
-            "R/R比順 (高い順)",         # 💡 【追加】R/R比順
-            "出来高倍率順 (高い順)",    # 💡 【修正】順序変更
+            "R/R比順 (高い順)",
+            "出来高倍率順 (高い順)",
             "勝率順 (高い順)", "銘柄コード順"
         ]
         current_index = sort_options.index(st.session_state.sort_option_key) if st.session_state.sort_option_key in sort_options else 0
@@ -348,7 +303,7 @@ with st.sidebar:
         
         st.session_state.ui_filter_min_liquid_man = col2_1.number_input("出来高(万株)", min_value=0.0, max_value=500.0, value=st.session_state.ui_filter_min_liquid_man, step=0.5, format="%.1f", key='filter_min_liquid_man')
         st.session_state.ui_filter_liquid_on = col2_2.checkbox("適用", value=st.session_state.ui_filter_liquid_on, key='filter_liquid_on')
-        #st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown("---")
 
         tickers_input = st.text_area(
             f"銘柄コード（上限{MAX_TICKERS}銘柄/回）", 
@@ -361,6 +316,7 @@ with st.sidebar:
             st.session_state.analysis_index = 0
             st.session_state.current_input_hash = "" 
 
+        st.markdown("---")
 
         col_start, col_check = st.columns([0.65, 0.35]) 
         is_checkbox_on_for_ui = st.session_state.get('run_continuously_checkbox_key', False) 
@@ -369,30 +325,24 @@ with st.sidebar:
              key='run_continuously_checkbox_key', on_change=toggle_continuous_run 
         )
         is_start_disabled = st.session_state.clear_confirmed or st.session_state.is_running_continuous 
-        # 【修正】use_container_width=True (表示崩れ防止)
         analyze_start_clicked = col_start.button("▶️分析", use_container_width=True, disabled=is_start_disabled, key='analyze_start_key') 
 
         col_clear, col_reload = st.columns(2)
         
-        # データがない場合、または連続実行中は「消去」ボタンを押せないようにする
         is_clear_disabled = not st.session_state.analyzed_data or st.session_state.is_running_continuous
-        # 【修正】use_container_width=True (表示崩れ防止)
         clear_button_clicked = col_clear.button("🗑️消去", on_click=clear_all_data_confirm, use_container_width=True, disabled=is_clear_disabled)
         
         is_reload_disabled = not st.session_state.analyzed_data or st.session_state.is_running_continuous
-        # 【修正】use_container_width=True (表示崩れ防止)
         reload_button_clicked = col_reload.button("🔄再診", on_click=reanalyze_all_data_logic, use_container_width=True, disabled=is_reload_disabled)
         
         if st.session_state.is_running_continuous:
              st.markdown("---")
-             # 【修正】use_container_width=True (表示崩れ防止)
              if st.button("🛑分析中止", use_container_width=True, key='cancel_continuous_key_large'):
                  st.session_state.is_running_continuous = False
                  st.session_state.wait_start_time = None
                  st.info("連続分析のキャンセルを承りました。現在のバッチが完了後、停止します。")
                  st.rerun() 
     else:
-        # 認証されていない場合
         analyze_start_clicked = False
         clear_button_clicked = False
         reload_button_clicked = False
@@ -491,12 +441,13 @@ def safe_float(val):
         return float(val)
     except: return 0.0
 
+# HTMLタグ除去ヘルパー
 def clean_html_tags(text):
     if pd.isna(text) or not isinstance(text, str):
         return text
     return re.sub(r'<[^>]+>', '', text).strip()
 
-# 💡【追加】絵文字・特殊文字除去ヘルパー関数（CSV対策用）
+# 絵文字・特殊文字除去ヘルパー
 def remove_emojis_and_special_chars(text):
     emoji_pattern = re.compile("["
         "\U0001F600-\U0001F64F"  # Emoticons
@@ -527,7 +478,7 @@ def get_stock_info(code):
         m_name = re.search(r'<title>(.*?)【', html)
         if m_name: data["name"] = re.sub(r'[\(\（].*?[\)\）]', '', m_name.group(1).strip()).replace("<br>", " ").strip()
         
-        # 現在値または終値 (小数点を許可するように [\d,.]+ に修正)
+        # 現在値または終値
         m_price = re.search(r'(?:現在値|終値)</th>\s*<td[^>]*>([\d,.]+)</td>', html)
         if m_price: data["price"] = safe_float_convert(m_price.group(1))
         
@@ -563,14 +514,13 @@ def get_stock_info(code):
                 data["per"] = clean_tag_and_br(tds[0])
                 data["pbr"] = clean_tag_and_br(tds[1])
                 
-        # 始値・高値・安値・終値 (ここも小数点を許可するように [\d,.]+ に修正)
+        # 始値・高値・安値・終値
         ohlc_map = {"始値": "open", "高値": "high", "安値": "low", "終値": "close"}
         # OHLCが含まれるテーブルを特定して抽出
         ohlc_table_match = re.search(r'<(?:h2|div)[^>]*>\s*12月\d+日.*?<table[^>]*>(.*?)</table>', html, re.DOTALL)
         ohlc_content = ohlc_table_match.group(1) if ohlc_table_match else html
         
         for key, val_key in ohlc_map.items():
-            # [0-9,.]+ に変更することで 1,939.5 等にマッチさせる
             m = re.search(fr'<th[^>]*>{key}</th>\s*<td[^>]*>([\d,.]+)</td>', ohlc_content)
             if m:
                 data[val_key] = safe_float_convert(m.group(1))
@@ -583,179 +533,6 @@ def get_stock_info(code):
     except Exception as e:
         st.session_state.error_messages.append(f"データ取得エラー (コード:{code}): Kabutan解析失敗。詳細: {e}")
         return data
-
-def calculate_score_and_logic(df, info, vol_ratio, status):
-    """
-    データセットに基づいて、戦略判定とスコアリングを行うエンジン
-    【修正版：ブレイクアウト時は判定の最後で想定株価を現在値へ強制上書きする】
-    """
-    # --- 0. 変数の初期化 ---
-    is_weekly_up = True
-    is_breakout = False
-    is_squeeze = False
-    is_plunge = False
-    
-    if len(df) < 80:
-        return 50, {}, "様子見", 0, 0, 0, 0, False, 0, 50, 0, "通常レンジ", "0%"
-
-    df = df.copy()
-    
-    # --- 1. 基本指標計算 ---
-    df['SMA5'] = df['Close'].rolling(5).mean()
-    df['SMA25'] = df['Close'].rolling(25).mean()
-    df['SMA75'] = df['Close'].rolling(75).mean()
-    df['Vol_SMA5'] = df['Volume'].rolling(5).mean()
-    df['High_Low'] = df['High'] - df['Low']
-    df['High_PrevClose'] = abs(df['High'] - df['Close'].shift(1))
-    df['Low_PrevClose'] = abs(df['Low'] - df['Close'].shift(1))
-    df['TR'] = df[['High_Low', 'High_PrevClose', 'Low_PrevClose']].max(axis=1)
-    df['ATR'] = df['TR'].rolling(14).mean()
-    df['ATR_SMA3'] = df['ATR'].rolling(3).mean()
-    
-    # RSI計算
-    delta = df['Close'].diff()
-    gain = (delta.where(delta > 0, 0)).rolling(14).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
-    rs = gain / loss
-    df['RSI'] = 100 - (100 / (1 + rs))
-
-    # 最新データの取得
-    last = df.iloc[-1]
-    prev = df.iloc[-2]
-    
-    # 【重要】現在値（終値）の確定
-    curr_price = round(float(last['Close']), 1)
-    
-    ma5, ma25, ma75 = last['SMA5'], last['SMA25'], last['SMA75']
-    prev_ma5, prev_ma25 = prev['SMA5'], prev['SMA25']
-    rsi_val = last['RSI']
-    atr_smoothed = last['ATR_SMA3']
-    
-    # 250日高値（当日を除いた過去250日の最高値）
-    high_250d = df['High'].iloc[:-1].tail(250).max()
-
-    # ATRベースの損切りライン（暫定）
-    atr_sl_calc = round(curr_price - max(atr_smoothed * 1.5, curr_price * 0.01), 1)
-
-    # --- 2. 戦略判定（ベース：押し目買い用） ---
-    # まず通常のロジック（順張り・逆張り・押し目など）で一旦ターゲットを計算
-    strategy, buy_target, p_half, p_full, sl_ma, is_aoteng, sl_pct = evaluate_strategy_new(
-        df, info, vol_ratio, high_250d, atr_smoothed, curr_price, ma5, ma25, ma75, prev_ma5, rsi_val, atr_sl_calc
-    )
-
-    # ==========================================================================
-    # 🚩 【核心】ブレイクアウト判定（終値確定ベース・75日）
-    # 条件：今日の終値が、昨日までの75日間の最高値を超えていること
-    # ==========================================================================
-    if len(df) >= 76:
-        # 今日の行(last)を除いた、昨日までの75日間の最高値を取得
-        lookback_75_high = df['High'].iloc[:-1].tail(75).max()
-        
-        # 場中のヒゲではなく、現在の価格（終値）がブレイクしているか
-        if curr_price > lookback_75_high:
-            is_breakout = True
-
-    # ==========================================================================
-    # 🚀 【絶対優先】ブレイクアウト時の強制上書き処理
-    # is_breakoutがTrueなら、これまでの計算を無視して現在値に同期させる
-    # ==========================================================================
-    if is_breakout:
-        strategy = "🚀ブレイク"
-        buy_target = curr_price  # <--- 【ここです】ターゲットを現在値で上書き（乖離0へ）
-        
-        # カテゴリ取得（時価総額別リターン計算用）
-        cat = get_market_cap_category(info.get("cap", 0))
-        
-        if is_aoteng:
-            # 青天井（ATH）判定済みの場合の特例処理
-            max_high_today = df['High'].iloc[-1]
-            atr_trailing = max(0, max_high_today - (atr_smoothed * 2.5))
-            sl_ma = round(atr_trailing, 1) # トレーリングストップ
-            p_full = sl_ma # 青天井はSLを目標表示欄に流用
-            p_half = 0
-        else:
-            # 通常のブレイクアウト：現在値を基準に利確目標を再計算
-            p_half = round(buy_target * (1 + get_target_pct_new(cat, True)), 1)
-            p_full = round(buy_target * (1 + get_target_pct_new(cat, False)), 1)
-            
-            # 損切りラインも現在値基準で再計算（ATR倍率 or 3%ルール）
-            sl_ma = round(max(atr_sl_calc, buy_target * 0.97), 1)
-
-        # SL乖離率の更新
-        sl_pct = ((curr_price / sl_ma) - 1) * 100 if sl_ma > 0 else 0.0
-
-    # --- 3. その他のテクニカル判定 ---
-
-    # スクイーズ判定
-    if len(df) >= 120:
-        bb_mid = df['Close'].rolling(20).mean()
-        bb_width = (4 * df['Close'].rolling(20).std()) / bb_mid
-        if bb_width.iloc[-1] <= bb_width.rolling(120).min().iloc[-1] * 1.1: is_squeeze = True
-
-    # 週足トレンド判定
-    try:
-        df_w = df.resample('W-FRI').agg({'Close': 'last'})
-        if len(df_w) >= 13:
-            df_w['SMA13'] = df_w['Close'].rolling(13).mean()
-            is_weekly_up = df_w['Close'].iloc[-1] >= df_w['SMA13'].iloc[-1]
-    except: is_weekly_up = True
-
-    # 急落（ショック）判定
-    dd_75 = df.tail(75).copy()
-    max_1d_drop = dd_75['Close'].pct_change(1).min()
-    max_3d_drop = dd_75['Close'].pct_change(3).min()
-    is_large = info.get("cap", 0) >= 3000
-    if (is_large and (max_1d_drop <= -0.04 or max_3d_drop <= -0.08)) or \
-       (not is_large and (max_1d_drop <= -0.07 or max_3d_drop <= -0.12)):
-        is_plunge = True
-
-    # モメンタム
-    up_days = int((df['Close'].diff().tail(5) > 0).sum())
-    momentum_str = f"{(up_days / 5) * 100:.0f}%"
-
-    # ==========================================================================
-    # 🎯 スコアリング
-    # ==========================================================================
-    score = 50
-    factors = {"基礎点": 50}
-    trend_sum = 0
-
-    if is_weekly_up: trend_sum += 5; factors["週足上昇"] = 5
-    else: score -= 20; factors["週足下落"] = -20
-    
-    if is_breakout: trend_sum += 15; factors["新高値ブレイク"] = 15
-    if is_squeeze: trend_sum += 10; factors["スクイーズ"] = 10
-    if "🚀" in strategy: trend_sum += 15; factors["戦略優位性"] = 15
-    
-    if is_large and len(df) >= 25:
-        mdd_25 = ((df['Close'].tail(25) / df['Close'].tail(25).cummax()) - 1).min()
-        if mdd_25 > -0.03: trend_sum += 10; factors["大型堅調"] = 10
-    
-    score += min(trend_sum, 35)
-
-    # R/R比による加点・減点
-    if buy_target > 0 and sl_ma > 0 and not is_aoteng:
-        risk = buy_target - sl_ma
-        reward = ((p_half + p_full) / 2 if p_half > 0 else p_full) - buy_target
-        if risk > 0 and reward > 0:
-            rr = reward / risk
-            if rr >= 2.0: score += 20; factors["高R/R比"] = 20
-            elif rr < 1.0: score -= 25; factors["低R/R比"] = -25
-
-    if is_plunge:
-        score -= 15; factors["高DDリスク"] = -15
-    
-    if get_25day_ratio() >= 125.0:
-        score -= 10; factors["市場過熱"] = -10
-
-    if vol_ratio > 1.5: score += 10; factors["出来高急増"] = 10
-    if up_days >= 4: score += 5; factors["直近勢い"] = 5
-    if last['Vol_SMA5'] < 1000: score -= 30; factors["流動性欠如"] = -30
-    
-    atr_p = (atr_smoothed / curr_price) * 100
-    atr_comment = "ボラティリティが危険水域です。" if atr_p >= 5.0 else ("値動きが荒くなっています。" if atr_p >= 3.0 else "通常レンジ内です。")
-
-    return score, factors, strategy, buy_target, p_half, p_full, sl_ma, is_aoteng, sl_pct, rsi_val, atr_smoothed, atr_comment, momentum_str
 
 @st.cache_data(ttl=300, show_spinner="市場25日騰落レシオを取得中...")
 def get_25day_ratio():
@@ -834,59 +611,12 @@ def run_backtest_precise(df, market_cap):
         total_trades = wins + losses
         win_rate_pct = (wins / total_trades) * 100 if total_trades > 0 else 0.0
         bt_str_new = f'{win_rate_pct:.0f}%' 
-        # 💡【修正】負け数 (losses) も追加で返す
+        
         if total_trades == 0: return "機会なし", 0.0, 0, 0.0, target_pct, 0, 0 
-        return bt_str_new, win_rate_pct, total_trades, max_dd_pct, target_pct, wins, losses # 💡【修正】lossesを追加
-    except Exception as e: return f"計算エラー: {e}", 0.0, 0, 0.0, 0.0, 0, 0 # 💡【修正】エラー時も負け数0を追加
+        return bt_str_new, win_rate_pct, total_trades, max_dd_pct, target_pct, wins, losses 
+    except Exception as e: return f"計算エラー: {e}", 0.0, 0, 0.0, 0.0, 0, 0 
 
 run_backtest = run_backtest_precise
-
-@st.cache_data(ttl=1) 
-def get_base_score(ticker, df_base, info):
-    if len(df_base) < 80: return 50 
-    df_base['SMA5'] = df_base['Close'].rolling(5).mean(); df_base['SMA25'] = df_base['Close'].rolling(25).mean()
-    df_base['SMA75'] = df_base['Close'].rolling(75).mean(); df_base['Vol_SMA5'] = df_base['Volume'].rolling(5).mean()
-    if 'High' in df_base.columns and 'Low' in df_base.columns: df_base['High_Low'] = df_base['High'] - df_base['Low']
-    else: df_base['High_Low'] = 0.0
-    df_base['High_PrevClose'] = abs(df_base['High'] - df_base['Close'].shift(1))
-    df_base['Low_PrevClose'] = abs(df_base['Low'] - df_base['Close'].shift(1))
-    df_base['TR'] = df_base[['High_Low', 'High_PrevClose', 'Low_PrevClose']].max(axis=1)
-    df_base['ATR'] = df_base['TR'].rolling(14).mean()
-    delta = df_base['Close'].diff(); gain = (delta.where(delta > 0, 0)).rolling(14).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(14).mean(); rs = gain / loss
-    df_base['RSI'] = 100 - (100 / (1 + rs))
-    last_base = df_base.iloc[-1]; prev_base = df_base.iloc[-2] if len(df_base) >= 2 else last_base
-    ma5_b = last_base['SMA5'] if not pd.isna(last_base['SMA5']) else 0; ma25_b = last_base['SMA25'] if not pd.isna(last_base['SMA25']) else 0
-    ma75_b = last_base['SMA75'] if not pd.isna(last_base['SMA75']) else 0; prev_ma5_b = prev_base['SMA5'] if not pd.isna(prev_base['SMA5']) else ma5_b
-    prev_ma25_b = prev_base['SMA25'] if not pd.isna(prev_base['SMA25']) else ma5_b
-    is_gc_b = (ma5_b > ma25_b) and (prev_ma5_b <= prev_ma25_b); is_dc_b = (ma5_b < ma25_b) and (prev_ma5_b >= prev_ma25_b)
-    atr_val_b = last_base['ATR'] if not pd.isna(last_base['ATR']) else 0; rsi_val_b = last_base['RSI'] if not pd.isna(last_base['RSI']) else 50
-    avg_vol_5d_b = last_base['Vol_SMA5'] if not pd.isna(last_base['Vol_SMA5']) else 0; curr_price_b = last_base.get('Close', 0)
-    strategy_b = "様子見"; buy_target_b = int(ma5_b) if ma5_b > 0 else 0
-    if ma5_b > ma25_b > ma75_b: strategy_b = "🔥順張り"
-    elif rsi_val_b <= 30 or (curr_price_b < ma25_b * 0.9 if ma25_b else False): strategy_b = "🌊逆張り"
-    score_b = 50; total_structural_deduction_b = 0
-    if "🔥順張り" in strategy_b:
-        if info["cap"] >= 3000: 
-            if rsi_val_b >= 85: total_structural_deduction_b -= 8 
-        else:
-            if rsi_val_b >= 80: total_structural_deduction_b -= 13 
-    elif "🌊逆張り" in strategy_b:
-        if rsi_val_b <= 20: 
-            if info["cap"] >= 3000: total_structural_deduction_b -= 15
-            else: total_structural_deduction_b -= 25
-    if avg_vol_5d_b < 1000: total_structural_deduction_b -= 30 
-    liquidity_ratio_pct_b = (avg_vol_5d_b / info.get("issued_shares", 1.0)) * 100 if info.get("issued_shares", 0.0) > 0 else 0.0
-    if liquidity_ratio_pct_b < 0.05: total_structural_deduction_b -= 10
-    if curr_price_b > 0 and atr_val_b > 0:
-        if (atr_val_b / curr_price_b) * 100 < 0.5: total_structural_deduction_b -= 10
-    score_b += total_structural_deduction_b
-    if "順張り" in strategy_b: score_b += 15 
-    if "逆張り" in strategy_b: score_b += 10
-    if 55 <= rsi_val_b <= 65: score_b += 10
-    if is_gc_b: score_b += 15
-    elif is_dc_b: score_b -= 10
-    return max(0, min(100, score_b)) 
 
 def create_signals_pro_bull(df, info, vol_ratio_in):
     last = df.iloc[-1]; prev = df.iloc[-2] if len(df) >= 2 else last
@@ -898,9 +628,10 @@ def create_signals_pro_bull(df, info, vol_ratio_in):
     vol_sma5 = df['Volume'].rolling(5).mean().iloc[-1] if len(df) >= 5 else 0
     if ma5 == 0 or close == 0 or open_price == 0 or high == 0 or low == 0 or prev_close == 0:
         return {"strategy": "様子見", "buy": 0, "p_half": 0, "p_full": 0, "sl_ma": 0, "signal_success": False}
-    # 株価がMA5の下、または出来高1.5倍以上で前日比マイナスなら即除外
+
     if close < ma5 or (close < prev_close and vol_ratio >= 1.5):
-        return {"strategy": "様子見", "buy": 0, "p_half": 0, "p_full": 0, "sl_ma": 0, "signal_success": False}     
+        return {"strategy": "様子見", "buy": 0, "p_half": 0, "p_full": 0, "sl_ma": 0, "signal_success": False}
+
     is_gap_up = open_price > prev_close * 1.01 
     if is_gap_up or high >= ma5 * 1.01 or close > ma5 * 1.01 or close < prev_close * 0.995: 
         return {"strategy": "様子見", "buy": 0, "p_half": 0, "p_full": 0, "sl_ma": 0, "signal_success": False}
@@ -962,19 +693,15 @@ def evaluate_strategy_new(df, info, vol_ratio, high_250d, atr_val, curr_price, m
          strategy, buy_target, p_half, p_full, sl_ma, is_aoteng = signals["strategy"], signals["buy"], signals["p_half"], signals["p_full"], signals["sl_ma"], False
     else:
          sl_ma = atr_sl_price
-         if ma5 > ma25 > ma75 and curr_price > ma75: 
+         if ma5 > ma25 > ma75 and curr_price > ma75:
               strategy, buy_target = "🔥順張り", int(ma5)
               category_str = get_market_cap_category(info["cap"])
               half_pct = get_target_pct_new(category_str, is_half=True)
               full_pct = get_target_pct_new(category_str, is_half=False)
               p_half_candidate = int(np.floor(buy_target * (1 + half_pct))) 
               p_full_candidate = int(np.floor(buy_target * (1 + full_pct)))
-              
-              # 250日新高値（青天井）判定
-              # 呼び出し元で計算した「当日を含まない過去250日高値」と比較する
               is_ath = high_250d > 0 and curr_price > high_250d
               is_rsi_ok = rsi_val < 80; is_volume_ok = vol_ratio >= 1.5
-              
               if is_ath and is_rsi_ok and is_volume_ok:
                    is_aoteng = True; max_high_today = df['High'].iloc[-1]; 
                    atr_trailing_price = max_high_today - (atr_val * 2.5); atr_trailing_price = max(0, atr_trailing_price)
@@ -989,31 +716,241 @@ def evaluate_strategy_new(df, info, vol_ratio, high_250d, atr_val, curr_price, m
     sl_pct = ((curr_price / sl_ma) - 1) * 100 if curr_price > 0 and sl_ma > 0 else 0.0
     return strategy, buy_target, p_half, p_full, sl_ma, is_aoteng, sl_pct
 
+def calculate_score_and_logic(df, info, vol_ratio, status):
+    """
+    データセットに基づいて、戦略判定とスコアリングを行うエンジン
+    【修正版：MDD判定を直近75日・15%基準へ緩和 / ブレイクアウト時は現在値同期】
+    """
+    # --- 0. 変数の初期化 ---
+    is_weekly_up = True
+    is_breakout = False
+    is_squeeze = False
+    is_plunge = False
+    
+    if len(df) < 80:
+        return 50, {}, "様子見", 0, 0, 0, 0, False, 0, 50, 0, "通常レンジ", "0%"
+
+    df = df.copy()
+    
+    # --- 1. 基本指標計算 ---
+    df['SMA5'] = df['Close'].rolling(5).mean()
+    df['SMA25'] = df['Close'].rolling(25).mean()
+    df['SMA75'] = df['Close'].rolling(75).mean()
+    df['Vol_SMA5'] = df['Volume'].rolling(5).mean()
+    df['High_Low'] = df['High'] - df['Low']
+    df['High_PrevClose'] = abs(df['High'] - df['Close'].shift(1))
+    df['Low_PrevClose'] = abs(df['Low'] - df['Close'].shift(1))
+    df['TR'] = df[['High_Low', 'High_PrevClose', 'Low_PrevClose']].max(axis=1)
+    df['ATR'] = df['TR'].rolling(14).mean()
+    df['ATR_SMA3'] = df['ATR'].rolling(3).mean()
+    
+    # RSI計算
+    delta = df['Close'].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(14).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
+    rs = gain / loss
+    df['RSI'] = 100 - (100 / (1 + rs))
+
+    # 最新データの取得
+    last = df.iloc[-1]
+    prev = df.iloc[-2]
+    
+    # 【重要】現在値（終値）の確定
+    curr_price = round(float(last['Close']), 1)
+    
+    ma5, ma25, ma75 = last['SMA5'], last['SMA25'], last['SMA75']
+    prev_ma5, prev_ma25 = prev['SMA5'], prev['SMA25']
+    rsi_val = last['RSI']
+    atr_smoothed = last['ATR_SMA3']
+    
+    # 250日高値（当日を除いた過去250日の最高値）
+    high_250d = df['High'].iloc[:-1].tail(250).max()
+
+    # ATRベースの損切りライン（暫定）
+    atr_sl_calc = round(curr_price - max(atr_smoothed * 1.5, curr_price * 0.01), 1)
+
+    # --- モメンタム ---
+    recent = df['Close'].diff().tail(5)
+    up_days = (recent > 0).sum()
+    momentum_str = f"{(up_days / 5) * 100:.0f}%"
+
+    # --- 2. 戦略判定（ベース：押し目買い用） ---
+    # まず通常のロジック（順張り・逆張り・押し目など）で一旦ターゲットを計算
+    strategy, buy_target, p_half, p_full, sl_ma, is_aoteng, sl_pct = evaluate_strategy_new(
+        df, info, vol_ratio, high_250d, atr_smoothed, curr_price, ma5, ma25, ma75, prev_ma5, rsi_val, atr_sl_calc
+    )
+
+    # ==========================================================================
+    # 🚩 【核心】ブレイクアウト判定（終値確定ベース・75日）
+    # 条件：今日の終値が、昨日までの75日間の最高値を超えていること
+    # ==========================================================================
+    if len(df) >= 76:
+        # 今日の行(last)を除いた、昨日までの75日間の最高値を取得
+        lookback_75_high = df['High'].iloc[:-1].tail(75).max()
+        
+        # 場中のヒゲではなく、現在の価格（終値）がブレイクしているか
+        if curr_price > lookback_75_high:
+            is_breakout = True
+
+    # ==========================================================================
+    # 🚀 【絶対優先】ブレイクアウト時の強制上書き処理
+    # is_breakoutがTrueなら、これまでの計算を無視して現在値に同期させる
+    # ==========================================================================
+    if is_breakout:
+        strategy = "🚀ブレイク"
+        buy_target = curr_price  # ターゲットを現在値で上書き（乖離0へ）
+        
+        # カテゴリ取得（時価総額別リターン計算用）
+        cat = get_market_cap_category(info.get("cap", 0))
+        
+        if is_aoteng:
+            # 青天井（ATH）判定済みの場合の特例処理
+            max_high_today = df['High'].iloc[-1]
+            atr_trailing = max(0, max_high_today - (atr_smoothed * 2.5))
+            sl_ma = round(atr_trailing, 1) # トレーリングストップ
+            p_full = sl_ma # 青天井はSLを目標表示欄に流用
+            p_half = 0
+        else:
+            # 通常のブレイクアウト：現在値を基準に利確目標を再計算
+            p_half = round(buy_target * (1 + get_target_pct_new(cat, True)), 1)
+            p_full = round(buy_target * (1 + get_target_pct_new(cat, False)), 1)
+            
+            # 損切りラインも現在値基準で再計算（ATR倍率 or 3%ルール）
+            sl_ma = round(max(atr_sl_calc, buy_target * 0.97), 1)
+
+        # SL乖離率の更新
+        sl_pct = ((curr_price / sl_ma) - 1) * 100 if sl_ma > 0 else 0.0
+
+    # --- 3. その他のテクニカル判定 ---
+
+    # スクイーズ判定
+    if len(df) >= 120:
+        bb_mid = df['Close'].rolling(20).mean()
+        bb_width = (4 * df['Close'].rolling(20).std()) / bb_mid
+        if bb_width.iloc[-1] <= bb_width.rolling(120).min().iloc[-1] * 1.1: is_squeeze = True
+
+    # 週足トレンド判定
+    try:
+        df_w = df.resample('W-FRI').agg({'Close': 'last'})
+        if len(df_w) >= 13:
+            df_w['SMA13'] = df_w['Close'].rolling(13).mean()
+            is_weekly_up = df_w['Close'].iloc[-1] >= df_w['SMA13'].iloc[-1]
+    except: is_weekly_up = True
+
+    # GC/DC判定
+    is_gc = (ma5 > ma25) and (prev_ma5 <= prev_ma25) and (abs(ma5-ma25)/ma25 > 0.005)
+    is_dc = (ma5 < ma25) and (prev_ma5 >= prev_ma25) and (abs(ma5-ma25)/ma25 > 0.005)
+
+    # 急落（ショック）判定
+    dd_75 = df.tail(75).copy()
+    max_1d_drop = dd_75['Close'].pct_change(1).min()
+    max_3d_drop = dd_75['Close'].pct_change(3).min()
+    is_large = info.get("cap", 0) >= 3000
+    if (is_large and (max_1d_drop <= -0.04 or max_3d_drop <= -0.08)) or \
+       (not is_large and (max_1d_drop <= -0.07 or max_3d_drop <= -0.12)):
+        is_plunge = True
+
+    # --- 4. DD/リカバリー計算（MDD判定修正版） ---
+    # 判定期間を75日（約3.5ヶ月）に短縮し、直近のトレンド安定性を重視
+    dd_data = df.tail(75).copy() 
+    dd_data['Peak'] = dd_data['Close'].cummax()
+    dd_data['DD'] = (dd_data['Close'] / dd_data['Peak']) - 1
+    max_dd_val = dd_data['DD'].min()
+    mdd_day_index = dd_data['DD'].idxmin()
+    recovery_check = dd_data[dd_data.index >= mdd_day_index]
+    recovery_days = 999
+    for i, (_, row_d) in enumerate(recovery_check.iterrows()):
+        if row_d['Close'] >= row_d['Peak'] * 0.95: recovery_days = i; break
+
+    # ==========================================================================
+    # 🎯 スコアリング
+    # ==========================================================================
+    score = 50
+    factors = {"基礎点": 50}
+    trend_sum = 0
+
+    if is_weekly_up: trend_sum += 5; factors["週足上昇"] = 5
+    else: score -= 20; factors["週足下落"] = -20
+    
+    if is_breakout: trend_sum += 15; factors["新高値ブレイク"] = 15
+    if is_squeeze: trend_sum += 10; factors["スクイーズ"] = 10
+    if "🚀" in strategy: trend_sum += 15; factors["戦略優位性"] = 15
+    if is_aoteng and rsi_val < 80 and vol_ratio > 1.5: trend_sum += 15; factors["青天井"] = 15
+    
+    # 大型堅調判定
+    if is_large and len(df) >= 25:
+        recent_25 = df.tail(25)
+        mdd_25 = ((recent_25['Close'] / recent_25['Close'].cummax()) - 1).min()
+        if mdd_25 > -0.03: trend_sum += 10; factors["大型堅調"] = 10
+    
+    score += min(trend_sum, 35)
+
+    # R/R比による加点・減点
+    if buy_target > 0 and sl_ma > 0 and not is_aoteng:
+        avg_target = (p_half + p_full) / 2 if p_half > 0 else p_full
+        risk = buy_target - sl_ma
+        reward = avg_target - buy_target
+        if risk > 0 and reward > 0:
+            rr = reward / risk
+            if rr >= 2.0: score += 20; factors["高R/R比"] = 20
+            elif rr < 1.0: score -= 25; factors["低R/R比"] = -25
+
+    # ドローダウン判定（修正済: 75日期間 / 15%基準）
+    dd_abs = abs(max_dd_val * 100)
+    if dd_abs < 1.0: score += 5; factors["低DD率"] = 5
+    elif dd_abs > 15.0: score -= 20; factors["高DDリスク"] = -20 # 基準緩和 (10% -> 15%)
+    elif is_plunge: score -= 15; factors["高DDリスク"] = -15   # 直近急落
+
+    if recovery_days <= 20: score += 5; factors["早期回復"] = 5
+    elif recovery_days >= 100: score -= 10; factors["回復遅延"] = -10
+
+    # 市場全体リスク
+    if get_25day_ratio() >= 125.0:
+        score -= 20; factors["市場過熱"] = -20
+
+    # テクニカル・出来高
+    if is_gc: score += 5; factors["GC発生"] = 5
+    elif is_dc: score -= 10; factors["DC発生"] = -10
+
+    if 55 <= rsi_val <= 65: score += 5; factors["RSI適正"] = 5
+    if vol_ratio > 1.5: score += 10; factors["出来高急増"] = 10
+    if up_days >= 4: score += 5; factors["直近勢い"] = 5
+    
+    # 構造的リスク
+    if last['Vol_SMA5'] < 1000: score -= 30; factors["流動性欠如"] = -30
+    atr_p = (atr_smoothed / curr_price) * 100
+    if atr_p < 0.5: score -= 10; factors["低ボラ"] = -10
+    
+    atr_comment = "ボラティリティが危険水域です。" if atr_p >= 5.0 else ("値動きが荒くなっています。" if atr_p >= 3.0 else "通常レンジ内です。")
+    if is_squeeze: atr_comment += " ⚡スクイーズ発生中。"
+
+    return score, factors, strategy, buy_target, p_half, p_full, sl_ma, is_aoteng, sl_pct, rsi_val, atr_smoothed, atr_comment, momentum_str
+
 @st.cache_data(ttl=1) 
 def get_stock_data(ticker, current_run_count):
     status, jst_now_local = get_market_status() 
     ticker = str(ticker).strip().upper()
     info = get_stock_info(ticker) 
-    if info.get("price") is not None and info["price"] < 100: return None
+    
+    # 100円未満の低位株はスキップ（高リスク回避）
+    if info.get("price") is not None and info["price"] < 100:
+        st.session_state.error_messages.append(f"分析スキップ (コード:{ticker}): 株価100円未満のため。")
+        return None
 
     try:
+        # 1. 過去データの取得
         csv_url = f"https://stooq.com/q/d/l/?s={ticker}.JP&i=d"
         res = fetch_with_retry(csv_url)
         df = pd.read_csv(io.BytesIO(res.content), parse_dates=True, index_col=0).sort_index()
         
-        # --- 【修正箇所】日付比較によるデータ結合ロジックの強化 ---
-        # Stooq(CSV)の最終日と、現在のJST日付を比較し、
-        # CSVが古い（今日の分がない）場合は、Kabutan(info)の最新値で足を追加・更新する
+        # 2. 当日リアルタイムデータの結合 (場中・引け後問わず最新データを反映)
         curr_price = info.get("price")
-        
-        # データの整合性チェック（Kabutanから有効な値が取れているか）
         has_live_data = info.get("open") is not None and curr_price is not None and info.get("high") is not None and info.get("low") is not None
         
         if has_live_data:
             today_dt = pd.to_datetime(jst_now_local.strftime("%Y-%m-%d"))
             last_csv_dt = df.index[-1] if not df.empty else pd.to_datetime("2000-01-01")
             
-            # 作成する最新行データ
             new_row_vals = {
                 'Open': info['open'], 
                 'High': info['high'], 
@@ -1023,28 +960,30 @@ def get_stock_data(ticker, current_run_count):
             }
             new_row = pd.Series(new_row_vals, name=today_dt)
 
-            # 1. CSVの最終日が今日より前なら -> 今日の分を追加
             if last_csv_dt.date() < today_dt.date():
-                # 市場が開いている時間、または引け後でまだCSVが更新されていない場合
                 df = pd.concat([df, new_row.to_frame().T])
-            
-            # 2. CSVの最終日が今日と同じなら -> 最新値で上書き（場中の更新など）
             elif last_csv_dt.date() == today_dt.date():
                 df.loc[df.index[-1]] = new_row
 
-        # -------------------------------------------------------
-
+        # 3. 指標計算の準備
         df['Vol_SMA5'] = df['Volume'].rolling(5).mean()
+        df['SMA25'] = df['Close'].rolling(25).mean()
         avg_vol_5d = df['Vol_SMA5'].iloc[-1] if not pd.isna(df['Vol_SMA5'].iloc[-1]) else 0
         vol_weight = get_volume_weight(jst_now_local, info["cap"])
         v_ratio = info['volume'] / (avg_vol_5d * vol_weight) if vol_weight > 0 and avg_vol_5d > 0 else 1.0
 
         market_25d = get_25day_ratio()
+        market_deduct = -20 if market_25d >= 125.0 else 0
 
-        # スコア計算エンジン呼び出し
+        # 4. スコアリングエンジンの実行
         raw_score, factors, strategy, buy_target, p_half, p_full, sl_ma, is_aoteng, sl_pct, rsi_val, atr_smoothed, atr_comment, momentum_str = calculate_score_and_logic(df, info, v_ratio, status)
-        current_score = max(0, min(100, raw_score))
+        
+        current_score = max(0, min(100, raw_score + market_deduct))
 
+        current_atr_sl = max(0, curr_price - max(atr_smoothed * 1.5, curr_price * 0.01))
+        current_ma25 = df['SMA25'].iloc[-1] if not pd.isna(df['SMA25'].iloc[-1]) else 0
+
+        # 5. 差分計算
         if ticker not in st.session_state.score_history:
             st.session_state.score_history[ticker] = {'pre_market_score': current_score}
         
@@ -1052,37 +991,64 @@ def get_stock_data(ticker, current_run_count):
         score_diff = current_score - pre_score
         st.session_state.score_history[ticker]['current_score'] = current_score
 
-        # 各種価格の確定
-        current_atr_sl = round(curr_price - max(atr_smoothed * 1.5, curr_price * 0.01), 1)
-        current_ma25 = df['SMA25'].iloc[-1] if 'SMA25' in df.columns else 0
-        atr_pct_val = (atr_smoothed / curr_price * 100 if curr_price > 0 else 0)
-
-        # R/R比
-        risk_reward_calc = 0.0
+        # 6. R/R比
+        risk_reward_ratio = 0.0
         if buy_target > 0 and sl_ma > 0:
-            risk_amt = buy_target - sl_ma
-            if is_aoteng: risk_reward_calc = 50.0 
+            risk_val = buy_target - sl_ma
+            if is_aoteng:
+                risk_reward_ratio = 50.0 
             else:
                 avg_target = (p_half + p_full) / 2 if p_half > 0 else p_full
-                reward_amt = avg_target - buy_target
-                if risk_amt > 0 and reward_amt > 0: risk_reward_calc = reward_amt / risk_amt
+                reward_val = avg_target - buy_target
+                if risk_val > 0 and reward_val > 0:
+                    risk_reward_ratio = reward_val / risk_val
 
+        # 7. バックテスト
         bt_str, win_rate_pct, bt_cnt, max_dd_pct, bt_target_pct, bt_win_count, bt_loss_count = run_backtest(df, info["cap"])
 
         return {
-            "code": ticker, "name": info["name"], "price": curr_price, "cap_val": info["cap"], "cap_disp": fmt_market_cap(info["cap"]),
-            "per": info["per"], "pbr": info["pbr"], "rsi": rsi_val, "rsi_disp": f"{rsi_val:.1f}", 
-            "vol_ratio": v_ratio, "strategy": strategy, "score": current_score, "score_diff": score_diff,
-            "buy": buy_target, "p_half": p_half, "p_full": p_full, "backtest": bt_str, "backtest_raw": bt_str,
-            "max_dd_pct": max_dd_pct, "sl_pct": sl_pct, "sl_ma": sl_ma, "ma25": current_ma25, "atr_sl_price": current_atr_sl,
-            "avg_volume_5d": avg_vol_5d, "is_low_liquidity": avg_vol_5d < 1000, "is_aoteng": is_aoteng, 
-            "win_rate_pct": win_rate_pct, "bt_win_count": bt_win_count, "bt_loss_count": bt_loss_count, "bt_target_pct": bt_target_pct,
-            "score_factors": factors, "atr_smoothed": atr_smoothed, "atr_comment": atr_comment, "momentum": momentum_str,
-            "risk_reward": risk_reward_calc,
-            "atr_pct": atr_pct_val
+            "code": ticker,
+            "name": info["name"],
+            "price": curr_price,
+            "cap_val": info["cap"],
+            "cap_disp": fmt_market_cap(info["cap"]),
+            "per": info["per"],
+            "pbr": info["pbr"],
+            "rsi": rsi_val,
+            "rsi_disp": f"{rsi_val:.1f}",
+            "vol_ratio": v_ratio,
+            "strategy": strategy,
+            "score": current_score,
+            "score_diff": score_diff,
+            "buy": buy_target,
+            "p_half": p_half,
+            "p_full": p_full,
+            "backtest": bt_str,
+            "backtest_raw": bt_str,
+            "max_dd_pct": max_dd_pct,
+            "sl_pct": sl_pct,
+            "sl_ma": sl_ma,
+            "ma25": current_ma25,
+            "atr_sl_price": current_atr_sl,
+            "avg_volume_5d": avg_vol_5d,
+            "is_low_liquidity": avg_vol_5d < 1000,
+            "is_aoteng": is_aoteng,
+            "win_rate_pct": win_rate_pct,
+            "bt_trade_count": bt_cnt,
+            "bt_win_count": bt_win_count,
+            "bt_loss_count": bt_loss_count,
+            "bt_target_pct": bt_target_pct,
+            "score_factors": factors,
+            "atr_smoothed": atr_smoothed,
+            "atr_pct": (atr_smoothed / curr_price * 100 if curr_price > 0 else 0),
+            "atr_comment": atr_comment,
+            "run_count": current_run_count,
+            "risk_reward": risk_reward_ratio,
+            "momentum": momentum_str
         }
+
     except Exception as e:
-        st.session_state.error_messages.append(f"エラー (コード:{ticker}): {e}")
+        st.session_state.error_messages.append(f"データ処理エラー (コード:{ticker}) 詳細: {e}")
         return None
 
 def batch_analyze_with_ai(data_list):
@@ -1101,36 +1067,30 @@ def batch_analyze_with_ai(data_list):
         price = d['price'] if d['price'] is not None else 0
         rr_val = d.get('risk_reward', 0.0)
         rr_disp = "青天" if d.get('is_aoteng') else (f"{rr_val:.1f}" if rr_val >= 0.1 else "-")
-        
-        # 乖離の計算
         buy_price = d.get('buy', 0)
         ma_div = (price / buy_price - 1) * 100 if buy_price > 0 else 0
-        
         mdd = d.get('max_dd_pct', 0.0)
-        
-        # --- ここを修正：計算結果から正しい価格を抽出 ---
-        sl_final = d.get('sl_ma', 0)           # 採用されている損切り価格
-        atr_sl = d.get('atr_sl_price', 0)      # 計算されたATR損切り価格
-        ma25_val = d.get('ma25', 0)            # 25日線
+        sl_final = d.get('sl_ma', 0)
+        atr_sl = d.get('atr_sl_price', 0)
+        ma25_val = d.get('ma25', 0)
         ma25_sl = ma25_val * 0.995 if ma25_val > 0 else 0
-        
         low_liq = "致命的低流動性:警告" if d.get('avg_volume_5d', 0) < 1000 else "流動性:問題なし"
         atr_msg = d.get('atr_comment', '')
         
-        # AIに送るテキストの組み立て
         data_for_ai += (
             f"ID:{d['code']}: 名称:{d['name']} | 点:{d['score']} | 戦略:{d['strategy']} | "
             f"RSI:{d['rsi']:.1f} | 乖離:{ma_div:+.1f}% | R/R:{rr_disp} | MDD:{mdd:+.1f}% | "
             f"SL_R/R:{sl_final:,.1f} | SL_ATR:{atr_sl:,.1f} | SL_MA25:{ma25_sl:,.1f} | "
             f"LIQUIDITY:{low_liq} | ATR_MSG:{atr_msg}\n"
         )
+        
     global market_25d_ratio
     r25 = market_25d_ratio
     market_alert_info = f"市場25日騰落レシオ: {r25:.2f}%。"
     if r25 >= 125.0: market_alert_info += "市場は【明確な過熱ゾーン】にあり、全体的な調整リスクが非常に高いです。"
     elif r25 <= 80.0: market_alert_info += "市場は【明確な底値ゾーン】にあり、全体的な反発期待が高いです。"
     else: market_alert_info += "市場の過熱感は中立的です。"
-    prompt = f"""あなたは「アイ」という名前のプロトレーダー（30代女性、冷静・理知的）です。以下の【市場環境】と【銘柄データ】に基づき、それぞれの「所感コメント（丁寧語）」を【生成コメントの原則】に従って作成してください。
+    prompt = f"""あなたは「システム」という名前の冷徹な分析AIです。以下の【市場環境】と【銘柄データ】に基づき、それぞれの「所感コメント（丁寧語）」を【生成コメントの原則】に従って作成してください。
 
 【市場環境】{market_alert_info}
 
@@ -1160,7 +1120,7 @@ def batch_analyze_with_ai(data_list):
 （例）
 ID:9984 | <b>ソフトバンクグループ</b>｜RSIは中立圏に位置し、MA25_SL（6,500円）を終値で割るか、ATR_SL（6,400円）を割るかのどちらかをロスカット基準としてご検討ください。
 
-【最後に】リストの最後に「END_OF_LIST」と書き、その後に続けて「アイの独り言（常体・独白調）」を1行で書いてください。語尾に感情的な表現を含めないこと。。※見出し不要。独り言は、市場25日騰落レシオ({r25:.2f}%)を総括し、規律ある撤退の重要性に言及する。
+【最後に】リストの最後に「END_OF_LIST」と書き、その後に続けて「市場分析サマリー（常体・独白調）」を1行で書いてください。語尾に感情的な表現を含めないこと。。※見出し不要。独り言は、市場25日騰落レシオ({r25:.2f}%)を総括し、規律ある撤退の重要性に言及する。
 """
     try:
         res = model.generate_content(prompt)
@@ -1289,7 +1249,7 @@ if analyze_start_clicked or (st.session_state.is_running_continuous and st.sessi
                 if d: d['batch_order'] = start_index + i + 1; new_analyzed_data.append(d)
                 if bar: bar.progress((i+1)/len(raw_tickers))
                 time.sleep(random.uniform(1.5, 2.5)) 
-            with st.spinner("アイが診断中..."):
+            with st.spinner("システムが診断中..."):
                 comments_map, monologue = batch_analyze_with_ai(new_analyzed_data)
                 for d in new_analyzed_data: d["comment"] = comments_map.get(d["code"], "コメント生成失敗")
                 merge_new_data(new_analyzed_data)
@@ -1339,7 +1299,7 @@ HEADER_MAP = [
     ('price_disp', '現在値', 'center', '70px', '70px'), ('buy_disp', '想定水準\n（乖離）', 'center', '80px', '80px'), ('rr_disp', 'R/R比', 'center', '50px', '50px'), 
     ('dd_sl_disp', 'DD率　\nSL率', 'center', '60px', '60px'), ('target_txt', '利益確定目標値', 'left', '130px', '130px'), ('rsi_disp', 'RSI', 'center', '60px', '60px'), 
     ('vol_disp_html', '出来高比\n(5日平均)', 'center', '70px', '70px'), ('bt_cell_content', 'MA5実績', 'center', '70px', '70px'), 
-    ('per_pbr_disp', 'PER　\nPBR', 'center', '60px', '60px'), ('momentum', '直近勝率', 'center', '60px', '60px'), ('comment', 'アイの所感', 'left', '350px', '350px')
+    ('per_pbr_disp', 'PER　\nPBR', 'center', '60px', '60px'), ('momentum', '直近勝率', 'center', '60px', '60px'), ('comment', 'システムの所感', 'left', '350px', '350px')
 ]
 
 st.markdown("---")
@@ -1360,8 +1320,10 @@ if st.session_state.analyzed_data:
             if keep: filtered_data.append(d)
     else: filtered_data = data
 
-    df = pd.DataFrame(filtered_data) # 元の df を定義
-
+    df_raw_for_display = pd.DataFrame(filtered_data) 
+    df = df_raw_for_display.copy() 
+    df_download = df_raw_for_display.copy() 
+    
     if st.session_state.get('trigger_copy_filtered_data', False):
          st.session_state.trigger_copy_filtered_data = False 
          st.warning("⚠️ 現在、コピー機能は無効化されています。")
@@ -1370,16 +1332,14 @@ if st.session_state.analyzed_data:
         if is_filter_active: st.info(f"⚠️ フィルター条件に該当なし。")
         else: st.info("⚠️ 結果なし。")
         st.markdown("---")
-        st.markdown(f"【アイの独り言】")
+        st.markdown(f"【市場分析サマリー】") 
         st.markdown(st.session_state.ai_monologue) 
         if st.session_state.ai_monologue or st.session_state.error_messages: st.stop()
         st.stop()
     
     # ----------------------------------------------------
-    # 💡 【CSVダウンロード機能の最終安全版】
+    # 💡 【CSVダウンロード機能】
     # ----------------------------------------------------
-    
-    # 1. CSVに必要なカラムの定義と順序の確定
     final_csv_columns = [
         ('code', 'コード'), ('name', '企業名'), ('cap_disp', '時価総額'),
         ('score', '総合点'), ('strategy', '分析戦略'), ('price', '現在値'),
@@ -1387,60 +1347,70 @@ if st.session_state.analyzed_data:
         ('max_dd_pct', 'DD率'), ('sl_pct', 'SL率'), ('risk_reward', 'R/R比'),
         ('rsi', 'RSI'), ('vol_ratio', '出来高倍率'), ('avg_volume_5d', '5日平均出来高'),
         ('momentum', '直近勝率'), ('backtest_raw', 'MA5実績'), ('per', 'PER'),
-        ('pbr', 'PBR'), ('comment', 'アイの所感')
+        ('pbr', 'PBR'), ('comment', 'システムの所感') 
     ]
     
-    # 2. データのコピーとリネーム（安全策）
-    df_download = df.copy()
-    rename_map = {key: name for key, name in final_csv_columns if key in df_download.columns}
-    df_download.rename(columns=rename_map, inplace=True)
-    
-    # 3. 存在する列だけを抽出
-    present_cols = [name for _, name in final_csv_columns if name in df_download.columns]
-    df_download = df_download[present_cols].copy()
+    internal_keys_to_drop = [
+        'score_factors', 'update_count', 'is_updated_in_this_run', 'run_count', 'batch_order', 'is_low_liquidity', 'is_aoteng', 
+        'atr_val', 'atr_smoothed', 'is_gc', 'is_dc', 'ma25', 'atr_sl_price', 'base_score', 'win_rate_pct', 
+        'bt_trade_count', 'bt_target_pct', 'bt_win_count', 'atr_pct', 'atr_comment', 'code_disp', 'score_disp', 
+        'price_disp', 'buy_disp', 'rr_disp', 'dd_sl_disp', 'target_txt', 'rsi_disp', 'vol_disp_html', 
+        'bt_cell_content', 'per_pbr_disp', 'diff_disp', 'update_disp', 'No' 
+    ]
+    for col in internal_keys_to_drop:
+        if col in df_download.columns:
+            df_download = df_download.drop(columns=[col])
 
-    # 4. 各列の整形 (列が存在する場合のみ実行)
-    if 'DD率' in df_download.columns:
-        df_download['DD率'] = df_download['DD率'].apply(lambda x: f"{x:+.2f}%" if pd.notna(x) else '-')
-    if 'SL率' in df_download.columns:
-        df_download['SL率'] = df_download['SL率'].apply(lambda x: f"{x:+.2f}%" if pd.notna(x) else '-')
-    if 'R/R比' in df_download.columns:
-        df_download['R/R比'] = df_download['R/R比'].apply(lambda x: f"{x:.2f}" if pd.notna(x) and isinstance(x, (int, float)) and x > 0 else '-')
-    if '出来高倍率' in df_download.columns:
-        df_download['出来高倍率'] = df_download['出来高倍率'].apply(lambda x: f"{x:.2f}" if pd.notna(x) else '-')
-    if 'RSI' in df_download.columns:
-        df_download['RSI'] = df_download['RSI'].apply(lambda x: f"{x:.2f}" if pd.notna(x) else '-')
-    
-    # 価格関連の整形
-    def fmt_csv_price(val):
-        if pd.isna(val) or val == 0: return "-"
-        return f"{val:,.1f}"
+    def fmt_val(val):
+        if pd.isna(val) or val == '-' or val == '': return '-'
+        if isinstance(val, str):
+            val = val.replace('倍', '').replace(',', '').strip()
+            if not val or val == '-': return '-'
+        try: return float(val)
+        except: return '-'
+            
+    final_rename_map = {key: name for key, name in final_csv_columns}
+    df_download.rename(columns=final_rename_map, inplace=True)
+    df_download = df_download[[col for col in [name for _, name in final_csv_columns] if col in df_download.columns]].copy()
 
-    for c in ['現在値', '想定水準(価格)', '目標_半利確', '目標_全利確']:
-        if c in df_download.columns:
-            df_download[c] = df_download[c].apply(fmt_csv_price)
-
-    # テキストの掃除
-    for c in ['アイの所感', 'MA5実績']:
-        if c in df_download.columns:
-            df_download[c] = df_download[c].apply(clean_html_tags).apply(remove_emojis_and_special_chars)
-
-    # 5. CSVボタンの設置
-    csv_bytes = df_download.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
-    b64 = base64.b64encode(csv_bytes).decode()
-    href = f'data:text/csv;base64,{b64}'
-    filename = f'ai_stock_analysis_{datetime.datetime.now().strftime("%Y%m%d_%H%M")}.csv'
+    df_download['企業名'] = df_download['企業名'].fillna('-')
+    df_download['分析戦略'] = df_download['分析戦略'].fillna('様子見')
+    df_download['システムの所感'] = df_download['システムの所感'].fillna('コメントなし')
     
-    st.markdown(f'<a href="{href}" download="{filename}" style="text-decoration:none; display:inline-block; width:100%; text-align:center; border:1px solid #ddd; padding:10px; border-radius:0.5rem; color:#fff; background-color:#007bff; font-weight:bold;">✅ フィルター適用済みデータをCSVダウンロード</a>', unsafe_allow_html=True)
-    
+    cols_to_clean = ['システムの所感', 'MA5実績']
+    for col in cols_to_clean:
+        if col in df_download.columns:
+             df_download[col] = df_download[col].apply(clean_html_tags)
+             df_download[col] = df_download[col].apply(remove_emojis_and_special_chars) 
+             
+    df_download['DD率'] = df_download['DD率'].apply(lambda x: f"{x:+.2f}%" if pd.notna(x) else '-')
+    df_download['SL率'] = df_download['SL率'].apply(lambda x: f"{x:+.2f}%" if pd.notna(x) else '-')
+    df_download['R/R比'] = df_download['R/R比'].apply(lambda x: f"{x:.2f}" if pd.notna(x) and x > 0 else '-')
+    df_download['出来高倍率'] = df_download['出来高倍率'].apply(lambda x: f"{x:.2f}")
+    df_download['RSI'] = df_download['RSI'].apply(lambda x: f"{x:.2f}")
+    df_download['PER'] = df_download['PER'].apply(fmt_val)
+    df_download['PBR'] = df_download['PBR'].apply(fmt_val)
+    df_download['5日平均出来高'] = df_download['5日平均出来高'].apply(lambda x: format_volume(x) if pd.notna(x) else '-')
+    df_download['現在値'] = df_download['現在値'].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else '-')
+    df_download['想定水準(価格)'] = df_download['想定水準(価格)'].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else '-')
+    df_download['目標_半利確'] = df_download['目標_半利確'].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else '-')
+    df_download['目標_全利確'] = df_download['目標_全利確'].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else '-')
+
+    csv_string = df_download.to_csv(index=False, encoding='utf-8-sig') 
+    csv_bytes = csv_string.encode('utf-8-sig')
+    csv_base64_str = base64.b64encode(csv_bytes).decode('utf-8')
+    data_uri = f"data:text/csv;charset=utf-8;base64,{csv_base64_str}"
+    filename = f'ai_stock_analysis_{datetime.datetime.now().strftime("%Y%m%d_%H%M%S")}.csv'
+
+    st.markdown(f'<a href="{data_uri}" download="{filename}" style="text-decoration:none; display:inline-block; width:100%; text-align:center; border:1px solid #ddd; padding:10px; border-radius:0.5rem; color:#fff; background-color:#007bff; font-weight:bold;">✅ フィルター適用済みデータをCSVダウンロード</a>', unsafe_allow_html=True)
+
     # ----------------------------------------------------
-    # 💡 【ソートロジックの修正】（元のコードから流用しR/R比ソートを追加）
+    # 📊 UI構築
     # ----------------------------------------------------
-
     sort_key_map = {
         "スコア順 (高い順)": ('score', False), "更新回数順": ('update_count', False), "時価総額順 (高い順)": ('cap_val', False),
         "RSI順 (低い順)": ('rsi', True), "RSI順 (高い順)": ('rsi', False), 
-        "R/R比順 (高い順)": ('risk_reward', False),  # 💡 R/R比ソート追加
+        "R/R比順 (高い順)": ('risk_reward', False),
         "出来高倍率順 (高い順)": ('vol_ratio', False),
         "勝率順 (高い順)": ('win_rate_pct', False), "銘柄コード順": ('code', True),
     }
@@ -1452,42 +1422,27 @@ if st.session_state.analyzed_data:
     
     def format_target_txt(row):
         kabu_price = row['price']; p_half = row['p_half']; p_full = row['p_full']
-        
-        # 1. 青天井（is_aoteng）の場合
         if row.get('is_aoteng'):
             full_pct = ((p_full / kabu_price) - 1) * 100 if kabu_price > 0 and p_full > 0 else 0
             return f'<span style="color:green;font-weight:bold;">青天井追従</span><br>SL:{p_full:,} ({full_pct:+.1f}%)'
         
-        # 2. 表示許可フラグの作成（ここに「ブレイク」を追加）
-        # 修正前: is_bull_or_pro = "順張り" in row['strategy'] or "順ロジ" in row['strategy']
-        # 修正後: ↓
         is_bull_or_pro = "順張り" in row['strategy'] or "順ロジ" in row['strategy'] or "ブレイク" in row['strategy']
         is_bear_or_pro = "逆張り" in row['strategy'] or "逆ロジ" in row['strategy']
-        
         output_lines = []
-        
-        # 3. 順張り・ブレイク系の表示ロジック
         if is_bull_or_pro:
-             # 現在値より目標が高い場合のみ表示（ブレイク時は現在値基準なので表示されるはず）
              if p_half > 0 and p_half > kabu_price:
                  half_pct = ((p_half / kabu_price) - 1) * 100 if kabu_price > 0 else 0
                  output_lines.append(f"半:{p_half:,} ({half_pct:+.1f}%)")
              if p_full > 0 and p_full > kabu_price:
                  full_pct = ((p_full / kabu_price) - 1) * 100 if kabu_price > 0 else 0
                  output_lines.append(f"全:{p_full:,} ({full_pct:+.1f}%)")
-             
-             # エラーハンドリング
              if not output_lines:
                   if row['p_half'] > 0 or row['p_full'] > 0: return "目標超過/無効" 
                   return "-"
-             
-             # 半益がなく全益だけの場合（青天井予備軍など）
              if row['p_half'] == 0:
                  if len(output_lines) == 1 and output_lines[0].startswith("全:"): return f'<span style="color:green;font-weight:bold;">目標追従</span><br>{output_lines[0]}'
-             
              return "<br>".join(output_lines)
 
-        # 4. 逆張り系の表示ロジック
         if is_bear_or_pro:
             if p_half > 0 and p_half > kabu_price:
                  half_pct = ((p_half / kabu_price) - 1) * 100 if kabu_price > 0 else 0
@@ -1498,12 +1453,9 @@ if st.session_state.analyzed_data:
             if output_lines: return f'<span style="color:#0056b3;font-weight:bold;">MA回帰目標</span><br>{"<br>".join(output_lines)}'
             if row['p_half'] > 0 or row['p_full'] > 0: return "MA回帰目標:超過/無効"
             return "MA回帰目標:なし"
-            
         return "-"
-        
     df = df.copy() 
 
-    # --- 1. 表示用ヘルパー関数群 (インデント修正済) ---
     def get_rsi_mark_local(val):
         if val <= 30: return "🔵"
         elif 55 <= val <= 65: return "🟢"
@@ -1511,25 +1463,17 @@ if st.session_state.analyzed_data:
         else: return "⚪"
 
     def format_rsi_atr_combined(row):
-        """RSIとATRを合体させて表示用のHTMLを作る (安全版)"""
-        # get_rsi_mark_local が定義されている前提
         mark = get_rsi_mark_local(row['rsi'])
         rsi_html = f"{mark}{row['rsi']:.1f}"
-        
-        # 💡 row['atr_pct'] ではなく row.get('atr_pct', 0) を使ってエラーを回避
         atr = row.get('atr_smoothed', 0)
         pct = row.get('atr_pct', 0)
-        
         atr_color = "#555" 
-        if pct >= 5.0: atr_color = "#800000" # 濃い赤
-        elif pct >= 3.0: atr_color = "#cc5500" # 濃いオレンジ
-            
+        if pct >= 5.0: atr_color = "#800000" 
+        elif pct >= 3.0: atr_color = "#cc5500" 
         atr_html = f"<br><span style='font-size:10px; color:{atr_color}; font-weight: bold;'>ATR:{atr:,.1f}円<br>({pct:.1f}%)</span>"
-        
         return rsi_html + atr_html
 
     def format_score_disp(row, market_status_label):
-        """スコア（点数）の表示を整える"""
         score = row['score']; diff = row['score_diff']; diff_span = ""
         if "場中" in market_status_label:
             diff_color = '#666' 
@@ -1543,35 +1487,16 @@ if st.session_state.analyzed_data:
         else: return f"{score:.0f}{diff_span}"
 
     def format_price_disp(price_val):
-        """現在値の表示（小数点第1位対応）"""
-        if price_val is None or (isinstance(price_val, float) and math.isnan(price_val)):
-            return "-"
-        if price_val % 1 == 0:
-            return f"{int(price_val):,}"
-        else:
-            return f"{price_val:,.1f}"
+        if price_val is None or (isinstance(price_val, float) and math.isnan(price_val)): return "-"
+        if price_val % 1 == 0: return f"{int(price_val):,}"
+        else: return f"{price_val:,.1f}"
 
-    # --- 2. 各列への適用処理 ---
-
-    # RSI & ATR
     df['rsi_disp'] = df.apply(format_rsi_atr_combined, axis=1)
-    
-    # スコア
     df['score_disp'] = df.apply(lambda row: format_score_disp(row, status_label), axis=1)
-    
-    # 現在値
     df['price_disp'] = df['price'].apply(format_price_disp)
-    
-    # 乖離 (ここも小数点第1位に対応)
     df['diff_disp'] = df.apply(lambda row: f"({row['price'] - row['buy']:+,.1f})" if row['price'] and row['buy'] and (row['price'] - row['buy']) != 0 else "(0)", axis=1)
-    
-    # 想定水準
     df['buy_disp'] = df.apply(lambda row: f"{row['buy']:,.0f}<br>{row['diff_disp']}" if "🚀" not in row['strategy'] else f"<span style='color:#1977d2; font-weight:bold; background-color:#E3F2FD; padding:1px 3px;'>{row['buy']:,.0f}</span><br><span style='font-size:10px;color:#1976d2; font-weight:bold;'>{row['diff_disp']}</span>", axis=1)
-    
-    # 出来高
     df['vol_disp_html'] = df.apply(lambda row: f"<b>{row['vol_ratio']:.1f}倍</b><br>({format_volume(row['avg_volume_5d'])})" if row['vol_ratio'] > 1.5 else f"{row['vol_ratio']:.1f}倍<br>({format_volume(row['avg_volume_5d'])})", axis=1)
-    
-    # その他基本項目
     df['rr_disp'] = df.apply(lambda row: "青天" if row['is_aoteng'] else (f"{row['risk_reward']:.1f}" if row['risk_reward'] >= 0.1 else "-"), axis=1)
     df['dd_sl_disp'] = df.apply(lambda row: f"{row['max_dd_pct']:+.1f}%<br>{row['sl_pct']:+.1f}%", axis=1)
     df['update_disp'] = df['update_count'].apply(lambda x: f'{x}回目' if x > 1 else '')
@@ -1579,19 +1504,14 @@ if st.session_state.analyzed_data:
     df['target_txt'] = df.apply(format_target_txt, axis=1)
     df['bt_cell_content'] = df.apply(lambda row: f"<b>{row['backtest_raw']}</b><br><span style='font-size:11px;'>({row['bt_win_count']}勝{row.get('bt_loss_count', 0)}敗)</span><br><span style='font-size:10px; color:#666;'>(+{row['bt_target_pct']*100:.1f}%抜)</span>" if "エラー" not in row['backtest_raw'] and "機会なし" not in row['backtest_raw'] else row['backtest'], axis=1)
     df['per_pbr_disp'] = df.apply(lambda row: f"{row['per']}<br>{row['pbr']}", axis=1)
-    
-    # Noと更新バッジ
     df['No_val'] = range(1, len(df) + 1) 
     df['No'] = df.apply(lambda row: f"{row['No_val']} <span class='update-badge'>更新済</span>" if row.get('is_updated_in_this_run', False) and row['update_count'] > 1 else f"{row['No_val']}", axis=1)
     
-    # スコアグループ分け
     df_above_75 = df[df['score'] >= 75].copy()
     df_50_to_74 = df[(df['score'] >= 50) & (df['score'] <= 74)].copy()
     df_below_50 = df[df['score'] < 50].copy()
 
-    # --- 3. バッジ定義マトリックス（全機能復活版） ---
     FACTOR_META = {
-        # 重要シグナル
         "新高値ブレイク": {"char": "新", "prio": 10},
         "スクイーズ": {"char": "充", "prio": 20},
         "週足上昇": {"char": "週", "prio": 30},
@@ -1599,23 +1519,17 @@ if st.session_state.analyzed_data:
         "戦略優位性": {"char": "戦", "prio": 40},
         "青天井": {"char": "青", "prio": 50},
         "大型堅調": {"char": "堅", "prio": 55},
-        
-        # リスク・リターン
         "高R/R比": {"char": "Ｒ", "prio": 60},
         "低R/R比": {"char": "損", "prio": 60},
         "低DD率": {"char": "安", "prio": 70},
         "高DDリスク": {"char": "落", "prio": 70},
         "早期回復": {"char": "復", "prio": 80},
         "回復遅延": {"char": "遅", "prio": 80},
-        
-        # テクニカル
         "GC発生": {"char": "Ｇ", "prio": 90},
         "DC発生": {"char": "Ｄ", "prio": 90},
         "出来高急増": {"char": "出", "prio": 100},
         "直近勢い": {"char": "勢", "prio": 110},
         "RSI適正": {"char": "適", "prio": 120},
-        
-        # ペナルティ系
         "市場過熱": {"char": "市", "prio": 130},
         "流動性欠如": {"char": "板", "prio": 140},
         "低ボラ": {"char": "凪", "prio": 150},
@@ -1623,44 +1537,26 @@ if st.session_state.analyzed_data:
     }
 
     def generate_html_table(data_frame, title):
-        """
-        分析結果をHTMLテーブル形式で生成する関数。
-        【修正点】引数を (data_frame, title) の2つに統一し、TypeErrorを解消。
-        """
-        if data_frame.empty:
-            return ""
-        
-        # 1. ヘッダー部分の生成
+        if data_frame.empty: return ""
         header_html = "".join([f'<th style="width:{h[4]}; min-width:{h[3]}; text-align:{h[2]};">{h[1]}</th>' for h in HEADER_MAP])
-        
         rows_html = []
-        
-        # 生データを参照するためのマップ（スコア要因バッジの生成に使用）
         raw_data_map = {d['code']: d for d in st.session_state.analyzed_data}
 
-        # 2. 各行の生成
         for _, row in data_frame.iterrows():
-            # 行全体の背景色を判定
             bg_class = ''
-            if row.get('is_low_liquidity'): 
-                bg_class = 'bg-low-liquidity'
-            elif row.get('is_aoteng'): 
-                bg_class = 'bg-aoteng'
-            elif row.get('score', 0) >= 75: 
-                bg_class = 'bg-triage-high'
+            if row.get('is_low_liquidity'): bg_class = 'bg-low-liquidity'
+            elif row.get('is_aoteng'): bg_class = 'bg-aoteng'
+            elif row.get('score', 0) >= 75: bg_class = 'bg-triage-high'
             
             row_cells = []
             for col_key, _, col_align, _, _ in HEADER_MAP:
                 cell_data = row[col_key]             
-                
-                # --- 企業名列：バッジ挿入ロジック ---
                 if col_key == 'name':
                     badges_html = ""
                     raw_row = raw_data_map.get(row['code'])
                     if raw_row and 'score_factors' in raw_row:
                         factors = raw_row['score_factors']
                         display_candidates = []
-                        
                         for f_key, f_val in factors.items():
                             if f_val == 0: continue
                             if f_key in FACTOR_META:
@@ -1671,34 +1567,21 @@ if st.session_state.analyzed_data:
                                     "val": f_val,
                                     "name": f_key
                                 })
-                        
-                        # 【重要】加点（緑）を左、減点（赤）を右に固めて並べる
                         display_candidates.sort(key=lambda x: (0 if x["val"] > 0 else 1, x["prio"]))
-                        
                         badge_spans = []
                         for b in display_candidates[:6]:
                             css_class = "badge-plus" if b["val"] > 0 else "badge-minus"
                             tooltip = f"{b['name']}: {b['val']:+}点"
                             badge_spans.append(f'<span class="factor-badge {css_class}" title="{tooltip}">{b["char"]}</span>')
-                        
                         if badge_spans:
                             badges_html = f'<div class="badge-container">{"".join(badge_spans)}</div>'
-                    
                     cell_html = f'<td class="{bg_class} td-{col_align}">{cell_data}{badges_html}</td>'
-                
-                # --- アイの所感列：スクロールボックス適用 ---
                 elif col_key == 'comment': 
                     cell_html = f'<td class="{bg_class} td-{col_align}"><div class="comment-scroll-box">{cell_data}</div></td>'
-                
-                # --- その他の列：標準表示 ---
                 else: 
                     cell_html = f'<td class="{bg_class} td-{col_align}">{cell_data}</td>'
-                
                 row_cells.append(cell_html)
-                
             rows_html.append(f'<tr>{"".join(row_cells)}</tr>')
-                
-        # 3. 最終的なHTMLテーブル構造を組み立てて返す
         return f"""
         <h4 style="margin-top: 1.5rem; margin-bottom: 0.5rem;">{title} ({len(data_frame)}件)</h4>
         <div class="table-container">
@@ -1709,7 +1592,7 @@ if st.session_state.analyzed_data:
         </div>
         """
         
-    st.markdown("### 📊 アイ分析結果") 
+    st.markdown("### 📊 システム分析結果") 
     r25 = market_25d_ratio
     ratio_color = "#d32f2f" if r25 >= 125.0 else ("#1976d2" if r25 <= 80.0 else "#4A4A4A")
     st.markdown(f'<p class="big-font"><b>市場環境（25日騰落レシオ）：<span style="color:{ratio_color};">{r25:.2f}%</span></b></p>', unsafe_allow_html=True)
@@ -1719,7 +1602,7 @@ if st.session_state.analyzed_data:
     st.markdown(generate_html_table(df_below_50, "【⚠️ リスク高】50点未満"), unsafe_allow_html=True)
     
     st.markdown("---")
-    st.markdown(f"【アイの独り言】")
+    st.markdown(f"【市場分析サマリー】")
     st.markdown(st.session_state.ai_monologue) 
     
     st.markdown("---")
@@ -1743,3 +1626,22 @@ if st.session_state.analyzed_data:
                         has_minus = True
                 if not has_minus: st.markdown('<p style="color:#666; margin: 0; padding: 0 0 0 15px;">- 該当なし</p>', unsafe_allow_html=True)
                 st.markdown("---")
+
+    # --- 最下部の免責事項 (HTML表示) ---
+    st.markdown("""
+    <br>
+    <div style="
+        border: 1px solid #ffcccc;
+        background-color: #fff5f5;
+        padding: 15px;
+        border-radius: 5px;
+        color: #d32f2f;
+        font-size: 13px;
+        line-height: 1.6;
+    ">
+        <h5 style="margin-top: 0; color: #d32f2f;">【注意事項】</h5>
+        本アプリは研究・検証目的の内部ツールです。<br>
+        特定の銘柄の売買を推奨するものではなく、<br>
+        実際の投資判断や売買に用いることを目的としていません。
+    </div>
+    """, unsafe_allow_html=True)
