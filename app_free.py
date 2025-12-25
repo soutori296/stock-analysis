@@ -978,34 +978,56 @@ def get_stock_data(ticker, current_run_count):
     status, jst_now_local = get_market_status() 
     ticker = str(ticker).strip().upper()
     info = get_stock_info(ticker) 
-    if info.get("price") is not None and info["price"] < 100: return None
+    
+    # 100円未満の低位株はスキップ（高リスク回避）
+    if info.get("price") is not None and info["price"] < 100:
+        st.session_state.error_messages.append(f"分析スキップ (コード:{ticker}): 株価100円未満のため。")
+        return None
 
     try:
+        # 1. 過去データの取得
         csv_url = f"https://stooq.com/q/d/l/?s={ticker}.JP&i=d"
         res = fetch_with_retry(csv_url)
         df = pd.read_csv(io.BytesIO(res.content), parse_dates=True, index_col=0).sort_index()
         
+        # 2. 当日リアルタイムデータの結合
         curr_price = info.get("price")
         if status == "場中(進行中)" and info.get("open") and curr_price:
             today_dt = pd.to_datetime(jst_now_local.strftime("%Y-%m-%d"))
-            new_row = pd.Series({'Open': info['open'], 'High': info['high'], 'Low': info['low'], 'Close': curr_price, 'Volume': info['volume']}, name=today_dt)
+            new_row = pd.Series({
+                'Open': info['open'], 'High': info['high'], 'Low': info['low'], 
+                'Close': curr_price, 'Volume': info['volume']
+            }, name=today_dt)
             if df.index[-1].date() < today_dt.date():
                 df = pd.concat([df, new_row.to_frame().T])
             else:
                 df.loc[df.index[-1]] = new_row
 
+        # 3. 指標計算の準備（出来高・25日線など）
         df['Vol_SMA5'] = df['Volume'].rolling(5).mean()
+        df['SMA25'] = df['Close'].rolling(25).mean()
         avg_vol_5d = df['Vol_SMA5'].iloc[-1] if not pd.isna(df['Vol_SMA5'].iloc[-1]) else 0
         vol_weight = get_volume_weight(jst_now_local, info["cap"])
         v_ratio = info['volume'] / (avg_vol_5d * vol_weight) if vol_weight > 0 and avg_vol_5d > 0 else 1.0
 
+        # 4. 市場環境による減点確定
         market_25d = get_25day_ratio()
         market_deduct = -20 if market_25d >= 125.0 else 0
 
-        # 計算エンジン呼び出し
+        # 5. 【重要】詳細スコアリングエンジンの実行
+        # タプルを正確に受け取る
         raw_score, factors, strategy, buy_target, p_half, p_full, sl_ma, is_aoteng, sl_pct, rsi_val, atr_smoothed, atr_comment, momentum_str = calculate_score_and_logic(df, info, v_ratio, status)
+        
+        # 市場減点を加味した最終スコア
         current_score = max(0, min(100, raw_score + market_deduct))
 
+        # AIコメント用に各損切りラインの具体的な「価格」を確定させる
+        # ATRベースの損切り価格
+        current_atr_sl = max(0, curr_price - max(atr_smoothed * 1.5, curr_price * 0.01))
+        # 25日線（のわずか下）の価格
+        current_ma25 = df['SMA25'].iloc[-1] if not pd.isna(df['SMA25'].iloc[-1]) else 0
+
+        # 6. 差分計算（セッション初診時との比較）
         if ticker not in st.session_state.score_history:
             st.session_state.score_history[ticker] = {'pre_market_score': current_score}
         
@@ -1013,30 +1035,63 @@ def get_stock_data(ticker, current_run_count):
         score_diff = current_score - pre_score
         st.session_state.score_history[ticker]['current_score'] = current_score
 
-        # R/R比
+        # 7. R/R比（リスクリワード）の数値化
         risk_reward_ratio = 0.0
         if buy_target > 0 and sl_ma > 0:
-            risk_value = buy_target - sl_ma
-            if is_aoteng: risk_reward_ratio = 50.0 
+            risk_val = buy_target - sl_ma
+            if is_aoteng:
+                risk_reward_ratio = 50.0 
             else:
                 avg_target = (p_half + p_full) / 2 if p_half > 0 else p_full
-                reward_value = avg_target - buy_target
-                if risk_value > 0 and reward_value > 0: risk_reward_ratio = reward_value / risk_value
+                reward_val = avg_target - buy_target
+                if risk_val > 0 and reward_val > 0:
+                    risk_reward_ratio = reward_val / risk_val
 
+        # 8. バックテストの実行
         bt_str, win_rate_pct, bt_cnt, max_dd_pct, bt_target_pct, bt_win_count, bt_loss_count = run_backtest(df, info["cap"])
 
+        # 9. すべてのデータを辞書にまとめて返却（UIとAIの両方で使用）
         return {
-            "code": ticker, "name": info["name"], "price": curr_price, "cap_val": info["cap"], "cap_disp": fmt_market_cap(info["cap"]),
-            "per": info["per"], "pbr": info["pbr"], "rsi": rsi_val, "rsi_disp": f"{rsi_val:.1f}", 
-            "vol_ratio": v_ratio, "strategy": strategy, "score": current_score, "score_diff": score_diff,
-            "buy": buy_target, "p_half": p_half, "p_full": p_full, "backtest": bt_str, "backtest_raw": bt_str,
-            "max_dd_pct": max_dd_pct, "sl_pct": sl_pct, "sl_ma": sl_ma, "avg_volume_5d": avg_vol_5d,
-            "is_low_liquidity": avg_vol_5d < 1000, "is_aoteng": is_aoteng, "win_rate_pct": win_rate_pct,
-            "bt_trade_count": bt_cnt, "bt_win_count": bt_win_count, "bt_loss_count": bt_loss_count, "bt_target_pct": bt_target_pct,
-            "score_factors": factors, "atr_smoothed": atr_smoothed, "atr_pct": (atr_smoothed/curr_price*100 if curr_price>0 else 0),
-            "atr_comment": atr_comment, "run_count": current_run_count, "risk_reward": risk_reward_ratio,
-            "momentum": momentum_str, "ma25": df['SMA25'].iloc[-1] if 'SMA25' in df.columns else 0 # AIコメント用
+            "code": ticker,
+            "name": info["name"],
+            "price": curr_price,
+            "cap_val": info["cap"],
+            "cap_disp": fmt_market_cap(info["cap"]),
+            "per": info["per"],
+            "pbr": info["pbr"],
+            "rsi": rsi_val,
+            "rsi_disp": f"{rsi_val:.1f}",
+            "vol_ratio": v_ratio,
+            "strategy": strategy,
+            "score": current_score,
+            "score_diff": score_diff,
+            "buy": buy_target,
+            "p_half": p_half,
+            "p_full": p_full,
+            "backtest": bt_str,
+            "backtest_raw": bt_str,
+            "max_dd_pct": max_dd_pct,
+            "sl_pct": sl_pct,
+            "sl_ma": sl_ma,                # 現在の戦略が採用しているロスカット価格
+            "ma25": current_ma25,          # AIがMA25_SLとして参照する価格
+            "atr_sl_price": current_atr_sl, # AIがATR_SLとして参照する価格
+            "avg_volume_5d": avg_vol_5d,
+            "is_low_liquidity": avg_vol_5d < 1000,
+            "is_aoteng": is_aoteng,
+            "win_rate_pct": win_rate_pct,
+            "bt_trade_count": bt_cnt,
+            "bt_win_count": bt_win_count,
+            "bt_loss_count": bt_loss_count,
+            "bt_target_pct": bt_target_pct,
+            "score_factors": factors,
+            "atr_smoothed": atr_smoothed,
+            "atr_pct": (atr_smoothed / curr_price * 100 if curr_price > 0 else 0),
+            "atr_comment": atr_comment,
+            "run_count": current_run_count,
+            "risk_reward": risk_reward_ratio,
+            "momentum": momentum_str
         }
+
     except Exception as e:
         st.session_state.error_messages.append(f"データ処理エラー (コード:{ticker}) 詳細: {e}")
         return None
