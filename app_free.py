@@ -816,11 +816,15 @@ def evaluate_strategy_new(df, info, vol_ratio, high_250d, atr_val, curr_price, m
     return strategy, buy_target, p_half, p_full, sl_ma, is_aoteng, sl_pct
 
 def calculate_score_and_logic(df, info, vol_ratio, status):
+    """
+    データセットに基づいて、戦略判定とスコアリングを行うエンジン
+    【最新版：MDDを廃止し、短期間の急落（ショック）検知を搭載】
+    """
     if len(df) < 80:
         return 50, {}, "様子見", 0, 0, 0, 0, False, 0, 50, 0, "通常レンジ", "0%"
 
     df = df.copy()
-    # --- 指標計算 ---
+    # --- 1. 基本指標計算 ---
     df['SMA5'] = df['Close'].rolling(5).mean()
     df['SMA25'] = df['Close'].rolling(25).mean()
     df['SMA75'] = df['Close'].rolling(75).mean()
@@ -849,47 +853,46 @@ def calculate_score_and_logic(df, info, vol_ratio, status):
     # 損切り用ATRの事前計算
     atr_sl_calc = max(0, curr_price - max(atr_smoothed * 1.5, curr_price * 0.01))
 
-    # --- フラグ判定 ---
+    # --- 2. フラグ判定 ---
+    # ブレイクアウト判定
     is_breakout = False
     if len(df) >= 60:
         h60 = df['High'].rolling(60).max().shift(1).iloc[-1]
         if curr_price > h60: is_breakout = True
 
+    # スクイーズ判定
     is_squeeze = False
     if len(df) >= 120:
         bb_mid = df['Close'].rolling(20).mean()
         bb_width = (4 * df['Close'].rolling(20).std()) / bb_mid
         if bb_width.iloc[-1] <= bb_width.rolling(120).min().iloc[-1] * 1.1: is_squeeze = True
 
-    # --- 戦略判定 ---
-    # まずは基本戦略(5MAベース)を取得
+    # --- 3. 戦略判定 ---
     strategy, buy_target, p_half, p_full, sl_ma, is_aoteng, sl_pct = evaluate_strategy_new(
         df, info, vol_ratio, high_250d, atr_smoothed, curr_price, ma5, ma25, ma75, prev_ma5, rsi_val, atr_sl_calc
     )
 
-    # 🚀 【ここが最重要：ブレイクアウトの上書き】
+    # 🚀 ブレイクアウトの上書き
     if is_breakout and ("順" in strategy or "ロジ" in strategy):
         strategy = "🚀ブレイク"
-        buy_target = curr_price  # 想定価格を「今」にする (乖離を0にする)
-        
-        # ブレイク時は、目標値と損切りも「現在値」から再計算する
+        buy_target = curr_price  # 想定価格を今にして乖離を(0)にする
         if not is_aoteng:
-            category = get_market_cap_category(info["cap"])
-            p_half = int(np.floor(buy_target * (1 + get_target_pct_new(category, True))))
-            p_full = int(np.floor(buy_target * (1 + get_target_pct_new(category, False))))
-            # ブレイクの損切りは、計算したATR_SLか現在値-3%の「浅い方」を採用
+            cat = get_market_cap_category(info["cap"])
+            p_half = int(np.floor(buy_target * (1 + get_target_pct_new(cat, True))))
+            p_full = int(np.floor(buy_target * (1 + get_target_pct_new(cat, False))))
             sl_ma = int(np.floor(max(atr_sl_calc, buy_target * 0.97)))
             sl_pct = ((curr_price / sl_ma) - 1) * 100 if sl_ma > 0 else 0
 
-    # モメンタム
+    # モメンタム（直近5日勝率）
     recent = df['Close'].diff().tail(5)
     up_days = (recent > 0).sum()
     momentum_str = f"{(up_days / 5) * 100:.0f}%"
 
-    # 特殊フラグ
+    # 特殊なMAクロス判定
     is_gc = (ma5 > ma25) and (prev_ma5 <= prev_ma25) and (abs(ma5-ma25)/ma25 > 0.005)
     is_dc = (ma5 < ma25) and (prev_ma5 >= prev_ma25) and (abs(ma5-ma25)/ma25 > 0.005)
     
+    # 週足トレンド判定
     is_weekly_up = True
     try:
         df_w = df.resample('W-FRI').agg({'Close': 'last'})
@@ -898,66 +901,107 @@ def calculate_score_and_logic(df, info, vol_ratio, status):
             is_weekly_up = df_w['Close'].iloc[-1] >= df_w['SMA13'].iloc[-1]
     except: pass
 
-    # DD/リカバリー
-    dd_data = df.tail(250).copy()
+    # ==========================================================================
+    # 📉 【新規】ショック（急落）検知 ＆ リカバリー計算
+    # ==========================================================================
+    # 直近3ヶ月（75日）の動きを詳細にスキャン
+    dd_data = df.tail(75).copy()
+    
+    # A. 衝撃（ショック）の測定
+    dd_data['1d_drop'] = dd_data['Close'].pct_change(1) # 1日の下落率
+    dd_data['3d_drop'] = dd_data['Close'].pct_change(3) # 3日間の合計下落率
+    
+    max_1d_drop = dd_data['1d_drop'].min()
+    max_3d_drop = dd_data['3d_drop'].min()
+    
+    # B. ドローダウン（最大下落幅）とリカバリー日数の算出
     dd_data['Peak'] = dd_data['Close'].cummax()
-    dd_data['DD'] = (dd_data['Close'] / dd_data['Peak']) - 1
-    max_dd_val = dd_data['DD'].min()
-    mdd_day_index = dd_data['DD'].idxmin()
+    dd_data['DD_calc'] = (dd_data['Close'] / dd_data['Peak']) - 1
+    mdd_val = dd_data['DD_calc'].min()
+    mdd_day_index = dd_data['DD_calc'].idxmin()
+    
     recovery_check = dd_data[dd_data.index >= mdd_day_index]
     recovery_days = 999
     for i, (_, row_d) in enumerate(recovery_check.iterrows()):
+        # ピークから5%以内まで戻せば「回復」とみなす
         if row_d['Close'] >= row_d['Peak'] * 0.95: recovery_days = i; break
 
     # ==========================================================================
-    # 🎯 スコアリング
+    # 🎯 スコアリング開始
     # ==========================================================================
     score = 50
     factors = {"基礎点": 50}
     
+    # --- 1. トレンド・戦略・安定性 (Capped at 35) ---
     trend_sum = 0
+    # 週足
     if is_weekly_up: trend_sum += 5; factors["週足上昇"] = 5
     else: score -= 20; factors["週足下落"] = -20
-    
+    # 戦略・ブレイク
     if is_breakout: trend_sum += 15; factors["新高値ブレイク"] = 15
     if is_squeeze: trend_sum += 10; factors["スクイーズ"] = 10
     if "🚀" in strategy: trend_sum += 15; factors["戦略優位性"] = 15
     if is_aoteng and rsi_val < 80 and vol_ratio > 1.5: trend_sum += 15; factors["青天井"] = 15
     
+    # 【大型堅調：堅バッジ】
     is_large_cap = info.get("cap", 0) >= 3000
     if is_large_cap and len(df) >= 25:
-        mdd_25 = ((df['Close'].tail(25) / df['Close'].tail(25).cummax()) - 1).min()
+        recent_25 = df.tail(25)
+        mdd_25 = ((recent_25['Close'] / recent_25['Close'].cummax()) - 1).min()
         if mdd_25 > -0.03: trend_sum += 10; factors["大型堅調"] = 10
-        elif (df['Close'].tail(25) >= df['SMA25'].tail(25)).all(): trend_sum += 5; factors["大型堅調"] = 5
+        elif (recent_25['Close'] >= recent_25['SMA25']).all(): trend_sum += 5; factors["大型堅調"] = 5
     
     score += min(trend_sum, 35)
 
+    # --- 2. リスクリワード (R/R) ---
     if buy_target > 0 and sl_ma > 0 and not is_aoteng:
+        avg_target = (p_half + p_full) / 2 if p_half > 0 else p_full
         risk = buy_target - sl_ma
-        reward = ((p_half + p_full) / 2 if p_half > 0 else p_full) - buy_target
+        reward = avg_target - buy_target
         if risk > 0 and reward > 0:
             rr = reward / risk
             if rr >= 2.0: score += 20; factors["高R/R比"] = 20
             elif rr < 1.0: score -= 25; factors["低R/R比"] = -25
 
-    dd_abs = abs(max_dd_val * 100)
-    if dd_abs < 1.0: score += 5; factors["低DD率"] = 5
-    elif dd_abs > 10.0: score -= 15; factors["高DDリスク"] = -15 
+    # --- 3. ショック（急落）リスク判定 ---
+    # ゆっくりな下落は減点せず、短期間の衝撃のみをペナルティ対象にする
+    is_plunge = False
+    if is_large_cap:
+        # 大型：1日4%超 または 3日8%超の下げを「急落」と定義
+        if max_1d_drop <= -0.04 or max_3d_drop <= -0.08: is_plunge = True
+    else:
+        # 中小型：1日7%超 または 3日12%超の下げを「急落」と定義
+        if max_1d_drop <= -0.07 or max_3d_drop <= -0.12: is_plunge = True
+
+    if is_plunge:
+        score -= 15
+        factors["高DDリスク"] = -15 # 記号[落]として表示
+    elif abs(mdd_val * 100) < 1.0:
+        # 3ヶ月間、1%も下げなかった超安定銘柄へのボーナス
+        score += 5; factors["低DD率"] = 5
     
+    # 回復速度評価
     if recovery_days <= 20: score += 5; factors["早期回復"] = 5
 
+    # --- 4. 市場・環境リスク ---
+    # 市場全体が過熱している場合の警告（一律マイナス）
     if get_25day_ratio() >= 125.0:
         score -= 10; factors["市場過熱"] = -10
 
+    # --- 5. テクニカル・出来高・モメンタム ---
     if is_gc: score += 5; factors["GC発生"] = 5
     elif is_dc: score -= 10; factors["DC発生"] = -10
+    
     if 55 <= rsi_val <= 65: score += 5; factors["RSI適正"] = 5
     if vol_ratio > 1.5: score += 10; factors["出来高急増"] = 10
-    if last['Vol_SMA5'] < 1000: score -= 30; factors["流動性欠如"] = -30
+    if up_days >= 4: score += 5; factors["直近勢い"] = 5
     
+    # 流動性とボラティリティの最低条件
+    if last['Vol_SMA5'] < 1000: score -= 30; factors["流動性欠如"] = -30
     atr_p = (atr_smoothed / curr_price) * 100
     if atr_p < 0.5: score -= 10; factors["低ボラ"] = -10
 
+    # --- 6. 最終的なATRコメントと戻り値の整理 ---
     atr_comment = "ボラティリティが危険水域です。" if atr_p >= 5.0 else ("値動きが荒くなっています。" if atr_p >= 3.0 else "通常レンジ内です。")
     if is_squeeze: atr_comment += " ⚡スクイーズ発生中。"
 
