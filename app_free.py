@@ -208,8 +208,10 @@ def toggle_continuous_run():
          st.session_state.wait_start_time = None
 
 # --- サイドバー (UIのコア：Ver.2.1 最終統合版) ---
+# --- [1. サイドバー・プロトコル] ---
+# --- [1. サイドバー・プロトコル：常用版（アイさん）] ---
 with st.sidebar:
-    # 1. 法的免責バナー（極小サイズで常駐）
+    # A. 法的免責バナー（極小サイズ・常駐型）
     st.markdown("""
         <div style="border: 1px solid #d1d5db; padding: 4px 8px; border-radius: 4px; background-color: #ffffff; margin-bottom: 12px; line-height: 1.1;">
             <div style="color: #dc2626; font-size: 10px; font-weight: 900; text-align: center;">
@@ -221,16 +223,18 @@ with st.sidebar:
         </div>
     """, unsafe_allow_html=True)
 
-    # 2. 認証セクション
+    # B. 認証セクション（Chromeの2重記憶・自動入力に対応）
     if not st.session_state.authenticated:
-        st.header("🔑 認証")
+        st.header("🔑 アイの認証")
         with st.form("login_form"):
-            # ラベルを「認証パスワード」に統一
-            user_password = st.text_input("認証パスワード", type="password", key='password_field')
+            # Chromeに「IDとパスワードのセット」として正しく認識させるための構成
+            st.text_input("User ID", value="Ai-san_User", disabled=True, key='browser_hint_id')
+            user_password = st.text_input("認証パスワード", type="password", key='system_auth_credential')
             
-            has_secret_api = "GEMINI_API_KEY" in st.secrets
-            api_placeholder = "secrets設定済なら空欄でOK" if has_secret_api else "Gemini APIキーを入力"
-            input_api_key = st.text_input("Gemini API Key (オプション)", type="password", placeholder=api_placeholder, key='login_api_key_input')
+            # APIキーも同時にセットしてChromeに一括記憶させる
+            api_has_secret = "GEMINI_API_KEY" in st.secrets
+            api_placeholder = "secrets設定済なら空欄でOK" if api_has_secret else "Gemini APIキーを入力"
+            input_api_key = st.text_input("Gemini API Key", type="password", placeholder=api_placeholder, key='initial_api_token')
             
             submitted = st.form_submit_button("ログイン", use_container_width=True)
             if submitted:
@@ -238,62 +242,61 @@ with st.sidebar:
                     st.session_state.authenticated = True
                     if input_api_key:
                         st.session_state.gemini_api_key_input = input_api_key
-                    st.success("認証成功")
-                    time.sleep(0.5) 
-                    st.rerun() 
+                    st.success("認証成功！")
+                    time.sleep(0.5)
+                    st.rerun()
                 else:
-                    st.error("パスワードが正しくありません。")
-        st.markdown("---") 
-        
-    # 3. 認証成功後の操作パネル
+                    st.error("パスワードが異なります。")
+        st.stop() # 認証されるまでここで停止
+
+    # C. 認証成功後の制御パネル
     api_key = None
     if st.session_state.authenticated:
-        # --- システム接続ステータス (極小表示) ---
+        # システム接続状態表示（極小バッジ）
         if IS_LOCAL_SKIP_AUTH:
             st.markdown('<div class="slim-status status-info">LOCAL MODE: ACTIVE</div>', unsafe_allow_html=True)
         else:
-            st.markdown('<div class="slim-status status-ok">SYSTEM AUTHENTICATED</div>', unsafe_allow_html=True)
+            st.markdown('<div class="slim-status status-ok">USER AUTHENTICATED</div>', unsafe_allow_html=True)
              
-        # --- API Key 厳密判定 ＆ 誘導ガイド ---
+        # --- API Key 判定ロジック（厳密判定＆手動入力対応版） ---
         secret_key_val = st.secrets.get("GEMINI_API_KEY")
+        manual_key_val = st.session_state.get('gemini_api_key_input')
         
         if secret_key_val and str(secret_key_val).strip() != "":
             # パターン1: secrets.toml に有効な値がある場合
             st.markdown('<div class="slim-status status-ok">API KEY: ✅ 設定済み (secrets.toml)</div>', unsafe_allow_html=True)
             api_key = secret_key_val
             
-        elif st.session_state.get('gemini_api_key_input') and st.session_state.gemini_api_key_input.strip() != "":
+        elif manual_key_val and str(manual_key_val).strip() != "":
             # パターン2: 画面から一時的に手動入力した場合
             st.markdown('<div class="slim-status status-ok">API KEY: 🟢 一時接続中 (手動入力)</div>', unsafe_allow_html=True)
             st.markdown('<div style="font-size:9px; color:#64748b; margin-bottom:10px;">💡 恒久的に設定するには .streamlit/secrets.toml への記述を推奨します。</div>', unsafe_allow_html=True)
-            api_key = st.session_state.gemini_api_key_input
+            api_key = manual_key_val
             
         else:
             # パターン3: 未設定の場合（警告とガイドを表示）
             st.markdown('<div class="slim-status" style="border-left-color: #f59e0b; background-color: #fffbeb; color: #92400e;">API KEY: ❌ 未設定</div>', unsafe_allow_html=True)
             st.markdown("""
                 <div style="font-size: 10px; color: #92400e; background: #fffbeb; padding: 10px; border-radius: 4px; border: 1px solid #fde68a; margin-bottom: 12px; line-height: 1.4;">
-                    <strong>🔑 設定ガイド</strong><br>
-                    APIキーが読み込めていません。以下の手順で設定してください：<br><br>
-                    1. <b>.streamlit/secrets.toml</b> を作成<br>
-                    2. 以下の1行を記述（""の中にキーを貼る）
+                    <strong>🔑 アイからの設定ガイド</strong><br>
+                    APIキーが読み込めていません。継続利用には以下のファイルを作成し、キーを記述してくださいね：<br>
                     <code style="background:#fef3c7; padding:2px; display:block; margin:4px 0; border-radius:2px; font-family:monospace; font-size:9px;">
-                    GEMINI_API_KEY = "あなたのAPIキー"
+                    # .streamlit/secrets.toml<br>
+                    GEMINI_API_KEY = "あなたのキー"
                     </code>
                 </div>
             """, unsafe_allow_html=True)
             
             # 手動入力救済フォーム
-            api_key_input_retry = st.text_input("一時的にKeyを入力して使用", type="password", key='retry_key_input_field')
+            api_key_input_retry = st.text_input("一時的にKeyを入力", type="password", key='retry_key_input_field')
             if api_key_input_retry:
                 st.session_state.gemini_api_key_input = api_key_input_retry
                 st.rerun()
             api_key = None
 
-        # --- AIモデル・ソート設定 ---
+        # --- モデル・ソート・表示設定 ---
         model_options = ["gemma-3-12b-it", "gemini-2.5-flash"]
         st.session_state.selected_model_name = st.selectbox("使用AIモデルを選択", options=model_options, index=0)
-        st.markdown("---") 
         
         sort_options = ["スコア順 (高い順)", "更新回数順", "時価総額順 (高い順)", "RSI順 (低い順)", "RSI順 (高い順)", "R/R比順 (高い順)", "出来高倍率順 (高い順)", "勝率順 (高い順)", "銘柄コード順"]
         st.session_state.sort_option_key = st.selectbox("📊 結果のソート順", options=sort_options, index=0)
@@ -306,7 +309,7 @@ with st.sidebar:
         st.session_state.ui_filter_min_liquid_man = col_f3.number_input("出来高(万)", 0.0, 500.0, st.session_state.ui_filter_min_liquid_man, 0.5)
         st.session_state.ui_filter_liquid_on = col_f4.checkbox("適用", value=st.session_state.ui_filter_liquid_on, key='f_liquid_check')
 
-        # --- 銘柄入力エリア ---
+        # --- 銘柄コード入力エリア ---
         tickers_input = st.text_area(f"銘柄コード (上限{MAX_TICKERS}銘柄/回)", value=st.session_state.tickers_input_value, placeholder="7203\n8306", height=150)
         if tickers_input != st.session_state.tickers_input_value:
             st.session_state.tickers_input_value = tickers_input
@@ -320,7 +323,7 @@ with st.sidebar:
         is_start_disabled = st.session_state.clear_confirmed or st.session_state.is_running_continuous or api_key is None
         analyze_start_clicked = col_start.button("▶️分析", use_container_width=True, disabled=is_start_disabled, key='analyze_start_key') 
 
-        # --- データ管理 ---
+        # --- データ管理ボタン ---
         col_clear, col_reload = st.columns(2)
         is_btn_disabled = st.session_state.is_running_continuous
         clear_button_clicked = col_clear.button("🗑️消去", on_click=clear_all_data_confirm, use_container_width=True, disabled=is_btn_disabled)
