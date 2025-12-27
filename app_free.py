@@ -1279,25 +1279,27 @@ if st.session_state.analyzed_data:
                     raw_row = raw_data_map.get(row['code'])
                     if raw_row and 'score_factors' in raw_row:
                         factors = raw_row['score_factors']
-                        pos_candidates = [] # プラス要因用リスト
-                        neg_candidates = [] # マイナス要因用リスト
+                        pos_candidates = [] # プラス要因用
+                        neg_candidates = [] # マイナス要因用
                         
                         for f_key, f_val in factors.items():
-                            if f_val == 0: continue
+                            if f_val == 0 or f_key == "基礎点": continue
                             if f_key in FACTOR_META:
                                 meta = FACTOR_META[f_key]
-                                item = {"char": meta["char"], "prio": meta["prio"], "val": f_val, "name": f_key}
+                                item = {"char": meta["char"], "val": f_val, "name": f_key}
                                 if f_val > 0:
                                     pos_candidates.append(item)
                                 else:
                                     neg_candidates.append(item)
                         
-                        # それぞれ優先度(prio)順に並べ替え
-                        pos_candidates.sort(key=lambda x: x["prio"])
-                        neg_candidates.sort(key=lambda x: x["prio"])
+                        # --- 並び替えロジック ---
+                        # プラスは影響度（値）が高い順（例: +20, +15, +5）
+                        pos_candidates.sort(key=lambda x: x["val"], reverse=True)
+                        # マイナスは影響度（絶対値）が高い順（例: -30, -20, -10）
+                        neg_candidates.sort(key=lambda x: x["val"]) 
                         
-                        # ▼▼▼【修正】プラス最大8個、マイナス最大8個まで取得して結合 ▼▼▼
-                        final_badges = pos_candidates[:8] + neg_candidates[:8]
+                        # 合体（左にプラス、右にマイナス）
+                        final_badges = pos_candidates + neg_candidates
                         
                         badge_spans = []
                         for b in final_badges:
