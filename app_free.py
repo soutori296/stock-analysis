@@ -260,10 +260,9 @@ with st.sidebar:
             api_key = None
 
         # AIモデル・ソート・表示設定
-        st.markdown("---")
         st.session_state.selected_model_name = st.selectbox("使用AIモデル", options=["gemma-3-12b-it", "gemini-2.5-flash"], index=0)
-        st.session_state.sort_option_key = st.selectbox("📊 結果のソート順", options=["スコア順 (高い順)", "更新回数順", "時価総額順", "RSI順", "勝率順", "銘柄コード順"], index=0)
-        
+        st.markdown("---")   
+        st.session_state.sort_option_key = st.selectbox("📊 結果のソート順", options=["スコア順 (高い順)", "更新回数順", "時価総額順", "RSI順", "勝率順", "銘柄コード順"], index=0)  
         st.markdown("##### 🔍 表示フィルター") 
         col_f1, col_f2 = st.columns([0.6, 0.4]); col_f3, col_f4 = st.columns([0.6, 0.4])
         st.session_state.ui_filter_min_score = col_f1.number_input("n点以上", 0, 100, st.session_state.ui_filter_min_score, 5)
