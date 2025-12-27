@@ -217,27 +217,23 @@ with st.sidebar:
 
     # B. 認証セクション (ID=APIキー平文 ＋ パスワード伏せ字)
     if not st.session_state.authenticated:
-        st.header("🔑 SYSTEM ACCESS")
-        with st.form("login_form_persistent"):
-            st.info("User ID欄に『Gemini APIキー』を貼り付けてください。")
+        st.header("🔑 LOGIN")
+        with st.form("login_form"):
+            # 上段：APIキー（ブラウザはこれを「ユーザー名」として記憶します）
+            api_input = st.text_input("Gemini API Key (User ID)")
             
-            # Chromeが「ユーザー名」として覚え、かつ入力時に隠さない(平文)設定
-            user_id_as_api = st.text_input("User ID (Gemini API Key)", key='auth_user_id_as_api_visible')
+            # 下段：パスワード（伏せ字）
+            pwd_input = st.text_input("認証パスワード", type="password")
             
-            # パスワードのみ隠す
-            user_password = st.text_input("認証パスワード", type="password", key='auth_system_password_hidden')
-            
-            submitted = st.form_submit_button("ログイン ＆ 情報を保存", use_container_width=True)
-            if submitted:
-                if user_password and hash_password(user_password) == SECRET_HASH:
+            if st.form_submit_button("ログイン ＆ 保存"):
+                if hash_password(pwd_input) == SECRET_HASH:
                     st.session_state.authenticated = True
-                    if user_id_as_api:
-                        st.session_state.gemini_api_key_input = user_id_as_api
+                    st.session_state.gemini_api_key_input = api_input
                     st.success("認証成功")
                     st.rerun()
                 else:
-                    st.error("認証失敗")
-        st.stop()
+                    st.error("パスワードが違います")
+        st.stop() # 認証されるまでここで止める
 
     # C. 認証成功後の制御パネル
     api_key = None
