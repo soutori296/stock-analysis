@@ -94,17 +94,15 @@ status_color = "#d32f2f" if "進行中" in status_label else "#1976d2"
 
 # --- 出来高調整ウェイト ---
 WEIGHT_MODELS = {
-    "large": { (9*60): 0.0, (9*60+30): 0.25, (10*60): 0.3, (11*60+30): 0.5, (12*60+30): 0.52, (13*60): 0.6, (15*60): 0.7, (15*60+25): 0.85, (15*60+30): 1.0 },
-    "mid": { (9*60): 0.0, (9*60+30): 0.3, (10*60): 0.35, (11*60+30): 0.55, (12*60+30): 0.57, (13*60): 0.67, (15*60): 0.75, (15*60+25): 0.9, (15*60+30): 1.0 },
-    "small": { (9*60): 0.0, (9*60+30): 0.4, (10*60): 0.45, (11*60+30): 0.65, (12*60+30): 0.67, (13*60): 0.75, (15*60): 0.88, (15*60+25): 0.95, (15*60+30): 1.0 }
+    "large": { (9*60): 0.00, (9*60+30): 0.25, (10*60): 0.30, (11*60+30): 0.50, (12*60+30): 0.525, (13*60): 0.60, (15*60): 0.70, (15*60+25): 0.85, (15*60+30): 1.00 },
+    "mid": { (9*60): 0.00, (9*60+30): 0.30, (10*60): 0.35, (11*60+30): 0.55, (12*60+30): 0.575, (13*60): 0.675, (15*60): 0.75, (15*60+25): 0.90, (15*60+30): 1.00 },
+    "small": { (9*60): 0.00, (9*60+30): 0.40, (10*60): 0.45, (11*60+30): 0.65, (12*60+30): 0.675, (13*60): 0.75, (15*60): 0.88, (15*60+25): 0.95, (15*60+30): 1.00 }
 }
 
 def get_volume_weight(current_dt, market_cap):
     status, _ = get_market_status()
-    # 休日・引け後・場前は基準値 1.0 を使用
     if "休日" in status or "引け後" in status or current_dt.hour < 9: return 1.0
     current_minutes = current_dt.hour * 60 + current_dt.minute
-    # 15:00以降も 1.0
     if current_minutes > (15 * 60): return 1.0
     if current_minutes < (9 * 60): return 0.01
 
@@ -226,25 +224,32 @@ with st.sidebar:
     # B. 認証セクション（3点セット一括記憶対応）
     if not st.session_state.authenticated:
         st.header("🔑 SYSTEM ACCESS")
-        with st.form("login_form"):
-            st.info("【重要】User IDの欄に『Gemini APIキー』を貼り付けてください。")
+        with st.form("login_form_bundle"):
+            st.markdown('<p style="font-size:11px; color:#64748b; margin:0;">Chromeに保存させるには3項目全て入力してログインしてください。</p>', unsafe_allow_html=True)
             
-            # Chromeに「ユーザー名」としてAPIキーを覚えさせる
-            user_id_as_api = st.text_input("User ID (ここにGemini APIキーを入力)", key='auth_user_id')
+            # 1. ユーザーID（Chromeが「識別名」として記憶します）
+            user_id = st.text_input("User ID", value="admin", key='auth_user_id')
             
-            # パスワード
-            user_password = st.text_input("認証パスワード", type="password", key='auth_password')
+            # 2. 認証パスワード
+            user_password = st.text_input("認証パスワード", type="password", key='auth_system_password')
             
-            if st.form_submit_button("ログイン ＆ 情報を保存"):
+            # 3. Gemini APIキー（これもパスワード型にすることでセットで記憶されます）
+            api_has_secret = "GEMINI_API_KEY" in st.secrets
+            api_placeholder = "secrets設定済なら空欄OK" if api_has_secret else "Gemini APIキーを入力"
+            input_api_key = st.text_input("Gemini API Key", type="password", placeholder=api_placeholder, key='auth_gemini_token')
+            
+            submitted = st.form_submit_button("ログイン ＆ 保存", use_container_width=True)
+            if submitted:
                 if user_password and hash_password(user_password) == SECRET_HASH:
                     st.session_state.authenticated = True
-                    # 入力されたIDをAPIキーとしてセッションに格納
-                    st.session_state.gemini_api_key_input = user_id_as_api
+                    if input_api_key:
+                        st.session_state.gemini_api_key_input = input_api_key
                     st.success("認証成功")
-                    st.rerun()
+                    time.sleep(0.5) 
+                    st.rerun() 
                 else:
-                    st.error("パスワードが不一致です")
-        st.stop()
+                    st.error("認証失敗：パスワードが不一致です")
+        st.stop() # 認証されるまでここで停止
 
     # C. 認証成功後の制御パネル
     api_key = None
@@ -304,7 +309,7 @@ with st.sidebar:
         col_f3, col_f4 = st.columns([0.6, 0.4])
         st.session_state.ui_filter_min_score = col_f1.number_input("n点以上", 0, 100, st.session_state.ui_filter_min_score, 5)
         st.session_state.ui_filter_score_on = col_f2.checkbox("適用", value=st.session_state.ui_filter_score_on, key='f_score_check')
-        st.session_state.ui_filter_min_liquid_man = col_f3.number_input("出来高(万)", 0.0, 500.0, st.session_state.ui_filter_min_liquid_man, 0.5)
+        st.session_state.ui_filter_min_liquid_man = col_f3.number_input("出来高(万)", 0.0, 500.0, st.session_state.ui_filter_min_liquid_man, 0.5, format="%.1f")
         st.session_state.ui_filter_liquid_on = col_f4.checkbox("適用", value=st.session_state.ui_filter_liquid_on, key='f_liquid_check')
 
         # --- 銘柄コード入力エリア ---
