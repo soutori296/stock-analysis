@@ -215,17 +215,17 @@ with st.sidebar:
         </div>
     """, unsafe_allow_html=True)
 
-    # B. 認証セクション (Chromeが APIキーとパスワードを1対1で覚える形式)
+    # B. 認証セクション (ID=APIキー平文 ＋ パスワード伏せ字)
     if not st.session_state.authenticated:
         st.header("🔑 SYSTEM ACCESS")
-        with st.form("login_form_bundle"):
-            st.info("ブラウザに記憶させるため、User ID欄に『Gemini APIキー』を入力してください。")
+        with st.form("login_form_persistent"):
+            st.info("User ID欄に『Gemini APIキー』を貼り付けてください。")
             
-            # Chromeに「ユーザー名」としてAPIキーを覚えさせる
-            user_id_as_api = st.text_input("User ID (Gemini API Key)", key='auth_user_id_api')
+            # Chromeが「ユーザー名」として覚え、かつ入力時に隠さない(平文)設定
+            user_id_as_api = st.text_input("User ID (Gemini API Key)", key='auth_user_id_as_api_visible')
             
-            # 認証パスワード
-            user_password = st.text_input("認証パスワード", type="password", key='auth_system_password')
+            # パスワードのみ隠す
+            user_password = st.text_input("認証パスワード", type="password", key='auth_system_password_hidden')
             
             submitted = st.form_submit_button("ログイン ＆ 情報を保存", use_container_width=True)
             if submitted:
@@ -236,35 +236,28 @@ with st.sidebar:
                     st.success("認証成功")
                     st.rerun()
                 else:
-                    st.error("パスワードが不一致です")
-        st.stop() # 認証されるまで以下を表示しない
+                    st.error("認証失敗")
+        st.stop()
 
     # C. 認証成功後の制御パネル
     api_key = None
     if st.session_state.authenticated:
-        # システム接続ステータス表示
         st.markdown('<div class="slim-status status-ok">SYSTEM AUTHENTICATED</div>', unsafe_allow_html=True)
              
-        # API Key 判定ロジック (Secrets優先 -> 手動入力)
+        # 判定ロジック
         secret_key_val = st.secrets.get("GEMINI_API_KEY")
         manual_key_val = st.session_state.get('gemini_api_key_input')
         
         if secret_key_val and str(secret_key_val).strip() != "":
-            st.markdown('<div class="slim-status status-ok">API KEY: ✅ 設定済み (secrets.toml)</div>', unsafe_allow_html=True)
+            st.markdown('<div class="slim-status status-ok">API KEY: ✅ LOADED (secrets.toml)</div>', unsafe_allow_html=True)
             api_key = secret_key_val
         elif manual_key_val and str(manual_key_val).strip() != "":
-            st.markdown('<div class="slim-status status-ok">API KEY: 🟢 接続中 (MEMORIZED)</div>', unsafe_allow_html=True)
+            st.markdown('<div class="slim-status status-ok">API KEY: 🟢 CONNECTED (MEMORIZED)</div>', unsafe_allow_html=True)
             api_key = manual_key_val
         else:
-            st.markdown('<div class="slim-status status-warn">API KEY: ❌ 未設定</div>', unsafe_allow_html=True)
-            st.markdown("""
-                <div style="font-size: 9px; color: #92400e; background: #fffbeb; padding: 8px; border: 1px solid #fde68a; margin-bottom: 10px; line-height: 1.3;">
-                    <strong>🔑 設定ガイド</strong><br>
-                    secrets.tomlに記述するか、再ログインして入力してください：<br>
-                    <code>GEMINI_API_KEY = "あなたのキー"</code>
-                </div>
-            """, unsafe_allow_html=True)
-            retry_key = st.text_input("一時的にAPIキーを入力", type="password", key='retry_token_storage')
+            # 救済用入力（ここも平文で表示）
+            st.warning("⚠️ API KEY MISSING")
+            retry_key = st.text_input("Gemini API Keyを再入力", key='retry_token_storage_visible')
             if retry_key:
                 st.session_state.gemini_api_key_input = retry_key
                 st.rerun()
