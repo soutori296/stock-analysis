@@ -145,6 +145,19 @@ st.markdown(f"""
     .factor-badge {{ display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; font-size: 12px; font-weight: bold; border-radius: 4px; border: 1.5px solid; line-height: 1; white-space: nowrap; flex-shrink: 0; text-align: center; box-sizing: border-box; cursor: default !important; }}
     .badge-plus {{ color: #004d00; background-color: #ccffcc; border-color: #008000; }}
     .badge-minus {{ color: #800000; background-color: #ffcccc; border-color: #cc0000; }}
+    .slim-status {{
+        font-size: 11px !important;    /* さらに小さく */
+        padding: 1px 8px !important;   /* 上下を限界まで細く */
+        margin-bottom: 3px !important; /* ボックス間の隙間を詰める */
+        border-radius: 3px;
+        border-left: 2px solid #ccc;
+        background-color: #f8fafc;
+        color: #64748b;
+        line-height: 1.2;
+        font-weight: 500;
+    }}
+    .status-ok {{ border-left-color: #10b981; background-color: #f0fdf4; color: #15803d; }}
+    .status-info {{ border-left-color: #3b82f6; background-color: #eff6ff; color: #1d4ed8; }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -194,88 +207,133 @@ def toggle_continuous_run():
          st.session_state.is_running_continuous = False
          st.session_state.wait_start_time = None
 
-# --- サイドバー (UIのコア) ---
+# --- サイドバー (UIのコア：Ver.2.1 最終統合版) ---
 with st.sidebar:
+    # 1. 法的免責バナー（極小サイズで常駐）
+    st.markdown("""
+        <div style="border: 1px solid #d1d5db; padding: 4px 8px; border-radius: 4px; background-color: #ffffff; margin-bottom: 12px; line-height: 1.1;">
+            <div style="color: #dc2626; font-size: 10px; font-weight: 900; text-align: center;">
+                【検証用：実売買禁止】
+            </div>
+            <div style="color: #64748b; font-size: 9px; text-align: center; margin-top: 2px;">
+                投資助言または売買推奨ではありません。
+            </div>
+        </div>
+    """, unsafe_allow_html=True)
+
+    # 2. 認証セクション
     if not st.session_state.authenticated:
         st.header("🔑 認証")
         with st.form("login_form"):
-            user_password = st.text_input("ユーザー名", type="default", key='username_field')
-            has_secret_api = False
-            try:
-                if "GEMINI_API_KEY" in st.secrets: has_secret_api = True
-            except: pass
-            api_placeholder = "secrets設定済なら空欄でOK" if has_secret_api else "APIキー (パスワードとして保存)"
-            input_api_key = st.text_input("Key", type="password", placeholder=api_placeholder, key='password_field')
+            # ラベルを「認証パスワード」に統一
+            user_password = st.text_input("認証パスワード", type="password", key='password_field')
+            
+            has_secret_api = "GEMINI_API_KEY" in st.secrets
+            api_placeholder = "secrets設定済なら空欄でOK" if has_secret_api else "Gemini APIキーを入力"
+            input_api_key = st.text_input("Gemini API Key (オプション)", type="password", placeholder=api_placeholder, key='login_api_key_input')
+            
             submitted = st.form_submit_button("ログイン", use_container_width=True)
             if submitted:
                 if user_password and hash_password(user_password) == SECRET_HASH:
                     st.session_state.authenticated = True
                     if input_api_key:
                         st.session_state.gemini_api_key_input = input_api_key
-                    st.success("認証成功！")
-                    time.sleep(1.0) 
+                    st.success("認証成功")
+                    time.sleep(0.5) 
                     st.rerun() 
                 else:
-                    st.error("パスワードが異なります。")
+                    st.error("パスワードが正しくありません。")
         st.markdown("---") 
         
+    # 3. 認証成功後の操作パネル
     api_key = None
     if st.session_state.authenticated:
-        if IS_LOCAL_SKIP_AUTH: st.info("✅ ローカルモード")
-        else: st.success("✅ ユーザー認証済")
-             
-        if "GEMINI_API_KEY" in st.secrets:
-            api_key = st.secrets["GEMINI_API_KEY"]
-            st.info("🔑 Key: OK")
+        # --- システム接続ステータス (極小表示) ---
+        if IS_LOCAL_SKIP_AUTH:
+            st.markdown('<div class="slim-status status-info">LOCAL MODE: ACTIVE</div>', unsafe_allow_html=True)
         else:
-            default_val = st.session_state.get('gemini_api_key_input', "")
-            api_key = st.text_input("Key", value=default_val, type="password", key='gemini_api_key_input_field')
-            if api_key: st.session_state.gemini_api_key_input = api_key
+            st.markdown('<div class="slim-status status-ok">SYSTEM AUTHENTICATED</div>', unsafe_allow_html=True)
+             
+        # --- API Key 厳密判定 ＆ 誘導ガイド ---
+        secret_key_val = st.secrets.get("GEMINI_API_KEY")
+        
+        if secret_key_val and str(secret_key_val).strip() != "":
+            # パターン1: secrets.toml に有効な値がある場合
+            st.markdown('<div class="slim-status status-ok">API KEY: ✅ 設定済み (secrets.toml)</div>', unsafe_allow_html=True)
+            api_key = secret_key_val
+            
+        elif st.session_state.get('gemini_api_key_input') and st.session_state.gemini_api_key_input.strip() != "":
+            # パターン2: 画面から一時的に手動入力した場合
+            st.markdown('<div class="slim-status status-ok">API KEY: 🟢 一時接続中 (手動入力)</div>', unsafe_allow_html=True)
+            st.markdown('<div style="font-size:9px; color:#64748b; margin-bottom:10px;">💡 恒久的に設定するには .streamlit/secrets.toml への記述を推奨します。</div>', unsafe_allow_html=True)
+            api_key = st.session_state.gemini_api_key_input
+            
+        else:
+            # パターン3: 未設定の場合（警告とガイドを表示）
+            st.markdown('<div class="slim-status" style="border-left-color: #f59e0b; background-color: #fffbeb; color: #92400e;">API KEY: ❌ 未設定</div>', unsafe_allow_html=True)
+            st.markdown("""
+                <div style="font-size: 10px; color: #92400e; background: #fffbeb; padding: 10px; border-radius: 4px; border: 1px solid #fde68a; margin-bottom: 12px; line-height: 1.4;">
+                    <strong>🔑 設定ガイド</strong><br>
+                    APIキーが読み込めていません。以下の手順で設定してください：<br><br>
+                    1. <b>.streamlit/secrets.toml</b> を作成<br>
+                    2. 以下の1行を記述（""の中にキーを貼る）
+                    <code style="background:#fef3c7; padding:2px; display:block; margin:4px 0; border-radius:2px; font-family:monospace; font-size:9px;">
+                    GEMINI_API_KEY = "あなたのAPIキー"
+                    </code>
+                </div>
+            """, unsafe_allow_html=True)
+            
+            # 手動入力救済フォーム
+            api_key_input_retry = st.text_input("一時的にKeyを入力して使用", type="password", key='retry_key_input_field')
+            if api_key_input_retry:
+                st.session_state.gemini_api_key_input = api_key_input_retry
+                st.rerun()
+            api_key = None
 
+        # --- AIモデル・ソート設定 ---
         model_options = ["gemma-3-12b-it", "gemini-2.5-flash"]
-        st.session_state.selected_model_name = st.selectbox("使用AIモデルを選択", options=model_options, index=model_options.index(st.session_state.selected_model_name) if st.session_state.selected_model_name in model_options else 0, key='model_select_key')
-        st.markdown("---")
+        st.session_state.selected_model_name = st.selectbox("使用AIモデルを選択", options=model_options, index=0)
+        st.markdown("---") 
         
         sort_options = ["スコア順 (高い順)", "更新回数順", "時価総額順 (高い順)", "RSI順 (低い順)", "RSI順 (高い順)", "R/R比順 (高い順)", "出来高倍率順 (高い順)", "勝率順 (高い順)", "銘柄コード順"]
-        current_index = sort_options.index(st.session_state.sort_option_key) if st.session_state.sort_option_key in sort_options else 0
-        st.session_state.sort_option_key = st.selectbox("📊 結果のソート順", options=sort_options, index=current_index, key='sort_selectbox_ui_key')
+        st.session_state.sort_option_key = st.selectbox("📊 結果のソート順", options=sort_options, index=0)
         
         st.markdown("##### 🔍 表示フィルター") 
-        col1_1, col1_2 = st.columns([0.6, 0.4])
-        col2_1, col2_2 = st.columns([0.6, 0.4])
-        st.session_state.ui_filter_min_score = col1_1.number_input("n点以上", min_value=0, max_value=100, value=st.session_state.ui_filter_min_score, step=5, key='filter_min_score')
-        st.session_state.ui_filter_score_on = col1_2.checkbox("適用", value=st.session_state.ui_filter_score_on, key='filter_score_on')
-        st.session_state.ui_filter_min_liquid_man = col2_1.number_input("出来高(万株)", min_value=0.0, max_value=500.0, value=st.session_state.ui_filter_min_liquid_man, step=0.5, format="%.1f", key='filter_min_liquid_man')
-        st.session_state.ui_filter_liquid_on = col2_2.checkbox("適用", value=st.session_state.ui_filter_liquid_on, key='filter_liquid_on')
+        col_f1, col_f2 = st.columns([0.6, 0.4])
+        col_f3, col_f4 = st.columns([0.6, 0.4])
+        st.session_state.ui_filter_min_score = col_f1.number_input("n点以上", 0, 100, st.session_state.ui_filter_min_score, 5)
+        st.session_state.ui_filter_score_on = col_f2.checkbox("適用", value=st.session_state.ui_filter_score_on, key='f_score_check')
+        st.session_state.ui_filter_min_liquid_man = col_f3.number_input("出来高(万)", 0.0, 500.0, st.session_state.ui_filter_min_liquid_man, 0.5)
+        st.session_state.ui_filter_liquid_on = col_f4.checkbox("適用", value=st.session_state.ui_filter_liquid_on, key='f_liquid_check')
 
-        tickers_input = st.text_area(f"銘柄コード（上限{MAX_TICKERS}銘柄/回）", value=st.session_state.tickers_input_value, placeholder="例:\n7203\n8306\n9984", height=150)
+        # --- 銘柄入力エリア ---
+        tickers_input = st.text_area(f"銘柄コード (上限{MAX_TICKERS}銘柄/回)", value=st.session_state.tickers_input_value, placeholder="7203\n8306", height=150)
         if tickers_input != st.session_state.tickers_input_value:
             st.session_state.tickers_input_value = tickers_input
             st.session_state.analysis_index = 0
             st.session_state.current_input_hash = "" 
 
+        # --- 実行ボタン（APIキーがない場合は無効化） ---
         col_start, col_check = st.columns([0.65, 0.35]) 
-        is_checkbox_on_for_ui = st.session_state.get('run_continuously_checkbox_key', False) 
-        st.session_state.run_continuously_checkbox = col_check.checkbox("連続", value=st.session_state.run_continuously_checkbox, key='run_continuously_checkbox_key', on_change=toggle_continuous_run)
-        is_start_disabled = st.session_state.clear_confirmed or st.session_state.is_running_continuous 
+        st.session_state.run_continuously_checkbox = col_check.checkbox("連続", value=st.session_state.run_continuously_checkbox, key='run_cont_check', on_change=toggle_continuous_run)
+        
+        is_start_disabled = st.session_state.clear_confirmed or st.session_state.is_running_continuous or api_key is None
         analyze_start_clicked = col_start.button("▶️分析", use_container_width=True, disabled=is_start_disabled, key='analyze_start_key') 
 
+        # --- データ管理 ---
         col_clear, col_reload = st.columns(2)
-        is_clear_disabled = not st.session_state.analyzed_data or st.session_state.is_running_continuous
-        clear_button_clicked = col_clear.button("🗑️消去", on_click=clear_all_data_confirm, use_container_width=True, disabled=is_clear_disabled)
-        is_reload_disabled = not st.session_state.analyzed_data or st.session_state.is_running_continuous
-        reload_button_clicked = col_reload.button("🔄再診", on_click=reanalyze_all_data_logic, use_container_width=True, disabled=is_reload_disabled)
+        is_btn_disabled = st.session_state.is_running_continuous
+        clear_button_clicked = col_clear.button("🗑️消去", on_click=clear_all_data_confirm, use_container_width=True, disabled=is_btn_disabled)
+        reload_button_clicked = col_reload.button("🔄再診", on_click=reanalyze_all_data_logic, use_container_width=True, disabled=is_btn_disabled)
         
+        # 連続実行中止ボタン
         if st.session_state.is_running_continuous:
-             # ⏹️ボタンの処理
-             if st.button("⏹️ 分析中止", use_container_width=True, key='cancel_continuous_key_large'):
+             if st.button("⏹️ 分析中止", use_container_width=True, key='cancel_run_btn'):
                  st.session_state.is_running_continuous = False
                  st.session_state.wait_start_time = None
-                 main_msg_placeholder.info("⏹️ 停止信号を受信しました。画面更新後に停止します。")
-                 
-                 time.sleep(1.0) # メッセージを少し読ませるために1秒待つ（お好みで）
                  st.rerun()
     else:
+        # 未認証時のボタンフラグ初期化（エラー防止）
         analyze_start_clicked = False; clear_button_clicked = False; reload_button_clicked = False
 
 # --- ボタンの実行ロジック ---
@@ -938,17 +996,30 @@ if st.session_state.is_running_continuous and st.session_state.wait_start_time i
              st.session_state.wait_start_time = None
         st.rerun() 
 
+# --- 分析実行メインブロック (Ver.2.1 修正版) ---
 if analyze_start_clicked or (st.session_state.is_running_continuous and st.session_state.wait_start_time is None and st.session_state.analysis_index > 0): 
     st.session_state.error_messages = [] 
     input_tickers = st.session_state.tickers_input_value
-    if not api_key: st.warning("APIキーを入力してください。")
-    elif not input_tickers.strip(): st.warning("銘柄コードを入力してください。")
+    
+    # 【ここが重要】サイドバーの変数だけでなく、session_state も直接確認して確定させる
+    resolved_api_key = api_key if api_key else st.session_state.get('gemini_api_key_input')
+
+    if not resolved_api_key or str(resolved_api_key).strip() == "":
+        st.warning("APIキーが認識されていません。サイドバーから再入力してください。")
+    elif not input_tickers.strip():
+        st.warning("銘柄コードを入力してください。")
     else:
+        # 分析で使用するグローバル変数または関数への渡しを確定
+        api_key = resolved_api_key 
+        
         raw_tickers_str = input_tickers.replace("\n", ",").replace(" ", ",").replace("、", ",")
         current_hash = hashlib.sha256(raw_tickers_str.encode()).hexdigest()
         is_input_changed = (st.session_state.current_input_hash != current_hash)
+        
         if is_input_changed:
-             st.session_state.analysis_index = 0; st.session_state.current_input_hash = current_hash 
+             st.session_state.analysis_index = 0
+             st.session_state.current_input_hash = current_hash 
+             
         all_unique_tickers = list(set([t.strip() for t in raw_tickers_str.split(",") if t.strip()]))
         total_tickers = len(all_unique_tickers)
         if analyze_start_clicked:
@@ -1107,14 +1178,39 @@ if st.session_state.analyzed_data:
     # ---------------------------------------------------------
     jst_zone = datetime.timezone(datetime.timedelta(hours=9))
     jst_now_for_file = datetime.datetime.now(jst_zone)
-    filename = f'ai_stock_analysis_{jst_now_for_file.strftime("%Y%m%d_%H%M")}.csv'
+    filename = f'internal_analysis_{jst_now_for_file.strftime("%Y%m%d_%H%M")}.csv'
 
-    csv_bytes = df_download.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
+    # CSVの最上部に法的免責事項を挿入
+    csv_header = "【内部検証用データ：実際の売買禁止】\n"
+    csv_header += f"生成日時: {jst_now_for_file.strftime('%Y/%m/%d %H:%M:%S')} (JST)\n"
+    csv_header += "本データはシステム検証用であり、特定の銘柄の売買を推奨するものではありません。\n\n"
+    
+    # 既存のデータをCSV文字列に変換
+    csv_raw_body = df_download.to_csv(index=False, encoding='utf-8-sig')
+    
+    # 署名ヘッダーと本体を合体
+    csv_final_content = csv_header + csv_raw_body
+    csv_bytes = csv_final_content.encode('utf-8-sig')
+    
     b64 = base64.b64encode(csv_bytes).decode()
     href = f'data:text/csv;base64,{b64}'
 
-    st.markdown(f'<a href="{href}" download="{filename}" style="text-decoration:none; display:inline-block; width:100%; text-align:center; border:1px solid #ddd; padding:10px; border-radius:0.5rem; color:#fff; background-color:#007bff; font-weight:bold;">✅ フィルター適用済みデータをCSVダウンロード</a>', unsafe_allow_html=True)
-    
+    # ダウンロードボタン
+    st.markdown(f'''
+        <a href="{href}" download="{filename}" style="
+            text-decoration:none; 
+            display:block; 
+            width:100%; 
+            text-align:center; 
+            padding:12px; 
+            border-radius:8px; 
+            color:#ffffff; 
+            background-color:#007bff; 
+            font-weight:bold;
+            border: 1px solid #0056b3;
+        ">✅ 内部検証用データをダウンロード</a>
+    ''', unsafe_allow_html=True)
+       
     # ---------------------------------------------------------
     # 結果のソート処理
     # ---------------------------------------------------------
@@ -1341,10 +1437,25 @@ if st.session_state.analyzed_data:
         </div>
         """
         
-    st.markdown("### 📊 アイ分析結果") 
+    st.error("⚠️ **警告：内部検証専用システム**")
+    st.markdown(f"""
+        <div style="background-color: #f8fafc; border-left: 5px solid #475569; padding: 15px; margin-bottom: 25px; border-radius: 4px;">
+            <p style="font-size: 16px; font-weight: bold; color: #1e293b; margin: 0;">
+                提示銘柄の定量的分析結果を表示します。
+            </p>
+            <p style="font-size: 14px; color: #475569; margin: 5px 0 0 0;">
+                本データはアルゴリズム検証用であり、実際の投資判断や売買には利用できません。<br>
+                算出される数値は統計的予測であり、将来の成果を保証するものではありません。
+            </p>
+        </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown("### 📊 アイ分析結果")
+
     r25 = market_25d_ratio
     ratio_color = "#d32f2f" if r25 >= 125.0 else ("#1976d2" if r25 <= 80.0 else "#4A4A4A")
     st.markdown(f'<p class="big-font"><b>市場環境（25日騰落レシオ）：<span style="color:{ratio_color};">{r25:.2f}%</span></b></p>', unsafe_allow_html=True)
+
     st.markdown(generate_html_table(df_above_75, "【🥇 最優位】75点以上"), unsafe_allow_html=True)
     st.markdown(generate_html_table(df_50_to_74, "【✅ 分析推奨】50点以上75点未満"), unsafe_allow_html=True)
     st.markdown(generate_html_table(df_below_50, "【⚠️ リスク高】50点未満"), unsafe_allow_html=True)
