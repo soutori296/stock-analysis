@@ -1105,6 +1105,7 @@ if st.session_state.analyzed_data:
     csv_bytes = df_download.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
     b64 = base64.b64encode(csv_bytes).decode()
     href = f'data:text/csv;base64,{b64}'
+    jst_now_for_file = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=9)
     filename = f'ai_stock_analysis_{datetime.datetime.now().strftime("%Y%m%d_%H%M")}.csv'
     st.markdown(f'<a href="{href}" download="{filename}" style="text-decoration:none; display:inline-block; width:100%; text-align:center; border:1px solid #ddd; padding:10px; border-radius:0.5rem; color:#fff; background-color:#007bff; font-weight:bold;">✅ フィルター適用済みデータをCSVダウンロード</a>', unsafe_allow_html=True)
     
@@ -1360,3 +1361,4 @@ if st.session_state.analyzed_data:
                         has_minus = True
                 if not has_minus: st.markdown('<p style="color:#666; margin: 0; padding: 0 0 0 15px;">- 該当なし</p>', unsafe_allow_html=True)
                 st.markdown("---")
+
