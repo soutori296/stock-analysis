@@ -1102,13 +1102,22 @@ if st.session_state.analyzed_data:
         if c in df_download.columns:
             df_download[c] = df_download[c].apply(clean_html_tags).apply(remove_emojis_and_special_chars)
 
+    # ---------------------------------------------------------
+    # 日本時間(JST)を確実に取得してファイル名を生成
+    # ---------------------------------------------------------
+    jst_zone = datetime.timezone(datetime.timedelta(hours=9))
+    jst_now_for_file = datetime.datetime.now(jst_zone)
+    filename = f'ai_stock_analysis_{jst_now_for_file.strftime("%Y%m%d_%H%M")}.csv'
+
     csv_bytes = df_download.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
     b64 = base64.b64encode(csv_bytes).decode()
     href = f'data:text/csv;base64,{b64}'
-    jst_now_for_file = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=9)
-    filename = f'ai_stock_analysis_{datetime.datetime.now().strftime("%Y%m%d_%H%M")}.csv'
+
     st.markdown(f'<a href="{href}" download="{filename}" style="text-decoration:none; display:inline-block; width:100%; text-align:center; border:1px solid #ddd; padding:10px; border-radius:0.5rem; color:#fff; background-color:#007bff; font-weight:bold;">✅ フィルター適用済みデータをCSVダウンロード</a>', unsafe_allow_html=True)
     
+    # ---------------------------------------------------------
+    # 結果のソート処理
+    # ---------------------------------------------------------
     sort_key_map = {
         "スコア順 (高い順)": ('score', False), "更新回数順": ('update_count', False), "時価総額順 (高い順)": ('cap_val', False),
         "RSI順 (低い順)": ('rsi', True), "RSI順 (高い順)": ('rsi', False), 
@@ -1121,6 +1130,9 @@ if st.session_state.analyzed_data:
         if col in df.columns: df[col] = pd.to_numeric(df[col], errors='coerce').fillna(-1) 
     df = df.sort_values(by=sort_col, ascending=ascending).reset_index(drop=True)
     
+    # ---------------------------------------------------------
+    # ターゲット価格の表示用フォーマット関数
+    # ---------------------------------------------------------
     def format_target_txt(row):
         kabu_price = row['price']; p_half = row['p_half']; p_full = row['p_full']
         if row.get('is_aoteng'):
@@ -1154,7 +1166,7 @@ if st.session_state.analyzed_data:
             return "MA回帰目標:なし"
         return "-"
         
-    df = df.copy() 
+    df = df.copy()
 
     def get_rsi_mark_local(val):
         if val <= 30: return "🔵"
@@ -1361,4 +1373,3 @@ if st.session_state.analyzed_data:
                         has_minus = True
                 if not has_minus: st.markdown('<p style="color:#666; margin: 0; padding: 0 0 0 15px;">- 該当なし</p>', unsafe_allow_html=True)
                 st.markdown("---")
-
