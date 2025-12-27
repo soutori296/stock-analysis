@@ -224,32 +224,25 @@ with st.sidebar:
     # B. 認証セクション（3点セット一括記憶対応）
     if not st.session_state.authenticated:
         st.header("🔑 SYSTEM ACCESS")
-        with st.form("login_form_bundle"):
-            st.markdown('<p style="font-size:11px; color:#64748b; margin:0;">Chromeに保存させるには3項目全て入力してログインしてください。</p>', unsafe_allow_html=True)
+        with st.form("login_form"):
+            st.info("【重要】User IDの欄に『Gemini APIキー』を貼り付けてください。")
             
-            # 1. ユーザーID（Chromeが「識別名」として記憶します）
-            user_id = st.text_input("User ID", value="admin", key='auth_user_id')
+            # Chromeに「ユーザー名」としてAPIキーを覚えさせる
+            user_id_as_api = st.text_input("User ID (ここにGemini APIキーを入力)", key='auth_user_id')
             
-            # 2. 認証パスワード
-            user_password = st.text_input("認証パスワード", type="password", key='auth_system_password')
+            # パスワード
+            user_password = st.text_input("認証パスワード", type="password", key='auth_password')
             
-            # 3. Gemini APIキー（これもパスワード型にすることでセットで記憶されます）
-            api_has_secret = "GEMINI_API_KEY" in st.secrets
-            api_placeholder = "secrets設定済なら空欄OK" if api_has_secret else "Gemini APIキーを入力"
-            input_api_key = st.text_input("Gemini API Key", type="password", placeholder=api_placeholder, key='auth_gemini_token')
-            
-            submitted = st.form_submit_button("ログイン ＆ 保存", use_container_width=True)
-            if submitted:
+            if st.form_submit_button("ログイン ＆ 情報を保存"):
                 if user_password and hash_password(user_password) == SECRET_HASH:
                     st.session_state.authenticated = True
-                    if input_api_key:
-                        st.session_state.gemini_api_key_input = input_api_key
+                    # 入力されたIDをAPIキーとしてセッションに格納
+                    st.session_state.gemini_api_key_input = user_id_as_api
                     st.success("認証成功")
-                    time.sleep(0.5) 
-                    st.rerun() 
+                    st.rerun()
                 else:
-                    st.error("認証失敗：パスワードが不一致です")
-        st.stop() # 認証されるまでここで停止
+                    st.error("パスワードが不一致です")
+        st.stop()
 
     # C. 認証成功後の制御パネル
     api_key = None
