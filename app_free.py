@@ -71,6 +71,7 @@ if 'wait_start_time' not in st.session_state: st.session_state.wait_start_time =
 if 'run_continuously_checkbox' not in st.session_state: st.session_state.run_continuously_checkbox = False 
 if 'trigger_copy_filtered_data' not in st.session_state: st.session_state.trigger_copy_filtered_data = False
 if 'gemini_api_key_input' not in st.session_state: st.session_state.gemini_api_key_input = "" 
+if 'run_continuously_checkbox_key' not in st.session_state: st.session_state.run_continuously_checkbox_key = False
 
 if 'authenticated' not in st.session_state:
     st.session_state.authenticated = IS_LOCAL_SKIP_AUTH
@@ -201,7 +202,10 @@ def reanalyze_all_data_logic():
     st.session_state.ui_filter_liquid_on = False 
 
 def toggle_continuous_run():
-    if not st.session_state.run_continuously_checkbox_key:
+    # .get() を使うことで、キーが存在しない場合にエラーにならず None を返します
+    is_checked = st.session_state.get('run_continuously_checkbox_key', False)
+    
+    if not is_checked:
          st.session_state.is_running_continuous = False
          st.session_state.wait_start_time = None
 
@@ -279,7 +283,7 @@ with st.sidebar:
 
         # 分析開始ボタン (APIキーがない場合は無効化)
         col_start, col_cont = st.columns([0.65, 0.35]) 
-        st.session_state.run_continuously_checkbox = col_cont.checkbox("連続", value=st.session_state.get('run_continuously_checkbox', False), key='run_cont_check', on_change=toggle_continuous_run)
+        col_cont.checkbox("連続", value=st.session_state.get('run_continuously_checkbox', False), key='run_continuously_checkbox_key', on_change=toggle_continuous_run)
         
         is_btn_disabled = st.session_state.get('is_running_continuous', False) or api_key is None
         analyze_start_clicked = col_start.button("▶️分析開始", use_container_width=True, disabled=is_btn_disabled)
