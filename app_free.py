@@ -942,7 +942,7 @@ with st.sidebar:
         st.session_state.ui_filter_score_on = col_f2.checkbox("適用", value=st.session_state.ui_filter_score_on, key='f_sc_check')
         
         col_f3, col_f4 = st.columns([0.6, 0.4])
-        st.session_state.ui_filter_min_liquid_man = col_f3.number_input("出来高(万)", 0.0, 500.0, st.session_state.ui_filter_min_liquid_man, 0.5, format="%.1f")
+        st.session_state.ui_filter_min_liquid_man = col_f3.number_input("出来高(n万株)", 0.0, 500.0, st.session_state.ui_filter_min_liquid_man, 0.5, format="%.1f")
         st.session_state.ui_filter_liquid_on = col_f4.checkbox("適用", value=st.session_state.ui_filter_liquid_on, key='f_lq_check')
 
         col_f5, col_f6 = st.columns([0.6, 0.4])
@@ -1510,4 +1510,5 @@ if st.session_state.analyzed_data:
                         has_minus = True
                 if not has_minus: st.markdown('<p style="color:#666; margin: 0; padding: 0 0 0 15px;">- 該当なし</p>', unsafe_allow_html=True)
                 st.markdown("---")
+
 
