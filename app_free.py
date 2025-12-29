@@ -59,13 +59,15 @@ if 'analysis_run_count' not in st.session_state: st.session_state.analysis_run_c
 if 'is_first_session_run' not in st.session_state: st.session_state.is_first_session_run = True 
 if 'analysis_index' not in st.session_state: st.session_state.analysis_index = 0 
 if 'current_input_hash' not in st.session_state: st.session_state.current_input_hash = "" 
-if 'sort_option_key' not in st.session_state: st.session_state.sort_option_key = "スコア順 (高い順)" 
+if 'sort_option_key' not in st.session_state: st.session_state.sort_option_key = "スコア順 (高い順)"
 if 'selected_model_name' not in st.session_state: st.session_state.selected_model_name = "gemma-3-12b-it"
 if 'score_history' not in st.session_state: st.session_state.score_history = {} 
 if 'ui_filter_min_score' not in st.session_state: st.session_state.ui_filter_min_score = 75 
 if 'ui_filter_min_liquid_man' not in st.session_state: st.session_state.ui_filter_min_liquid_man = 1.0 
 if 'ui_filter_score_on' not in st.session_state: st.session_state.ui_filter_score_on = False
 if 'ui_filter_liquid_on' not in st.session_state: st.session_state.ui_filter_liquid_on = False
+if 'ui_filter_max_rsi' not in st.session_state: st.session_state.ui_filter_max_rsi = 70 
+if 'ui_filter_rsi_on' not in st.session_state: st.session_state.ui_filter_rsi_on = False
 if 'is_running_continuous' not in st.session_state: st.session_state.is_running_continuous = False 
 if 'wait_start_time' not in st.session_state: st.session_state.wait_start_time = None
 if 'run_continuously_checkbox' not in st.session_state: st.session_state.run_continuously_checkbox = False 
@@ -145,9 +147,9 @@ st.markdown(f"""
     .badge-plus {{ color: #004d00; background-color: #ccffcc; border-color: #008000; }}
     .badge-minus {{ color: #800000; background-color: #ffcccc; border-color: #cc0000; }}
     .slim-status {{
-        font-size: 11px !important;    /* さらに小さく */
-        padding: 1px 8px !important;   /* 上下を限界まで細く */
-        margin-bottom: 3px !important; /* ボックス間の隙間を詰める */
+        font-size: 11px !important;
+        padding: 1px 8px !important;
+        margin-bottom: 4px !important;
         border-radius: 3px;
         border-left: 2px solid #ccc;
         background-color: #f8fafc;
@@ -157,6 +159,66 @@ st.markdown(f"""
     }}
     .status-ok {{ border-left-color: #10b981; background-color: #f0fdf4; color: #15803d; }}
     .status-info {{ border-left-color: #3b82f6; background-color: #eff6ff; color: #1d4ed8; }}
+
+    /* ==========================================================
+       サイドバー精密調整（Ver.2 決定版）
+    ========================================================== */
+
+    /* 1. 項目の名前(ラベル)を枠に密着させる */
+    [data-testid="stSidebar"] label p {{
+        font-size: 11px !important;
+        margin-bottom: -15px !important; /* ラベルを枠に吸い付かせる */
+        color: #475569 !important;
+        font-weight: bold;
+        line-height: 1.2 !important;
+    }}
+
+    /* 2. チェックボックスの「四角」と「文字」を一直線、かつ密着させる */
+    [data-testid="stSidebar"] .stCheckbox label {{
+        display: flex !important;
+        align-items: center !important; 
+        gap: 5px !important; /* 四角と文字の距離を最適化 */
+        margin: 0 !important;
+        padding: 0 !important;
+    }}
+    
+    /* 文字の垂直位置(Y軸)を四角の物理的な中心に揃える */
+    [data-testid="stSidebar"] .stCheckbox label div[data-testid="stMarkdownContainer"] p {{
+        margin: 0 !important;
+        padding: 0 !important;
+        line-height: 1.0 !important;
+        font-size: 13px !important;
+        transform: translateY(1.5px); /* 文字を1.5px沈めて四角と中心線を一致させる */
+    }}
+
+    /* 3. フィルター行（数値入力）の「適用」の垂直中央揃え */
+    /* 入力枠がある行の2列目だけをターゲットにパディングを調整 */
+    [data-testid="stSidebar"] div[data-testid="stHorizontalBlock"]:has(.stNumberInput) [data-testid="column"]:nth-child(2) .stCheckbox {{
+        padding-top: 31px !important; 
+        margin-bottom: 12px !important;
+    }}
+    
+    [data-testid="stSidebar"] .stNumberInput {{
+        margin-bottom: 12px !important;
+    }}
+
+    /* 4. 分析開始ボタン行の「連続」の垂直中央揃え */
+    /* ボタンの高さ中央に合わせるためパディングを個別に調整 */
+    [data-testid="stSidebar"] div[data-testid="stHorizontalBlock"]:has(.stButton) [data-testid="column"]:nth-child(2) .stCheckbox {{
+        padding-top: 10px !important; 
+        margin-bottom: 0px !important;
+    }}
+
+    /* 5. サイドバー全体の垂直要素間の隙間(Gap) */
+    [data-testid="stSidebar"] [data-testid="stVerticalBlock"] {{
+        gap: 0.5rem !important;
+    }}
+
+    /* 銘柄コード入力欄(TextArea)のラベル調整 */
+    [data-testid="stSidebar"] .stTextArea label p {{
+        margin-bottom: -6px !important;
+    }}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -190,6 +252,7 @@ def clear_all_data_confirm():
     st.session_state.clear_confirmed = True
     st.session_state.ui_filter_score_on = False
     st.session_state.ui_filter_liquid_on = False
+    st.session_state.ui_filter_rsi_on = False
 
 def reanalyze_all_data_logic():
     all_tickers = [d['code'] for d in st.session_state.analyzed_data]
@@ -265,15 +328,39 @@ with st.sidebar:
 
         # AIモデル・ソート・表示設定
         st.session_state.selected_model_name = st.selectbox("使用AIモデル", options=["gemma-3-12b-it", "gemini-2.5-flash"], index=0)
-        st.markdown("---")   
-        st.session_state.sort_option_key = st.selectbox("📊 結果のソート順", options=["スコア順 (高い順)", "更新回数順", "時価総額順", "RSI順", "勝率順", "銘柄コード順"], index=0)  
-        st.markdown("##### 🔍 表示フィルター") 
-        col_f1, col_f2 = st.columns([0.6, 0.4]); col_f3, col_f4 = st.columns([0.6, 0.4])
+        st.markdown('<hr style="margin: 10px 0; border: 0; border-top: 1px solid #eee;">', unsafe_allow_html=True)
+        # --- 修正後：サイドバーのソート選択肢 ---
+        st.session_state.sort_option_key = st.selectbox(
+            "📊 結果のソート順", 
+            options=[
+                "スコア順 (高い順)", 
+                "更新回数順", 
+                "時価総額順 (高い順)", 
+                "出来高倍率順 (高い順)",
+                "RSI順 (低い順)", 
+                "RSI順 (高い順)", 
+                "5MA実績順 (高い順)",
+                "銘柄コード順"
+            ], 
+            index=0
+        )
+        st.markdown("###### 🔍 表示フィルター") 
+        # 1行目：スコア
+        col_f1, col_f2 = st.columns([0.6, 0.4])
         st.session_state.ui_filter_min_score = col_f1.number_input("n点以上", 0, 100, st.session_state.ui_filter_min_score, 5)
         st.session_state.ui_filter_score_on = col_f2.checkbox("適用", value=st.session_state.ui_filter_score_on, key='f_sc_check')
-        # 出来高フィルター表示の1.0形式修正
+        
+        # 2行目：出来高
+        col_f3, col_f4 = st.columns([0.6, 0.4])
         st.session_state.ui_filter_min_liquid_man = col_f3.number_input("出来高(万)", 0.0, 500.0, st.session_state.ui_filter_min_liquid_man, 0.5, format="%.1f")
         st.session_state.ui_filter_liquid_on = col_f4.checkbox("適用", value=st.session_state.ui_filter_liquid_on, key='f_lq_check')
+
+        # 3行目：RSI（追加分）
+        col_f5, col_f6 = st.columns([0.6, 0.4])
+        st.session_state.ui_filter_max_rsi = col_f5.number_input("RSI (n未満)", 0, 100, st.session_state.ui_filter_max_rsi, 5)
+        st.session_state.ui_filter_rsi_on = col_f6.checkbox("適用", value=st.session_state.ui_filter_rsi_on, key='f_rsi_check')
+        
+        st.markdown('<div style="margin-top: 10px;"></div>', unsafe_allow_html=True) # 少しだけ隙間
 
         # 銘柄入力エリア
         tickers_input = st.text_area(f"銘柄コード (上限10銘柄/回)", value=st.session_state.get('tickers_input_value',''), placeholder="7203\n8306", height=150)
@@ -1075,17 +1162,21 @@ st.markdown("---")
 if st.session_state.analyzed_data:
     data = st.session_state.analyzed_data
     filtered_data = []
-    is_filter_active = st.session_state.ui_filter_score_on or st.session_state.ui_filter_liquid_on
+    is_filter_active = st.session_state.ui_filter_score_on or st.session_state.ui_filter_liquid_on or st.session_state.ui_filter_rsi_on
     if is_filter_active:
         min_score = st.session_state.ui_filter_min_score
         min_liquid_man = st.session_state.ui_filter_min_liquid_man
+        max_rsi = st.session_state.ui_filter_max_rsi
         for d in data:
             keep = True
             if st.session_state.ui_filter_score_on:
                  if d['score'] < min_score: keep = False
             if keep and st.session_state.ui_filter_liquid_on:
                  if d['avg_volume_5d'] < min_liquid_man * 10000: keep = False
+            if keep and st.session_state.ui_filter_rsi_on and d['rsi'] >= max_rsi: keep = False
+          
             if keep: filtered_data.append(d)
+            
     else: filtered_data = data
 
     df = pd.DataFrame(filtered_data)
@@ -1183,15 +1274,33 @@ if st.session_state.analyzed_data:
     # 結果のソート処理
     # ---------------------------------------------------------
     sort_key_map = {
-        "スコア順 (高い順)": ('score', False), "更新回数順": ('update_count', False), "時価総額順 (高い順)": ('cap_val', False),
-        "RSI順 (低い順)": ('rsi', True), "RSI順 (高い順)": ('rsi', False), 
-        "R/R比順 (高い順)": ('risk_reward', False), "出来高倍率順 (高い順)": ('vol_ratio', False),
-        "勝率順 (高い順)": ('win_rate_pct', False), "銘柄コード順": ('code', True),
+        "スコア順 (高い順)": ('score', False),
+        "更新回数順": ('update_count', False),
+        "時価総額順 (高い順)": ('cap_val', False),
+        "出来高倍率順 (高い順)": ('vol_ratio', False), # 追加
+        "RSI順 (低い順)": ('rsi', True),
+        "RSI順 (高い順)": ('rsi', False), 
+        "5MA実績順 (高い順)": ('win_rate_pct', False), # キー名をサイドバーと一致させた
+        "銘柄コード順": ('code', True),
     }
-    sort_col, ascending = sort_key_map.get(st.session_state.sort_option_key, ('score', False))
+    
+    # 選択されたキーに基づいてソート設定を取得
+    selected_key = st.session_state.sort_option_key
+    sort_res = sort_key_map.get(selected_key)
+    
+    if sort_res:
+        sort_col, ascending = sort_res
+    else:
+        # 項目名が不一致の場合のフォールバック
+        sort_col, ascending = ('score', False)
+
+    # 数値型に変換（ソートを正しく行うため）
     numeric_cols_for_sort = ['score', 'update_count', 'cap_val', 'rsi', 'vol_ratio', 'win_rate_pct', 'risk_reward'] 
     for col in numeric_cols_for_sort:
-        if col in df.columns: df[col] = pd.to_numeric(df[col], errors='coerce').fillna(-1) 
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(-1) 
+    
+    # 最終的なソート実行
     df = df.sort_values(by=sort_col, ascending=ascending).reset_index(drop=True)
     
     # ---------------------------------------------------------
