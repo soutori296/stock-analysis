@@ -40,6 +40,7 @@ try:
         SECRET_HASH = st.secrets["security"]["secret_password_hash"]
         is_password_set = True
     else:
+        # secretsがない場合のフォールバック（開発用）
         raise ValueError("No secrets found")
 except Exception:
     SECRET_HASH = hash_password("default_password_for_local_test")
@@ -95,57 +96,57 @@ def get_market_status():
 status_label, jst_now = get_market_status()
 status_color = "#d32f2f" if "進行中" in status_label else "#1976d2"
 
-# --- 出来高調整ウェイト（正確な数値） ---
-WEIGHT_MODELS = {
-    "large": { (9*60): 0.00, (9*60+30): 0.25, (10*60): 0.30, (11*60+30): 0.50, (12*60+30): 0.525, (13*60): 0.60, (15*60): 0.70, (15*60+25): 0.85, (15*60+30): 1.00 },
-    "mid": { (9*60): 0.00, (9*60+30): 0.30, (10*60): 0.35, (11*60+30): 0.55, (12*60+30): 0.575, (13*60): 0.675, (15*60): 0.75, (15*60+25): 0.90, (15*60+30): 1.00 },
-    "small": { (9*60): 0.00, (9*60+30): 0.40, (10*60): 0.45, (11*60+30): 0.65, (12*60+30): 0.675, (13*60): 0.75, (15*60): 0.88, (15*60+25): 0.95, (15*60+30): 1.00 }
-}
-
-def get_volume_weight(current_dt, market_cap):
-    status, _ = get_market_status()
-    if "休日" in status or "引け後" in status or current_dt.hour < 9: return 1.0
-    current_minutes = current_dt.hour * 60 + current_dt.minute
-    if current_minutes > (15 * 60): return 1.0
-    if current_minutes < (9 * 60): return 0.01
-    if market_cap >= 5000: weights = WEIGHT_MODELS["large"]
-    elif market_cap >= 500: weights = WEIGHT_MODELS["mid"]
-    else: weights = WEIGHT_MODELS["small"]
-    last_weight = 0.0; last_minutes = (9 * 60)
-    for end_minutes, weight in weights.items():
-        if current_minutes <= end_minutes:
-            if end_minutes == last_minutes: return weight
-            progress = (current_minutes - last_minutes) / (end_minutes - last_minutes)
-            return max(0.01, last_weight + progress * (weight - last_weight))
-        last_weight = weight; last_minutes = end_minutes
-    return 1.0
-    
-def format_volume(volume):
-    if volume < 10000: return f'{volume:,.0f}株'
-    else: return f'{round(volume / 10000):,.0f}万株'
-
 # --- CSSスタイル ---
 st.markdown(f"""
 <style> 
+    /* --------------------------------------------------------------------
+       🟦 1. 全体レイアウト（画面幅を広げる）
+       -------------------------------------------------------------------- */
+    .block-container {{
+        max-width: 100% !important;
+        padding-top: 2rem !important;
+        padding-bottom: 5rem !important;
+        padding-left: 3rem !important;
+        padding-right: 3rem !important;
+    }}
+    
+    /* サイドバーの幅固定 */
     [data-testid="stSidebar"] > div:first-child {{ width: 250px !important; max-width: 250px !important; }}
+    
+    /* --------------------------------------------------------------------
+       🟦 2. 各パーツのデザイン
+       -------------------------------------------------------------------- */
+    /* タイトルとアイコン */
     .custom-title {{ font-size: 1.8rem !important; font-weight: bold; display: flex; align-items: center; gap: 15px; margin-bottom: 10px; }}
     .custom-title img {{ height: 60px !important; width: auto !important; vertical-align: middle; object-fit: contain; }}
-    .big-font {{ font-size:18px !important; font-weight: bold; color: #4A4A4A; font-family: "Meiryo", sans-serif; }}
+    
+    /* 説明文（文字色指定を削除し、テーマに従わせる） */
+    .big-font {{ font-size:18px !important; font-weight: bold; font-family: "Meiryo", sans-serif; }}
+    
+    /* バッジ類 */
     .status-badge {{ background-color: {status_color}; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; vertical-align: middle; }}
     .update-badge {{ font-size: 10px; font-weight: bold; color: #ff6347; display: inline-block; vertical-align: middle; line-height: 1.0; margin-left: 5px; }}
+    
+    /* テーブル設定（背景白・文字黒で固定して視認性を確保） */
     .table-container {{ width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; margin-bottom: 20px; }}
     .ai-table {{ width: 100%; border-collapse: collapse; min-width: 1200px; background-color: #ffffff; color: #000000; font-family: "Meiryo", sans-serif; font-size: 13px; }}
     .ai-table th {{ background-color: #e0e0e0; color: #000000; border: 1px solid #999; padding: 4px 2px; text-align: center; vertical-align: middle; font-weight: bold; white-space: normal !important; position: relative; line-height: 1.2; }}
     .ai-table td {{ background-color: #ffffff; color: #000000; border: 1px solid #ccc; padding: 4px 2px; vertical-align: top; line-height: 1.4; text-align: center; }}
     .td-left {{ text-align: left !important; }}
+    
+    /* 行の色 */
     .bg-aoteng {{ background-color: #E6F0FF !important; }} 
     .bg-low-liquidity {{ background-color: #FFE6E6 !important; }} 
     .bg-triage-high {{ background-color: #FFFFCC !important; }} 
+    
+    /* スクロールボックス・バッジ */
     .comment-scroll-box {{ max-height: 70px; overflow-y: auto; padding-right: 5px; white-space: normal; text-align: left !important; line-height: 1.4; margin: 0; }}
     .badge-container {{ margin-top: 4px; display: flex; flex-wrap: wrap; gap: 3px; max-width: 100%; padding-bottom: 2px; }}
     .factor-badge {{ display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; font-size: 12px; font-weight: bold; border-radius: 4px; border: 1.5px solid; line-height: 1; white-space: nowrap; flex-shrink: 0; text-align: center; box-sizing: border-box; cursor: default !important; }}
     .badge-plus {{ color: #004d00; background-color: #ccffcc; border-color: #008000; }}
     .badge-minus {{ color: #800000; background-color: #ffcccc; border-color: #cc0000; }}
+    
+    /* ステータス表示 */
     .slim-status {{
         font-size: 11px !important;
         padding: 1px 8px !important;
@@ -160,77 +161,58 @@ st.markdown(f"""
     .status-ok {{ border-left-color: #10b981; background-color: #f0fdf4; color: #15803d; }}
     .status-info {{ border-left-color: #3b82f6; background-color: #eff6ff; color: #1d4ed8; }}
 
-    /* ==========================================================
-       サイドバー精密調整（Ver.2 決定版）
-    ========================================================== */
-
-    /* 1. 項目の名前(ラベル)を枠に密着させる */
+    /* --------------------------------------------------------------------
+       🟦 3. サイドバー調整（文字色強制を削除）
+       -------------------------------------------------------------------- */
     [data-testid="stSidebar"] label p {{
         font-size: 11px !important;
-        margin-bottom: -15px !important; /* ラベルを枠に吸い付かせる */
-        color: #475569 !important;
+        margin-bottom: -15px !important;
         font-weight: bold;
         line-height: 1.2 !important;
+        /* color指定を削除し、テーマに従わせる */
     }}
-
-    /* 2. チェックボックスの「四角」と「文字」を一直線、かつ密着させる */
     [data-testid="stSidebar"] .stCheckbox label {{
         display: flex !important;
         align-items: center !important; 
-        gap: 5px !important; /* 四角と文字の距離を最適化 */
+        gap: 5px !important;
         margin: 0 !important;
         padding: 0 !important;
     }}
-    
-    /* 文字の垂直位置(Y軸)を四角の物理的な中心に揃える */
     [data-testid="stSidebar"] .stCheckbox label div[data-testid="stMarkdownContainer"] p {{
         margin: 0 !important;
         padding: 0 !important;
         line-height: 1.0 !important;
         font-size: 13px !important;
-        transform: translateY(1.5px); /* 文字を1.5px沈めて四角と中心線を一致させる */
+        transform: translateY(1.5px);
     }}
-
-    /* 3. フィルター行（数値入力）の「適用」の垂直中央揃え */
-    /* 入力枠がある行の2列目だけをターゲットにパディングを調整 */
     [data-testid="stSidebar"] div[data-testid="stHorizontalBlock"]:has(.stNumberInput) [data-testid="column"]:nth-child(2) .stCheckbox {{
         padding-top: 31px !important; 
         margin-bottom: 12px !important;
     }}
-    
     [data-testid="stSidebar"] .stNumberInput {{
         margin-bottom: 12px !important;
     }}
-
-    /* 4. 分析開始ボタン行の「連続」の垂直中央揃え */
-    /* ボタンの高さ中央に合わせるためパディングを個別に調整 */
     [data-testid="stSidebar"] div[data-testid="stHorizontalBlock"]:has(.stButton) [data-testid="column"]:nth-child(2) .stCheckbox {{
         padding-top: 10px !important; 
         margin-bottom: 0px !important;
     }}
-
-    /* 5. サイドバー全体の垂直要素間の隙間(Gap) */
     [data-testid="stSidebar"] [data-testid="stVerticalBlock"] {{
         gap: 0.5rem !important;
     }}
-
-    /* 銘柄コード入力欄(TextArea)のラベル調整 */
     [data-testid="stSidebar"] .stTextArea label p {{
         margin-bottom: -6px !important;
     }}
-
 </style>
 """, unsafe_allow_html=True)
 
-# --- タイトル ---
+# --- タイトル表示 ---
 st.markdown(f"""
 <div class="custom-title">
     <img src="{ICON_URL}" alt="AI Icon"> 教えて！AIさん 2
 </div>
 """, unsafe_allow_html=True)
 
-main_msg_placeholder = st.empty() 
-
+# 説明文（文字色指定なし＝テーマ依存）
 st.markdown(f"""
 <p class="big-font">
     あなたの提示した銘柄についてアイが分析を行い、<b>判断の参考となる見解</b>を提示します。<br>
@@ -265,162 +247,40 @@ def reanalyze_all_data_logic():
     st.session_state.ui_filter_liquid_on = False 
 
 def toggle_continuous_run():
-    # .get() を使うことで、キーが存在しない場合にエラーにならず None を返します
     is_checked = st.session_state.get('run_continuously_checkbox_key', False)
-    
     if not is_checked:
          st.session_state.is_running_continuous = False
          st.session_state.wait_start_time = None
 
-# --- [サイドバー・プロトコル：Ver.2.1 統合版] ---
-with st.sidebar:
-    # A. 法的免責バナー
-    st.markdown("""
-        <div style="border: 1px solid #d1d5db; padding: 4px 8px; border-radius: 4px; background-color: #ffffff; margin-bottom: 12px; line-height: 1.1;">
-            <div style="color: #dc2626; font-size: 10px; font-weight: 900; text-align: center;">【内部検証：実売買禁止】</div>
-            <div style="color: #64748b; font-size: 9px; text-align: center; margin-top: 2px;">投資助言または売買推奨ではありません。</div>
-        </div>
-    """, unsafe_allow_html=True)
+# --- 出来高調整ウェイト（正確な数値） ---
+WEIGHT_MODELS = {
+    "large": { (9*60): 0.00, (9*60+30): 0.25, (10*60): 0.30, (11*60+30): 0.50, (12*60+30): 0.525, (13*60): 0.60, (15*60): 0.70, (15*60+25): 0.85, (15*60+30): 1.00 },
+    "mid": { (9*60): 0.00, (9*60+30): 0.30, (10*60): 0.35, (11*60+30): 0.55, (12*60+30): 0.575, (13*60): 0.675, (15*60): 0.75, (15*60+25): 0.90, (15*60+30): 1.00 },
+    "small": { (9*60): 0.00, (9*60+30): 0.40, (10*60): 0.45, (11*60+30): 0.65, (12*60+30): 0.675, (13*60): 0.75, (15*60): 0.88, (15*60+25): 0.95, (15*60+30): 1.00 }
+}
 
-    # B. 認証セクション (ID=APIキー平文 ＋ パスワード伏せ字)
-    if not st.session_state.authenticated:
-        st.header("🔑 LOGIN")
-        with st.form("login_form"):
-            # 上段：APIキー（ブラウザはこれを「ユーザー名」として記憶します）
-            api_input = st.text_input("Gemini API Key (User ID)")
-            
-            # 下段：パスワード（伏せ字）
-            pwd_input = st.text_input("認証パスワード", type="password")
-            
-            if st.form_submit_button("ログイン ＆ 保存"):
-                if hash_password(pwd_input) == SECRET_HASH:
-                    st.session_state.authenticated = True
-                    st.session_state.gemini_api_key_input = api_input
-                    st.success("認証成功")
-                    st.rerun()
-                else:
-                    st.error("パスワードが違います")
-        st.stop() # 認証されるまでここで止める
+def get_volume_weight(current_dt, market_cap):
+    status, _ = get_market_status()
+    if "休日" in status or "引け後" in status or current_dt.hour < 9: return 1.0
+    current_minutes = current_dt.hour * 60 + current_dt.minute
+    if current_minutes > (15 * 60): return 1.0
+    if current_minutes < (9 * 60): return 0.01
+    if market_cap >= 5000: weights = WEIGHT_MODELS["large"]
+    elif market_cap >= 500: weights = WEIGHT_MODELS["mid"]
+    else: weights = WEIGHT_MODELS["small"]
+    last_weight = 0.0; last_minutes = (9 * 60)
+    for end_minutes, weight in weights.items():
+        if current_minutes <= end_minutes:
+            if end_minutes == last_minutes: return weight
+            progress = (current_minutes - last_minutes) / (end_minutes - last_minutes)
+            return max(0.01, last_weight + progress * (weight - last_weight))
+        last_weight = weight; last_minutes = end_minutes
+    return 1.0
+    
+def format_volume(volume):
+    if volume < 10000: return f'{volume:,.0f}株'
+    else: return f'{round(volume / 10000):,.0f}万株'
 
-    # C. 認証成功後の制御パネル
-    api_key = None
-    if st.session_state.authenticated:
-        st.markdown('<div class="slim-status status-ok">SYSTEM AUTHENTICATED</div>', unsafe_allow_html=True)
-             
-        # 判定ロジック
-        secret_key_val = st.secrets.get("GEMINI_API_KEY")
-        manual_key_val = st.session_state.get('gemini_api_key_input')
-        
-        if secret_key_val and str(secret_key_val).strip() != "":
-            st.markdown('<div class="slim-status status-ok">API KEY: ✅ LOADED (secrets.toml)</div>', unsafe_allow_html=True)
-            api_key = secret_key_val
-        elif manual_key_val and str(manual_key_val).strip() != "":
-            st.markdown('<div class="slim-status status-ok">API KEY: 🟢 CONNECTED (MEMORIZED)</div>', unsafe_allow_html=True)
-            api_key = manual_key_val
-        else:
-            # 救済用入力（ここも平文で表示）
-            st.warning("⚠️ API KEY MISSING")
-            retry_key = st.text_input("Gemini API Keyを再入力", key='retry_token_storage_visible')
-            if retry_key:
-                st.session_state.gemini_api_key_input = retry_key
-                st.rerun()
-            api_key = None
-
-        # AIモデル・ソート・表示設定
-        st.session_state.selected_model_name = st.selectbox("使用AIモデル", options=["gemma-3-12b-it", "gemini-2.5-flash"], index=0)
-        st.markdown('<hr style="margin: 10px 0; border: 0; border-top: 1px solid #eee;">', unsafe_allow_html=True)
-        # --- 修正後：サイドバーのソート選択肢 ---
-        st.session_state.sort_option_key = st.selectbox(
-            "📊 結果のソート順", 
-            options=[
-                "スコア順 (高い順)", 
-                "更新回数順", 
-                "時価総額順 (高い順)", 
-                "出来高倍率順 (高い順)",
-                "RSI順 (低い順)", 
-                "RSI順 (高い順)", 
-                "5MA実績順 (高い順)",
-                "銘柄コード順"
-            ], 
-            index=0
-        )
-        st.markdown("###### 🔍 表示フィルター") 
-        # 1行目：スコア
-        col_f1, col_f2 = st.columns([0.6, 0.4])
-        st.session_state.ui_filter_min_score = col_f1.number_input("n点以上", 0, 100, st.session_state.ui_filter_min_score, 5)
-        st.session_state.ui_filter_score_on = col_f2.checkbox("適用", value=st.session_state.ui_filter_score_on, key='f_sc_check')
-        
-        # 2行目：出来高
-        col_f3, col_f4 = st.columns([0.6, 0.4])
-        st.session_state.ui_filter_min_liquid_man = col_f3.number_input("出来高(万)", 0.0, 500.0, st.session_state.ui_filter_min_liquid_man, 0.5, format="%.1f")
-        st.session_state.ui_filter_liquid_on = col_f4.checkbox("適用", value=st.session_state.ui_filter_liquid_on, key='f_lq_check')
-
-        # 3行目：RSI（追加分）
-        col_f5, col_f6 = st.columns([0.6, 0.4])
-        st.session_state.ui_filter_max_rsi = col_f5.number_input("RSI (n未満)", 0, 100, st.session_state.ui_filter_max_rsi, 5)
-        st.session_state.ui_filter_rsi_on = col_f6.checkbox("適用", value=st.session_state.ui_filter_rsi_on, key='f_rsi_check')
-        
-        st.markdown('<div style="margin-top: 10px;"></div>', unsafe_allow_html=True) # 少しだけ隙間
-
-        # 銘柄入力エリア
-        tickers_input = st.text_area(f"銘柄コード (上限10銘柄/回)", value=st.session_state.get('tickers_input_value',''), placeholder="7203\n8306", height=150)
-        if tickers_input != st.session_state.get('tickers_input_value'):
-            st.session_state.tickers_input_value = tickers_input
-            st.session_state.analysis_index = 0
-
-        # 分析開始ボタン (APIキーがない場合は無効化)
-        col_start, col_cont = st.columns([0.65, 0.35]) 
-        col_cont.checkbox("連続", value=st.session_state.get('run_continuously_checkbox', False), key='run_continuously_checkbox_key', on_change=toggle_continuous_run)
-        
-        is_btn_disabled = st.session_state.get('is_running_continuous', False) or api_key is None
-        analyze_start_clicked = col_start.button("▶️分析開始", use_container_width=True, disabled=is_btn_disabled)
-
-        # 管理ボタン
-        col_clr, col_re = st.columns(2)
-        is_mng_disabled = st.session_state.get('is_running_continuous', False)
-        clear_button_clicked = col_clr.button("🗑️消去", on_click=clear_all_data_confirm, use_container_width=True, disabled=is_mng_disabled)
-        reload_button_clicked = col_re.button("🔄再診", on_click=reanalyze_all_data_logic, use_container_width=True, disabled=is_mng_disabled)
-        
-        # 連続実行中止ボタン
-        if st.session_state.is_running_continuous:
-             if st.button("⏹️ 分析中止", use_container_width=True, key='cancel_run_btn'):
-                 st.session_state.is_running_continuous = False
-                 st.session_state.wait_start_time = None
-                 st.rerun()
-    else:
-        # 未認証時のボタンフラグ初期化（エラー防止）
-        analyze_start_clicked = False; clear_button_clicked = False; reload_button_clicked = False
-
-# --- ボタンの実行ロジック ---
-if clear_button_clicked or reload_button_clicked: st.rerun() 
-if st.session_state.clear_confirmed:
-    st.warning("⚠️ 本当に分析結果をすべてクリアしますか？この操作は取り消せません。", icon="🚨")
-    col_confirm, col_cancel, col_clear_spacer = st.columns([0.2, 0.2, 0.6])
-    if col_confirm.button("✅ はい、クリアします", use_container_width=False): 
-        st.session_state.analyzed_data = []
-        st.session_state.ai_monologue = ""
-        st.session_state.error_messages = []
-        st.session_state.clear_confirmed = False
-        st.session_state.overflow_tickers = "" 
-        st.session_state.analysis_run_count = 0 
-        st.session_state.is_first_session_run = True 
-        st.session_state.score_history = {} 
-        st.session_state.tickers_input_value = "" 
-        st.session_state.analysis_index = 0 
-        st.session_state.current_input_hash = "" 
-        st.session_state.is_running_continuous = False
-        st.session_state.wait_start_time = None
-        st.session_state.run_continuously_checkbox = False 
-        st.rerun() 
-    if col_cancel.button("❌ キャンセル", use_container_width=False): 
-        st.session_state.clear_confirmed = False
-        st.rerun() 
-
-if not st.session_state.authenticated:
-    st.info("⬅️ サイドバーでユーザー名を入力して認証してください。")
-    st.stop()
-
-# --- 関数群 ---
 def get_market_cap_category(market_cap):
     if market_cap >= 10000: return "超大型"
     elif market_cap >= 3000: return "大型"
@@ -470,12 +330,6 @@ def safe_float_convert(s):
         if isinstance(s, (int, float)): return float(s)
         return float(s.replace(",", ""))
     except ValueError: return 0.0
-        
-def safe_float(val):
-    try:
-        if isinstance(val, (int, float)): return float(val)
-        return float(val)
-    except: return 0.0
 
 def clean_html_tags(text):
     if pd.isna(text) or not isinstance(text, str): return text
@@ -545,9 +399,7 @@ def get_stock_info(code):
         m_issued = re.search(r'発行済株式数.*?<td>([\d,.]+).*?株</td>', html)
         if m_issued: data["issued_shares"] = safe_float_convert(m_issued.group(1))
 
-        # ----------------------------------------------------------------------
-        # 💡 決算発表日の取得ロジック
-        # ----------------------------------------------------------------------
+        # 決算発表日取得
         m_earn_plan = re.search(r'決算発表予定日.*?(\d{4})/(\d{1,2})/(\d{1,2})', html)
         if m_earn_plan:
             data["earnings_date"] = datetime.datetime(int(m_earn_plan.group(1)), int(m_earn_plan.group(2)), int(m_earn_plan.group(3)))
@@ -563,6 +415,20 @@ def get_stock_info(code):
     except Exception as e:
         st.session_state.error_messages.append(f"データ取得エラー (コード:{code}): Kabutan解析失敗。詳細: {e}")
         return data
+
+@st.cache_data(ttl=300, show_spinner="市場25日騰落レシオを取得中...")
+def get_25day_ratio():
+    url = "https://nikkeiyosoku.com/up_down_ratio/"
+    default_ratio = 100.0 
+    try:
+        res = fetch_with_retry(url); res.encoding = res.apparent_encoding
+        m_ratio = re.search(r'<p class="stock-txt">([0-9\.]+)', res.text.replace("\n", ""))
+        if m_ratio: return float(m_ratio.group(1).strip())
+        return default_ratio
+    except Exception: return default_ratio
+    
+# 騰落レシオをグローバル変数として保持
+market_25d_ratio = get_25day_ratio()
 
 def calculate_score_and_logic(df, info, vol_ratio, status):
     is_weekly_up = True; is_breakout = False; is_squeeze = False; is_plunge = False
@@ -673,18 +539,6 @@ def calculate_score_and_logic(df, info, vol_ratio, status):
 
     return score, factors, strategy, buy_target, p_half, p_full, sl_ma, is_aoteng, sl_pct, rsi_val, atr_smoothed, atr_comment, momentum_str
 
-@st.cache_data(ttl=300, show_spinner="市場25日騰落レシオを取得中...")
-def get_25day_ratio():
-    url = "https://nikkeiyosoku.com/up_down_ratio/"
-    default_ratio = 100.0 
-    try:
-        res = fetch_with_retry(url); res.encoding = res.apparent_encoding
-        m_ratio = re.search(r'<p class="stock-txt">([0-9\.]+)', res.text.replace("\n", ""))
-        if m_ratio: return float(m_ratio.group(1).strip())
-        return default_ratio
-    except Exception: return default_ratio
-market_25d_ratio = get_25day_ratio()
-
 def run_backtest_precise(df, market_cap):
     try:
         if len(df) < 80: return "データ不足", 0.0, 0, 0.0, 0.0, 0, 0
@@ -693,15 +547,13 @@ def run_backtest_precise(df, market_cap):
         test_data = df.tail(75).copy(); n = len(test_data)
         test_data['SMA5'] = test_data['Close'].rolling(5).mean(); test_data['SMA25'] = test_data['Close'].rolling(25).mean()
         test_data['High_250d'] = test_data['High'].rolling(250, min_periods=1).max()
-
-        # 【修正】FutureWarning対策 & ATR計算を厳密化（1行lambdaをやめる）
+        
         test_data['PrevClose'] = test_data['Close'].shift(1)
         test_data['High_Low'] = test_data['High'] - test_data['Low']
         test_data['High_PrevClose'] = abs(test_data['High'] - test_data['PrevClose'])
         test_data['Low_PrevClose'] = abs(test_data['Low'] - test_data['PrevClose'])
         test_data['TR'] = test_data[['High_Low', 'High_PrevClose', 'Low_PrevClose']].max(axis=1)
         test_data['ATR'] = test_data['TR'].rolling(14).mean()
-        
         test_data['Vol_SMA5'] = test_data['Volume'].rolling(5).mean()
         
         i = 1 
@@ -1019,15 +871,140 @@ def merge_new_data(new_data_list):
         existing_map[new_data['code']] = new_data
     st.session_state.analyzed_data = list(existing_map.values())
 
-model_name = st.session_state.selected_model_name
-api_key = st.secrets.get("GEMINI_API_KEY") if "GEMINI_API_KEY" in st.secrets else st.session_state.get('gemini_api_key_input')
-model = None
-if api_key:
-    try:
-        genai.configure(api_key=api_key); model = genai.GenerativeModel(model_name)
-    except Exception: pass
+# --- サイドバー構成 ---
+with st.sidebar:
+    st.markdown("""
+        <div style="border: 1px solid #d1d5db; padding: 4px 8px; border-radius: 4px; background-color: #ffffff; margin-bottom: 12px; line-height: 1.1;">
+            <div style="color: #dc2626; font-size: 10px; font-weight: 900; text-align: center;">【内部検証：実売買禁止】</div>
+            <div style="color: #64748b; font-size: 9px; text-align: center; margin-top: 2px;">投資助言または売買推奨ではありません。</div>
+        </div>
+    """, unsafe_allow_html=True)
 
-# --- メイン処理 ---
+    # 認証
+    if not st.session_state.authenticated:
+        st.header("🔑 LOGIN")
+        with st.form("login_form"):
+            api_input = st.text_input("Gemini API Key (User ID)")
+            pwd_input = st.text_input("認証パスワード", type="password")
+            if st.form_submit_button("ログイン ＆ 保存"):
+                if hash_password(pwd_input) == SECRET_HASH:
+                    st.session_state.authenticated = True
+                    st.session_state.gemini_api_key_input = api_input
+                    st.success("認証成功")
+                    st.rerun()
+                else:
+                    st.error("パスワードが違います")
+        st.stop()
+
+    # 認証後コントロール
+    api_key = None
+    if st.session_state.authenticated:
+        st.markdown('<div class="slim-status status-ok">SYSTEM AUTHENTICATED</div>', unsafe_allow_html=True)
+             
+        secret_key_val = st.secrets.get("GEMINI_API_KEY")
+        manual_key_val = st.session_state.get('gemini_api_key_input')
+        
+        if secret_key_val and str(secret_key_val).strip() != "":
+            st.markdown('<div class="slim-status status-ok">API KEY: ✅ LOADED (secrets.toml)</div>', unsafe_allow_html=True)
+            api_key = secret_key_val
+        elif manual_key_val and str(manual_key_val).strip() != "":
+            st.markdown('<div class="slim-status status-ok">API KEY: 🟢 CONNECTED (MEMORIZED)</div>', unsafe_allow_html=True)
+            api_key = manual_key_val
+        else:
+            st.warning("⚠️ API KEY MISSING")
+            retry_key = st.text_input("Gemini API Keyを再入力", key='retry_token_storage_visible')
+            if retry_key:
+                st.session_state.gemini_api_key_input = retry_key
+                st.rerun()
+            api_key = None
+
+        st.session_state.selected_model_name = st.selectbox("使用AIモデル", options=["gemma-3-12b-it", "gemini-2.5-flash"], index=0)
+        st.markdown('<hr style="margin: 10px 0; border: 0; border-top: 1px solid #eee;">', unsafe_allow_html=True)
+        
+        # ソート順に「R/R比順 (高い順)」を追加
+        st.session_state.sort_option_key = st.selectbox(
+            "📊 結果のソート順", 
+            options=[
+                "スコア順 (高い順)", 
+                "更新回数順", 
+                "R/R比順 (高い順)",  # ← これを追加
+                "時価総額順 (高い順)", 
+                "出来高倍率順 (高い順)",
+                "RSI順 (低い順)", 
+                "RSI順 (高い順)", 
+                "5MA実績順 (高い順)", 
+                "銘柄コード順"
+            ], index=0
+        )
+        st.markdown("###### 🔍 表示フィルター") 
+        col_f1, col_f2 = st.columns([0.6, 0.4])
+        st.session_state.ui_filter_min_score = col_f1.number_input("n点以上", 0, 100, st.session_state.ui_filter_min_score, 5)
+        st.session_state.ui_filter_score_on = col_f2.checkbox("適用", value=st.session_state.ui_filter_score_on, key='f_sc_check')
+        
+        col_f3, col_f4 = st.columns([0.6, 0.4])
+        st.session_state.ui_filter_min_liquid_man = col_f3.number_input("出来高(万)", 0.0, 500.0, st.session_state.ui_filter_min_liquid_man, 0.5, format="%.1f")
+        st.session_state.ui_filter_liquid_on = col_f4.checkbox("適用", value=st.session_state.ui_filter_liquid_on, key='f_lq_check')
+
+        col_f5, col_f6 = st.columns([0.6, 0.4])
+        st.session_state.ui_filter_max_rsi = col_f5.number_input("RSI (n未満)", 0, 100, st.session_state.ui_filter_max_rsi, 5)
+        st.session_state.ui_filter_rsi_on = col_f6.checkbox("適用", value=st.session_state.ui_filter_rsi_on, key='f_rsi_check')
+        
+        st.markdown('<div style="margin-top: 10px;"></div>', unsafe_allow_html=True)
+
+        tickers_input = st.text_area(f"銘柄コード (上限10銘柄/回)", value=st.session_state.get('tickers_input_value',''), placeholder="7203\n8306", height=150)
+        if tickers_input != st.session_state.get('tickers_input_value'):
+            st.session_state.tickers_input_value = tickers_input
+            st.session_state.analysis_index = 0
+
+        col_start, col_cont = st.columns([0.65, 0.35]) 
+        col_cont.checkbox("連続", value=st.session_state.get('run_continuously_checkbox', False), key='run_continuously_checkbox_key', on_change=toggle_continuous_run)
+        
+        is_btn_disabled = st.session_state.get('is_running_continuous', False) or api_key is None
+        analyze_start_clicked = col_start.button("▶️分析開始", use_container_width=True, disabled=is_btn_disabled)
+
+        col_clr, col_re = st.columns(2)
+        is_mng_disabled = st.session_state.get('is_running_continuous', False)
+        clear_button_clicked = col_clr.button("🗑️消去", on_click=clear_all_data_confirm, use_container_width=True, disabled=is_mng_disabled)
+        reload_button_clicked = col_re.button("🔄再診", on_click=reanalyze_all_data_logic, use_container_width=True, disabled=is_mng_disabled)
+        
+        if st.session_state.is_running_continuous:
+             if st.button("⏹️ 分析中止", use_container_width=True, key='cancel_run_btn'):
+                 st.session_state.is_running_continuous = False
+                 st.session_state.wait_start_time = None
+                 st.rerun()
+    else:
+        analyze_start_clicked = False; clear_button_clicked = False; reload_button_clicked = False
+
+# ボタン処理
+if clear_button_clicked or reload_button_clicked: st.rerun() 
+if st.session_state.clear_confirmed:
+    st.warning("⚠️ 本当に分析結果をすべてクリアしますか？この操作は取り消せません。", icon="🚨")
+    col_confirm, col_cancel, col_clear_spacer = st.columns([0.2, 0.2, 0.6])
+    if col_confirm.button("✅ はい、クリアします", use_container_width=False): 
+        st.session_state.analyzed_data = []
+        st.session_state.ai_monologue = ""
+        st.session_state.error_messages = []
+        st.session_state.clear_confirmed = False
+        st.session_state.overflow_tickers = "" 
+        st.session_state.analysis_run_count = 0 
+        st.session_state.is_first_session_run = True 
+        st.session_state.score_history = {} 
+        st.session_state.tickers_input_value = "" 
+        st.session_state.analysis_index = 0 
+        st.session_state.current_input_hash = "" 
+        st.session_state.is_running_continuous = False
+        st.session_state.wait_start_time = None
+        st.session_state.run_continuously_checkbox = False 
+        st.rerun() 
+    if col_cancel.button("❌ キャンセル", use_container_width=False): 
+        st.session_state.clear_confirmed = False
+        st.rerun() 
+
+if not st.session_state.authenticated:
+    st.info("⬅️ サイドバーでユーザー名を入力して認証してください。")
+    st.stop()
+
+# --- メイン実行制御 ---
 if st.session_state.is_running_continuous and st.session_state.wait_start_time is not None:
     REQUIRED_DELAY = 60 + random.uniform(5.0, 10.0) 
     time_elapsed = (datetime.datetime.now() - st.session_state.wait_start_time).total_seconds()
@@ -1037,7 +1014,6 @@ if st.session_state.is_running_continuous and st.session_state.wait_start_time i
     else:
         time_to_wait = REQUIRED_DELAY - time_elapsed
         status_placeholder = st.empty()
-        status_placeholder.info(f"⌛️ サーバー負荷を考慮し、次のバッチ分析まで【残り {time_to_wait:.1f}秒間】待機中です。")
         while time_to_wait > 0 and st.session_state.is_running_continuous:
             time_to_wait = REQUIRED_DELAY - (datetime.datetime.now() - st.session_state.wait_start_time).total_seconds()
             status_placeholder.info(f"⌛️ サーバー負荷を考慮し、次のバッチ分析まで【残り {time_to_wait:.1f}秒間】待機中です。")
@@ -1051,12 +1027,9 @@ if st.session_state.is_running_continuous and st.session_state.wait_start_time i
              st.session_state.wait_start_time = None
         st.rerun() 
 
-# --- 分析実行メインブロック (Ver.2.1 修正版) ---
 if analyze_start_clicked or (st.session_state.is_running_continuous and st.session_state.wait_start_time is None and st.session_state.analysis_index > 0): 
     st.session_state.error_messages = [] 
     input_tickers = st.session_state.tickers_input_value
-    
-    # 【ここが重要】サイドバーの変数だけでなく、session_state も直接確認して確定させる
     resolved_api_key = api_key if api_key else st.session_state.get('gemini_api_key_input')
 
     if not resolved_api_key or str(resolved_api_key).strip() == "":
@@ -1064,9 +1037,7 @@ if analyze_start_clicked or (st.session_state.is_running_continuous and st.sessi
     elif not input_tickers.strip():
         st.warning("銘柄コードを入力してください。")
     else:
-        # 分析で使用するグローバル変数または関数への渡しを確定
         api_key = resolved_api_key 
-        
         raw_tickers_str = input_tickers.replace("\n", ",").replace(" ", ",").replace("、", ",")
         current_hash = hashlib.sha256(raw_tickers_str.encode()).hexdigest()
         is_input_changed = (st.session_state.current_input_hash != current_hash)
@@ -1147,14 +1118,14 @@ if analyze_start_clicked or (st.session_state.is_running_continuous and st.sessi
         if new_analyzed_data and end_index >= total_tickers: st.success(f"✅ 全{total_tickers}件完了。")
         elif new_analyzed_data and end_index < total_tickers: st.success(f"✅ {len(new_analyzed_data)}件完了。")
 
-# --- UI表示 ---
+# --- 結果表示UI ---
 HEADER_MAP = [
     ('No', 'No', 'center', '40px', '40px'), ('code_disp', 'コード', 'center', '70px', '70px'), ('name', '　企業名', 'left', '190px', '190px'), 
     ('cap_disp', '時価総額', 'center', '100px', '100px'), ('score_disp', '点', 'center', '50px', '50px'), ('strategy', '分析戦略', 'center', '80px', '80px'), 
     ('price_disp', '現在値', 'center', '60px', '60px'), ('buy_disp', '想定水準\n（乖離）', 'center', '60px', '60px'), ('rr_disp', 'R/R比', 'center', '50px', '50px'), 
     ('dd_sl_disp', 'DD率\nSL率', 'center', '60px', '60px'), ('target_txt', '　利益確定目標値', 'left', '130px', '130px'), ('rsi_disp', 'RSI', 'center', '60px', '60px'), 
-    ('vol_disp_html', '出来高比\n(5日平均)', 'center', '70px', '70px'), ('bt_cell_content', 'MA5実績', 'center', '60px', '60px'), 
-    ('per_pbr_disp', 'PER\nPBR', 'center', '60px', '60px'), ('momentum', '直近勝率', 'center', '60px', '60px'), ('comment', '　アイの所感', 'left', '350px', '350px')
+    ('vol_disp_html', '出来高比\n(5日平均)', 'center', '70px', '70px'), ('bt_cell_content', '5MA実績', 'center', '65px', '65px'), 
+    ('per_pbr_disp', 'PER\nPBR', 'center', '60px', '60px'), ('momentum', '直近勝率', 'center', '60px', '60px'), ('comment', '　アイの所感', 'left', '345px', '345px')
 ]
 
 st.markdown("---")
@@ -1210,6 +1181,7 @@ if st.session_state.analyzed_data:
     present_cols = [name for _, name in final_csv_columns if name in df_download.columns]
     df_download = df_download[present_cols].copy()
 
+    # CSVフォーマット処理
     if 'DD率' in df_download.columns:
         df_download['DD率'] = df_download['DD率'].apply(lambda x: f"{x:+.2f}%" if pd.notna(x) else '-')
     if 'SL率' in df_download.columns:
@@ -1232,29 +1204,21 @@ if st.session_state.analyzed_data:
         if c in df_download.columns:
             df_download[c] = df_download[c].apply(clean_html_tags).apply(remove_emojis_and_special_chars)
 
-    # ---------------------------------------------------------
-    # 日本時間(JST)を確実に取得してファイル名を生成
-    # ---------------------------------------------------------
+    # 日本時間取得
     jst_zone = datetime.timezone(datetime.timedelta(hours=9))
     jst_now_for_file = datetime.datetime.now(jst_zone)
     filename = f'internal_analysis_{jst_now_for_file.strftime("%Y%m%d_%H%M")}.csv'
 
-    # CSVの最上部に法的免責事項を挿入
     csv_header = "【内部検証用データ：実際の売買禁止】\n"
     csv_header += f"生成日時: {jst_now_for_file.strftime('%Y/%m/%d %H:%M:%S')} (JST)\n"
     csv_header += "本データはシステム検証用であり、特定の銘柄の売買を推奨するものではありません。\n\n"
     
-    # 既存のデータをCSV文字列に変換
     csv_raw_body = df_download.to_csv(index=False, encoding='utf-8-sig')
-    
-    # 署名ヘッダーと本体を合体
     csv_final_content = csv_header + csv_raw_body
     csv_bytes = csv_final_content.encode('utf-8-sig')
-    
     b64 = base64.b64encode(csv_bytes).decode()
     href = f'data:text/csv;base64,{b64}'
 
-    # ダウンロードボタン
     st.markdown(f'''
         <a href="{href}" download="{filename}" style="
             text-decoration:none; 
@@ -1270,74 +1234,79 @@ if st.session_state.analyzed_data:
         ">✅ 内部検証用データをダウンロード</a>
     ''', unsafe_allow_html=True)
        
-    # ---------------------------------------------------------
-    # 結果のソート処理
-    # ---------------------------------------------------------
+    # ソート処理
     sort_key_map = {
         "スコア順 (高い順)": ('score', False),
         "更新回数順": ('update_count', False),
+        "R/R比順 (高い順)": ('risk_reward', False), # ← 追加
         "時価総額順 (高い順)": ('cap_val', False),
-        "出来高倍率順 (高い順)": ('vol_ratio', False), # 追加
+        "出来高倍率順 (高い順)": ('vol_ratio', False),
         "RSI順 (低い順)": ('rsi', True),
         "RSI順 (高い順)": ('rsi', False), 
-        "5MA実績順 (高い順)": ('win_rate_pct', False), # キー名をサイドバーと一致させた
+        "5MA実績順 (高い順)": ('win_rate_pct', False),
         "銘柄コード順": ('code', True),
     }
     
-    # 選択されたキーに基づいてソート設定を取得
     selected_key = st.session_state.sort_option_key
     sort_res = sort_key_map.get(selected_key)
-    
-    if sort_res:
-        sort_col, ascending = sort_res
-    else:
-        # 項目名が不一致の場合のフォールバック
-        sort_col, ascending = ('score', False)
+    sort_col, ascending = sort_res if sort_res else ('score', False)
 
-    # 数値型に変換（ソートを正しく行うため）
     numeric_cols_for_sort = ['score', 'update_count', 'cap_val', 'rsi', 'vol_ratio', 'win_rate_pct', 'risk_reward'] 
     for col in numeric_cols_for_sort:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce').fillna(-1) 
     
-    # 最終的なソート実行
     df = df.sort_values(by=sort_col, ascending=ascending).reset_index(drop=True)
     
-    # ---------------------------------------------------------
-    # ターゲット価格の表示用フォーマット関数
-    # ---------------------------------------------------------
+    # ターゲット価格表示
     def format_target_txt(row):
         kabu_price = row['price']; p_half = row['p_half']; p_full = row['p_full']
+        
+        # ★ 数値整形用ヘルパー（常に小数点以下切り捨て）
+        def fmt(val):
+            if val is None or val == 0: return "-"
+            # int() でキャストすることで小数点以下を切り捨てます
+            return f"{int(val):,}"
+
         if row.get('is_aoteng'):
             full_pct = ((p_full / kabu_price) - 1) * 100 if kabu_price > 0 and p_full > 0 else 0
-            return f'<span style="color:green;font-weight:bold;">青天井追従</span><br>SL:{p_full:,} ({full_pct:+.1f}%)'
+            # 青天井のSL価格にも適用
+            return f'<span style="color:green;font-weight:bold;">青天井追従</span><br>SL:{fmt(p_full)} ({full_pct:+.1f}%)'
+            
         is_bull_or_pro = "順張り" in row['strategy'] or "順ロジ" in row['strategy'] or "ブレイク" in row['strategy']
         is_bear_or_pro = "逆張り" in row['strategy'] or "逆ロジ" in row['strategy']
+        
         output_lines = []
         if is_bull_or_pro:
              if p_half > 0 and p_half > kabu_price:
                  half_pct = ((p_half / kabu_price) - 1) * 100 if kabu_price > 0 else 0
-                 output_lines.append(f"半:{p_half:,} ({half_pct:+.1f}%)")
+                 output_lines.append(f"半:{fmt(p_half)} ({half_pct:+.1f}%)")
              if p_full > 0 and p_full > kabu_price:
                  full_pct = ((p_full / kabu_price) - 1) * 100 if kabu_price > 0 else 0
-                 output_lines.append(f"全:{p_full:,} ({full_pct:+.1f}%)")
+                 output_lines.append(f"全:{fmt(p_full)} ({full_pct:+.1f}%)")
              if not output_lines:
                   if row['p_half'] > 0 or row['p_full'] > 0: return "目標超過/無効" 
                   return "-"
              if row['p_half'] == 0:
-                 if len(output_lines) == 1 and output_lines[0].startswith("全:"): return f'<span style="color:green;font-weight:bold;">目標追従</span><br>{output_lines[0]}'
+                 if len(output_lines) == 1 and output_lines[0].startswith("全:"): 
+                     return f'<span style="color:green;font-weight:bold;">目標追従</span><br>{output_lines[0]}'
              return "<br>".join(output_lines)
+             
         if is_bear_or_pro:
             if p_half > 0 and p_half > kabu_price:
                  half_pct = ((p_half / kabu_price) - 1) * 100 if kabu_price > 0 else 0
-                 output_lines.append(f"半:{p_half:,} ({half_pct:+.1f}%)")
+                 output_lines.append(f"半:{fmt(p_half)} ({half_pct:+.1f}%)")
             if p_full > 0 and p_full > kabu_price:
                  full_pct = ((p_full / kabu_price) - 1) * 100 if kabu_price > 0 else 0
-                 output_lines.append(f"全:{p_full:,} ({full_pct:+.1f}%)")
-            if output_lines: return f'<span style="color:#0056b3;font-weight:bold;">MA回帰目標</span><br>{"<br>".join(output_lines)}'
+                 output_lines.append(f"全:{fmt(p_full)} ({full_pct:+.1f}%)")
+            if output_lines: 
+                return f'<span style="color:#0056b3;font-weight:bold;">MA回帰目標</span><br>{"<br>".join(output_lines)}'
             if row['p_half'] > 0 or row['p_full'] > 0: return "MA回帰目標:超過/無効"
             return "MA回帰目標:なし"
+            
         return "-"
+        
+    df['target_txt'] = df.apply(format_target_txt, axis=1)
         
     df = df.copy()
 
@@ -1350,12 +1319,15 @@ if st.session_state.analyzed_data:
     def format_rsi_atr_combined(row):
         mark = get_rsi_mark_local(row['rsi'])
         rsi_html = f"{mark}{row['rsi']:.1f}"
+        
         atr = row.get('atr_smoothed', 0)
         pct = row.get('atr_pct', 0)
         atr_color = "#555" 
         if pct >= 5.0: atr_color = "#800000" 
         elif pct >= 3.0: atr_color = "#cc5500" 
-        atr_html = f"<br><span style='font-size:10px; color:{atr_color}; font-weight: bold;'>ATR:{atr:,.1f}円<br>({pct:.1f}%)</span>"
+        atr_rounded = int(atr + 0.5)
+        
+        atr_html = f"<br><span style='font-size:10px; color:{atr_color}; font-weight: bold;'>ATR:{atr_rounded:,}円<br>({pct:.1f}%)</span>"
         return rsi_html + atr_html
 
     def format_score_disp(row, market_status_label):
@@ -1380,36 +1352,32 @@ if st.session_state.analyzed_data:
         code_html = f"<b>{row['code']}</b>"
         days = row.get('earnings_day_count')
         disp_str = row.get('earnings_disp_str', "")
-        
-        # データがない、または空文字の場合はコードのみ
         if days is None and not disp_str: return code_html
-        
-        # 1. 発表済み（直近）
         if disp_str == "発表済":
             return f"{code_html}<br><span style='font-size:11px; color:blue; '>決算発表済</span>"
-        
-        # 2. 発表予定
         if days is not None and disp_str:
-            # 1週間以内 (赤太字)
             if days <= 7:
-                # 💡修正: {days} -> {days:.0f} にして小数を消去
                 return f"{code_html}<br><span style='font-size:11px; color:red; font-weight:bold;'>決算 {disp_str}<br>(あと{days:.0f}日)</span>"
-            
-            # 2週間以内 (オレンジ)
             elif days <= 14:
                 return f"{code_html}<br><span style='font-size:11px; color:#cc5500; font-weight:bold;'>決算 {disp_str}</span>"
-            
-            # それ以上 (グレー、日付のみ)
             else:
                 return f"{code_html}<br><span style='font-size:11px; color:#666;'>決算 {disp_str}</span>"
-        
         return code_html
 
     df['code_disp'] = df.apply(format_code_with_earnings, axis=1)
     df['rsi_disp'] = df.apply(format_rsi_atr_combined, axis=1)
     df['score_disp'] = df.apply(lambda row: format_score_disp(row, status_label), axis=1)
     df['price_disp'] = df['price'].apply(format_price_disp)
-    df['diff_disp'] = df.apply(lambda row: f"({row['price'] - row['buy']:+,.1f})" if row['price'] and row['buy'] and (row['price'] - row['buy']) != 0 else "(0)", axis=1)
+    def format_diff_smart(row):
+        if not row['price'] or not row['buy']: return "(0)"
+        diff = row['price'] - row['buy']
+        if diff == 0: return "(0)"
+        if diff % 1 == 0:
+            return f"({int(diff):+,})"
+        else:
+            return f"({diff:+,.1f})"
+
+    df['diff_disp'] = df.apply(format_diff_smart, axis=1)
     df['buy_disp'] = df.apply(lambda row: f"{row['buy']:,.0f}<br>{row['diff_disp']}" if "🚀" not in row['strategy'] else f"<span style='color:#1977d2; font-weight:bold; background-color:#E3F2FD; padding:1px 3px;'>{row['buy']:,.0f}</span><br><span style='font-size:10px;color:#1976d2; font-weight:bold;'>{row['diff_disp']}</span>", axis=1)
     df['vol_disp_html'] = df.apply(lambda row: f"<b>{row['vol_ratio']:.1f}倍</b><br>({format_volume(row['avg_volume_5d'])})" if row['vol_ratio'] > 1.5 else f"{row['vol_ratio']:.1f}倍<br>({format_volume(row['avg_volume_5d'])})", axis=1)
     df['rr_disp'] = df.apply(lambda row: "青天" if row['is_aoteng'] else (f"{row['risk_reward']:.1f}" if row['risk_reward'] >= 0.1 else "-"), axis=1)
@@ -1426,9 +1394,7 @@ if st.session_state.analyzed_data:
     df_50_to_74 = df[(df['score'] >= 50) & (df['score'] <= 74)].copy()
     df_below_50 = df[df['score'] < 50].copy()
 
-    # ----------------------------------------------------
-    # バッジ定義とテーブル生成関数の修正版
-    # ----------------------------------------------------
+    # バッジ定義
     FACTOR_META = {
         "新高値ブレイク": {"char": "新", "prio": 10}, "スクイーズ": {"char": "充", "prio": 20},
         "週足上昇": {"char": "週", "prio": 30}, "週足下落": {"char": "週", "prio": 30},
@@ -1445,12 +1411,9 @@ if st.session_state.analyzed_data:
 
     def generate_html_table(data_frame, title):
         if data_frame.empty: return ""
-        # ヘッダー作成（改行コード変換含む）
         header_html = "".join([f'<th style="width:{h[4]}; min-width:{h[3]}; text-align:{h[2]};">{h[1].replace("\n", "<br>")}</th>' for h in HEADER_MAP])
-        
         rows_html = []
         raw_data_map = {d['code']: d for d in st.session_state.analyzed_data}
-        
         for _, row in data_frame.iterrows():
             bg_class = ''
             if row.get('is_low_liquidity'): bg_class = 'bg-low-liquidity'
@@ -1465,37 +1428,24 @@ if st.session_state.analyzed_data:
                     raw_row = raw_data_map.get(row['code'])
                     if raw_row and 'score_factors' in raw_row:
                         factors = raw_row['score_factors']
-                        pos_candidates = [] # プラス要因用
-                        neg_candidates = [] # マイナス要因用
-                        
+                        pos_candidates = [] 
+                        neg_candidates = [] 
                         for f_key, f_val in factors.items():
                             if f_val == 0 or f_key == "基礎点": continue
                             if f_key in FACTOR_META:
                                 meta = FACTOR_META[f_key]
                                 item = {"char": meta["char"], "val": f_val, "name": f_key}
-                                if f_val > 0:
-                                    pos_candidates.append(item)
-                                else:
-                                    neg_candidates.append(item)
-                        
-                        # --- 並び替えロジック ---
-                        # プラスは影響度（値）が高い順（例: +20, +15, +5）
+                                if f_val > 0: pos_candidates.append(item)
+                                else: neg_candidates.append(item)
                         pos_candidates.sort(key=lambda x: x["val"], reverse=True)
-                        # マイナスは影響度（絶対値）が高い順（例: -30, -20, -10）
                         neg_candidates.sort(key=lambda x: x["val"]) 
-                        
-                        # 合体（左にプラス、右にマイナス）
                         final_badges = pos_candidates + neg_candidates
-                        
                         badge_spans = []
                         for b in final_badges:
                             css_class = "badge-plus" if b["val"] > 0 else "badge-minus"
                             tooltip = f"{b['name']}: {b['val']:+}点"
                             badge_spans.append(f'<span class="factor-badge {css_class}" title="{tooltip}">{b["char"]}</span>')
-                        
-                        if badge_spans: 
-                            badges_html = f'<div class="badge-container">{"".join(badge_spans)}</div>'
-                            
+                        if badge_spans: badges_html = f'<div class="badge-container">{"".join(badge_spans)}</div>'
                     cell_html = f'<td class="{bg_class} td-{col_align}">{cell_data}{badges_html}</td>'
                 elif col_key == 'comment': 
                     cell_html = f'<td class="{bg_class} td-{col_align}"><div class="comment-scroll-box">{cell_data}</div></td>'
@@ -1503,7 +1453,6 @@ if st.session_state.analyzed_data:
                     cell_html = f'<td class="{bg_class} td-{col_align}">{cell_data}</td>'
                 row_cells.append(cell_html)
             rows_html.append(f'<tr>{"".join(row_cells)}</tr>')
-            
         return f"""
         <h4 style="margin-top: 1.5rem; margin-bottom: 0.5rem;">{title} ({len(data_frame)}件)</h4>
         <div class="table-container">
@@ -1561,3 +1510,4 @@ if st.session_state.analyzed_data:
                         has_minus = True
                 if not has_minus: st.markdown('<p style="color:#666; margin: 0; padding: 0 0 0 15px;">- 該当なし</p>', unsafe_allow_html=True)
                 st.markdown("---")
+
