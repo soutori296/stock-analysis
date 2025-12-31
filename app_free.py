@@ -1227,7 +1227,7 @@ if st.session_state.analyzed_data:
     df['bt_cell_content'] = df.apply(lambda row: f"<b>{row['backtest_raw']}</b><br><span style='font-size:11px;'>({row['bt_win_count']}勝{row.get('bt_loss_count', 0)}敗)</span>", axis=1)
     df['per_pbr_disp'] = df.apply(lambda row: f"{row['per']}<br>{row['pbr']}", axis=1)
     df['No'] = range(1, len(df) + 1)
-    df['No'] = df.apply(lambda row: f"{row['No']} <span class='update-badge'>更新済</span>" if row.get('is_updated_in_this_run') and row.get('update_count', 1) > 1 else f"{row['No']}", axis=1)
+    df['No'] = df.apply(lambda row: f"{row['No']} <span class='update-badge'>更新</span>" if row.get('is_updated_in_this_run') and row.get('update_count', 1) > 1 else f"{row['No']}", axis=1)
 
 # --- CSV用データ加工（PBR第2位 / その他第1位 / 損切整数 版） ---
     # CSVに出力する項目と名前を定義
@@ -1423,5 +1423,6 @@ if st.session_state.analyzed_data:
         特定の銘柄の売買を推奨するものではなく、実際の投資判断や売買に用いることを目的としていません。
     </div>
     """, unsafe_allow_html=True)
+
 
 
