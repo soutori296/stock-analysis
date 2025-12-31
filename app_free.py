@@ -135,7 +135,7 @@ st.markdown(f"""
     .custom-title {{ font-size: 1.2rem !important; font-weight: bold; display: flex; align-items: center; gap: 15px; color: inherit !important; }}
     .custom-title img {{ height: 60px !important; }}
     .big-font {{ font-size:14px !important; font-weight: bold; color: inherit !important; }}
-    .update-badge {{ font-size: 10px !important; font-weight: bold !important; color: white !important; background-color: #ff6347 !important; padding: 1px 4px !important; border-radius: 3px; }}
+    .update-badge {{ font-size: 10px; font-weight: bold; color: #ff6347; display: inline-block; vertical-align: middle; line-height: 1.0; margin-left: 5px; }}
     .factor-badge {{ display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; font-size: 11px; font-weight: bold; border-radius: 4px; border: 1.5px solid; }}
     .badge-plus {{ color: #004d00 !important; background-color: #ccffcc !important; border-color: #008000 !important; }}
     .badge-minus {{ color: #800000 !important; background-color: #ffcccc !important; border-color: #cc0000 !important; }}
@@ -1423,6 +1423,7 @@ if st.session_state.analyzed_data:
         特定の銘柄の売買を推奨するものではなく、実際の投資判断や売買に用いることを目的としていません。
     </div>
     """, unsafe_allow_html=True)
+
 
 
 
