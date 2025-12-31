@@ -1294,7 +1294,10 @@ if st.session_state.analyzed_data:
 
     b64 = base64.b64encode(csv_str.encode('utf-8-sig')).decode()
     href = f'data:text/csv;base64,{b64}'
-    filename = f'analysis_{datetime.datetime.now().strftime("%Y%m%d_%H%M")}.csv'
+    
+    jst_now_for_csv = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=9)
+    filename = f'analysis_{jst_now_for_csv.strftime("%Y%m%d_%H%M")}.csv'
+
     st.markdown(f'''
         <a href="{href}" download="{filename}" style="
             text-decoration:none; display:block; width:100%; text-align:center; padding:12px; border-radius:8px; 
