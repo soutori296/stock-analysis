@@ -60,7 +60,7 @@ st.markdown(f"""
         padding: 0px 15px 1rem 15px !important; 
         width: 100% !important;
     }}
-    [data-testid="stSidebar"] > div:first-child {{ width: 250px !important; max-width: 250px !important; }}
+    [data-testid="stSidebar"] > div:first-child {{ width: 260px !important; max-width: 260px !important; }}
 
     /* --- サイドバー文字色：全ての要素を背景追従(inherit)に変更 --- */
     
@@ -1423,3 +1423,4 @@ if st.session_state.analyzed_data:
         特定の銘柄の売買を推奨するものではなく、実際の投資判断や売買に用いることを目的としていません。
     </div>
     """, unsafe_allow_html=True)
+
