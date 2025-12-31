@@ -37,43 +37,11 @@ def get_market_status():
 status_label, jst_now = get_market_status()
 status_color = "#d32f2f" if "進行中" in status_label else "#1976d2"
 
-# ==============================================================================
-# 【完全復活・統合版】CSSスタイル（サイドバー維持 ＋ 表デザイン復旧）
-# ==============================================================================
+# --- CSSスタイル（サイドバー文字視認性・完全修正版） ---
 st.markdown(f"""
 <style> 
-    /* 1. メイン画面の全体レイアウト */
-    .block-container {{ 
-        max-width: 100% !important; 
-        padding-top: 2rem !important; 
-        padding-bottom: 5rem !important; 
-        padding-left: 1.5rem !important; 
-        padding-right: 1.5rem !important; 
-    }}
-
-    /* 2. タイトル・説明文・バッジ（ユーザー様調整版を維持） */
-    .custom-title {{ 
-        font-size: 1.5rem !important; 
-        font-weight: bold; 
-        display: flex; 
-        align-items: center; 
-        gap: 15px; 
-        margin-bottom: 10px; 
-        color: inherit; 
-    }}
-    .custom-title img {{ 
-        height: 60px !important; 
-        width: auto !important; 
-        vertical-align: middle; 
-        object-fit: contain; 
-    }}
-    .big-font {{ 
-        font-size:16px !important; 
-        font-weight: bold; 
-        font-family: "Meiryo", sans-serif; 
-        line-height: 1.5;
-        margin-bottom: 10px !important;
-    }}
+    /* 1. メイン画面レイアウト */
+    .block-container {{ max-width: 100% !important; padding: 2rem 1.5rem !important; }}
     .status-badge {{ 
         background-color: {status_color}; 
         color: white; 
@@ -84,113 +52,93 @@ st.markdown(f"""
         vertical-align: middle; 
     }}
 
-    /* 3. サイドバー全体の構造調整（維持） */
+    /* 2. サイドバー全体の構造（最上部引き上げ・15px均等） */
     [data-testid="stSidebar"] {{ padding: 0px !important; }}
     [data-testid="stSidebarContent"] {{ padding: 0px !important; }}
     [data-testid="stSidebarUserContent"] {{
         margin-top: -35px !important; 
-        padding-top: 0px !important;
-        padding-bottom: 1rem !important;
-        padding-left: 15px !important;
-        padding-right: 15px !important;
+        padding: 0px 15px 1rem 15px !important; 
         width: 100% !important;
     }}
-    [data-testid="stSidebar"] > div:first-child {{
-        width: 250px !important;
-        max-width: 250px !important;
+    [data-testid="stSidebar"] > div:first-child {{ width: 250px !important; max-width: 250px !important; }}
+
+    /* --- サイドバー文字色：全ての要素を背景追従(inherit)に変更 --- */
+    
+    /* 入力欄のラベル (n点以上、使用AIモデル等) */
+    [data-testid="stSidebar"] label p {{ 
+        font-size: 11px !important; 
+        margin-bottom: 2px !important; 
+        font-weight: bold !important; 
+        color: inherit !important; 
     }}
 
-    /* 4. サイドバー内パーツの個別調整（維持） */
-    [data-testid="stSidebarUserContent"] .stSelectbox:first-of-type {{
-        margin-top: 5px !important;
+    /* 🔍表示フィルター などのカスタム見出し */
+    .sidebar-header-style {{ 
+        font-size: 11px !important; 
+        font-weight: bold !important; 
+        margin: 5px 0 2px 0; 
+        display: block; 
+        color: inherit !important; 
     }}
-    [data-testid="stSidebar"] label p {{
-        font-size: 11px !important;
-        margin-bottom: -15px !important;
-        font-weight: bold !important;
-        line-height: 1.2 !important;
-        color: #31333F;
-    }}
-    [data-testid="stSidebar"] .stCheckbox label {{
-        display: flex !important;
-        align-items: center !important; 
-        gap: 5px !important;
-    }}
+
+    /* チェックボックスの横の文字 (適用、連続) */
     [data-testid="stSidebar"] .stCheckbox label div[data-testid="stMarkdownContainer"] p {{
-        margin: 0 !important;
-        padding: 0 !important;
-        line-height: 1.0 !important;
-        font-size: 13px !important;
-        transform: translateY(1.5px); 
+        font-size: 12px !important;
+        color: inherit !important;
+        transform: translateY(1.5px);
+    }}
+
+    /* SYSTEM AUTHENTICATED 等のステータス表示 */
+    .slim-status {{ 
+        font-size: 11px !important; 
+        padding: 1px 8px !important; 
+        margin-bottom: 4px !important; 
+        border-radius: 3px; 
+        border-left: 2px solid #ccc; 
+        background-color: rgba(128, 128, 128, 0.1) !important; /* ほんのり背景色を付ける */
+        color: inherit !important; 
+        line-height: 1.2; 
+        font-weight: 500; 
+    }}
+    .status-ok {{ border-left-color: #10b981 !important; color: #10b981 !important; }}
+
+    /* 3. サイドバー・パーツ配置調整 */
+    [data-testid="stSidebarUserContent"] .stSelectbox:first-of-type {{ margin-top: 5px !important; }}
+    [data-testid="stSidebar"] .stCheckbox {{ margin-top: 24px !important; }}
+    [data-testid="stSidebar"] div[data-testid="stHorizontalBlock"]:has(.stButton) [data-testid="column"]:nth-child(2) .stCheckbox {{
+        padding-top: 10px !important; /* 連続ボタンの高さ合わせ */
     }}
     [data-testid="stSidebar"] div[data-testid="stHorizontalBlock"]:has(.stNumberInput) [data-testid="column"]:nth-child(2) .stCheckbox {{
-        padding-top: 36px !important; 
+        padding-top: 36px !important; /* 適用ボタンの高さ合わせ */
     }}
-    [data-testid="stSidebar"] div[data-testid="stHorizontalBlock"]:has(.stButton) [data-testid="column"]:nth-child(2) .stCheckbox {{
-        padding-top: 10px !important; 
-    }}
-    .stWidget, .stButton, .stSelectbox, .stTextArea {{ width: 100% !important; margin: 0px !important; }}
-    .sidebar-header-style {{ font-size: 11px !important; font-weight: bold; margin-top: 5px !important; margin-bottom: 2px !important; display: block; color: #31333F; }}
-    .slim-status {{ font-size: 11px !important; padding: 1px 8px !important; margin-bottom: 0px !important; border-radius: 3px; border-left: 2px solid #ccc; background-color: #f8fafc; color: #64748b; line-height: 1.2; font-weight: 500; }}
-    .status-ok {{ border-left-color: #10b981; background-color: #f0fdf4; color: #15803d; }}
 
-    /* 5. テーブル（表）の設定：文字サイズ13pxと左寄せを復旧 */
-    .table-container {{ width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; margin-bottom: 20px; }}
+    /* ウィジェット幅の固定 */
+    .stWidget, .stButton, .stSelectbox, .stTextArea {{ width: 100% !important; margin: 0px !important; }}
+
+    /* 4. テーブル設定（白背景固定で視認性確保） */
     .ai-table {{ 
-        width: 100%; border-collapse: collapse; min-width: 1200px; 
-        background-color: #ffffff; color: #000000; 
+        width: 100%; border-collapse: collapse; min-width: 1100px; 
         font-family: "Meiryo", sans-serif; font-size: 13px !important; 
+        background-color: white !important; 
+        color: black !important; 
     }}
-    .ai-table th {{ 
-        background-color: #e0e0e0; color: #000000; border: 1px solid #999; 
-        padding: 4px 2px; text-align: center; vertical-align: middle; 
-        font-weight: bold; white-space: normal !important; line-height: 1.2; 
-    }}
-    .ai-table td {{ 
-        background-color: #ffffff; color: #000000; border: 1px solid #ccc; 
-        padding: 4px 2px; vertical-align: top; line-height: 1.4; 
-        text-align: center; /* 基本は中央寄せ */
-    }}
-    
-    /* 企業名・所感用の左寄せクラス */
-    .td-left {{ 
-        text-align: left !important; 
-        padding-left: 8px !important; 
-    }}
-    
-    /* 行の色（背景色） */
+    .ai-table th {{ background-color: #e0e0e0 !important; color: black !important; border: 1px solid #999; padding: 4px 2px; text-align: center; font-weight: bold; }}
+    .ai-table td {{ border: 1px solid #ccc; padding: 4px 2px; vertical-align: top; text-align: center; color: black !important; }}
+    .td-left {{ text-align: left !important; padding-left: 8px !important; }}
+
+    /* 背景色（テーブル内） */
     .bg-aoteng {{ background-color: #E6F0FF !important; }} 
     .bg-low-liquidity {{ background-color: #FFE6E6 !important; }} 
     .bg-triage-high {{ background-color: #FFFFCC !important; }} 
-    
-    /* 7. アイの所感・バッジ */
-    .comment-scroll-box {{ 
-        max-height: 70px; overflow-y: auto; padding-right: 5px; 
-        white-space: normal; text-align: left !important; line-height: 1.4; margin: 0; 
-    }}
-    .badge-container {{ margin-top: 4px; display: flex; flex-wrap: wrap; gap: 3px; max-width: 100%; padding-bottom: 2px; }}
-    .factor-badge {{ 
-        display: inline-flex; align-items: center; justify-content: center; 
-        width: 22px; height: 22px; font-size: 12px; font-weight: bold; 
-        border-radius: 4px; border: 1.5px solid; line-height: 1; 
-        white-space: nowrap; flex-shrink: 0; text-align: center; box-sizing: border-box; 
-    }}
-    .badge-plus {{ color: #004d00; background-color: #ccffcc; border-color: #008000; }}
-    .badge-minus {{ color: #800000; background-color: #ffcccc; border-color: #cc0000; }}
-    
-    /* 更新済バッジのスタイル（復活） */
-    .update-badge {{
-        font-size: 10px !important;
-        font-weight: bold !important;
-        color: white !important;
-        background-color: #ff6347 !important; /* トマト色 */
-        padding: 1px 4px !important;
-        border-radius: 3px !important;
-        margin-left: 5px !important;
-        vertical-align: middle !important;
-        display: inline-block !important;
-        line-height: 1.2 !important;
-    }}
+
+    /* 5. タイトル・その他 */
+    .custom-title {{ font-size: 1.2rem !important; font-weight: bold; display: flex; align-items: center; gap: 15px; color: inherit !important; }}
+    .custom-title img {{ height: 60px !important; }}
+    .big-font {{ font-size:14px !important; font-weight: bold; color: inherit !important; }}
+    .update-badge {{ font-size: 10px !important; font-weight: bold !important; color: white !important; background-color: #ff6347 !important; padding: 1px 4px !important; border-radius: 3px; }}
+    .factor-badge {{ display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; font-size: 11px; font-weight: bold; border-radius: 4px; border: 1.5px solid; }}
+    .badge-plus {{ color: #004d00 !important; background-color: #ccffcc !important; border-color: #008000 !important; }}
+    .badge-minus {{ color: #800000 !important; background-color: #ffcccc !important; border-color: #cc0000 !important; }}
 </style>
 """, unsafe_allow_html=True)
 
