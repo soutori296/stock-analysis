@@ -941,7 +941,7 @@ with st.sidebar:
         col_cont.checkbox("連続", value=st.session_state.get('run_continuously_checkbox', False), key='run_continuously_checkbox_key', on_change=toggle_continuous_run)
         
         is_btn_disabled = st.session_state.get('is_running_continuous', False) or api_key is None
-        analyze_start_clicked = col_start.button("▶️分析開始", use_container_width=True, disabled=is_btn_disabled)
+        analyze_start_clicked = col_start.button("▶️分析", use_container_width=True, disabled=is_btn_disabled)
 
         col_clr, col_re = st.columns(2)
         is_mng_disabled = st.session_state.get('is_running_continuous', False)
@@ -1423,4 +1423,5 @@ if st.session_state.analyzed_data:
         特定の銘柄の売買を推奨するものではなく、実際の投資判断や売買に用いることを目的としていません。
     </div>
     """, unsafe_allow_html=True)
+
 
