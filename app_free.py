@@ -16,7 +16,7 @@ import base64
 
 # --- アイコン設定（オリジナル画像） ---
 ICON_URL = "https://raw.githubusercontent.com/soutori296/stock-analysis/main/aisan.png"
-PAGE_TITLE = "教えて！AIさん 2"
+PAGE_TITLE = "教えて！AIさん 23"
 
 # ==============================================================================
 # 【最優先】ページ設定 & CSS
@@ -1423,6 +1423,7 @@ if st.session_state.analyzed_data:
         特定の銘柄の売買を推奨するものではなく、実際の投資判断や売買に用いることを目的としていません。
     </div>
     """, unsafe_allow_html=True)
+
 
 
 
