@@ -104,7 +104,7 @@ st.markdown(f"""
 
     /* 3. サイドバー・パーツ配置調整 */
     [data-testid="stSidebarUserContent"] .stSelectbox:first-of-type {{ margin-top: 5px !important; }}
-    [data-testid="stSidebar"] .stCheckbox {{ margin-top: 24px !important; }}
+    [data-testid="stSidebar"] .stCheckbox {{ margin-top: 4px !important; }}
     [data-testid="stSidebar"] div[data-testid="stHorizontalBlock"]:has(.stButton) [data-testid="column"]:nth-child(2) .stCheckbox {{
         padding-top: 10px !important; /* 連続ボタンの高さ合わせ */
     }}
@@ -1423,6 +1423,7 @@ if st.session_state.analyzed_data:
         特定の銘柄の売買を推奨するものではなく、実際の投資判断や売買に用いることを目的としていません。
     </div>
     """, unsafe_allow_html=True)
+
 
 
 
