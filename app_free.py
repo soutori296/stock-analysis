@@ -56,7 +56,7 @@ st.markdown(f"""
     [data-testid="stSidebar"] {{ padding: 0px !important; }}
     [data-testid="stSidebarContent"] {{ padding: 0px !important; }}
     [data-testid="stSidebarUserContent"] {{
-        margin-top: -35px !important; 
+        margin-top: -25px !important; 
         padding: 0px 15px 1rem 15px !important; 
         width: 100% !important;
     }}
@@ -1423,6 +1423,7 @@ if st.session_state.analyzed_data:
         特定の銘柄の売買を推奨するものではなく、実際の投資判断や売買に用いることを目的としていません。
     </div>
     """, unsafe_allow_html=True)
+
 
 
 
