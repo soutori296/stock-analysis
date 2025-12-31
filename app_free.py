@@ -49,15 +49,15 @@ st.markdown(f"""
         border-radius: 4px; 
         font-size: 12px; 
         font-weight: bold; 
-        vertical-align: middle; 
+        vertical-align: middle;
     }}
 
     /* 2. サイドバー全体の構造（最上部引き上げ・15px均等） */
     [data-testid="stSidebar"] {{ padding: 0px !important; }}
     [data-testid="stSidebarContent"] {{ padding: 0px !important; }}
     [data-testid="stSidebarUserContent"] {{
-        margin-top: -35px !important; 
-        padding: 0px 15px 1rem 15px !important; 
+        margin-top: -35px !important; /* 修正: -35pxだとWeb環境で見切れるため緩和 */
+        padding: 10px 15px 1rem 15px !important; /* 修正: 上部に余裕を持たせる */
         width: 100% !important;
     }}
     [data-testid="stSidebar"] > div:first-child {{ width: 260px !important; max-width: 260px !important; }}
@@ -473,9 +473,9 @@ def calculate_score_and_logic(df, info, vol_ratio, status):
             elif rr < 1.0: score -= 25; factors["低R/R比"] = -25
 
     dd_abs = abs(max_dd_val * 100)
-    if dd_abs < 1.0: score += 5; factors["低DD率"] = 5
-    elif dd_abs > 15.0: score -= 20; factors["高DDリスク"] = -20 
-    elif is_plunge: score -= 15; factors["高DDリスク"] = -15   
+    if dd_abs < 1.0: score += 5; factors["低含損率"] = 5
+    elif dd_abs > 15.0: score -= 20; factors["高含損リスク"] = -20 
+    elif is_plunge: score -= 15; factors["高含損リスク"] = -15   
     if recovery_days <= 20: score += 5; factors["早期回復"] = 5
     elif recovery_days >= 100: score -= 10; factors["回復遅延"] = -10
     if get_25day_ratio() >= 125.0: score -= 10; factors["市場過熱"] = -10
@@ -1104,7 +1104,7 @@ HEADER_MAP = [
     ('No', 'No', 'center', '40px', '40px'), ('code_disp', 'コード', 'center', '70px', '70px'), ('name', '　企業名', 'left', '190px', '190px'), 
     ('cap_disp', '時価総額', 'center', '100px', '100px'), ('score_disp', '点', 'center', '50px', '50px'), ('strategy', '分析戦略', 'center', '80px', '80px'), 
     ('price_disp', '現在値', 'center', '70px', '70px'), ('buy_disp', '想定水準\n（乖離）', 'center', '80px', '80px'), ('rr_disp', 'R/R比', 'center', '50px', '50px'), 
-    ('dd_sl_disp', 'DD率\nSL率', 'center', '90px', '90px'), ('target_txt', '　利益確定目標値', 'left', '130px', '130px'), ('rsi_disp', 'RSI', 'center', '60px', '60px'), 
+    ('dd_sl_disp', '最大含損率\n損切乖離率', 'center', '90px', '90px'), ('target_txt', '　利益確定目標値', 'left', '130px', '130px'), ('rsi_disp', 'RSI', 'center', '60px', '60px'), 
     ('vol_disp_html', '出来高比\n(5日平均)', 'center', '80px', '80px'), ('bt_cell_content', '5MA実績', 'center', '65px', '65px'), 
     ('per_pbr_disp', 'PER\nPBR', 'center', '60px', '60px'), ('momentum', '直近勝率', 'center', '60px', '60px'), ('comment', '　アイの所感', 'left', '345px', '345px')
 ]
@@ -1236,7 +1236,7 @@ if st.session_state.analyzed_data:
         ('cap_val', '時価総額(億円)'),
         ('score', '総合点'), ('strategy', '分析戦略'), ('price', '現在値'),
         ('buy', '想定水準(価格)'), ('p_half', '目標_半利確'), ('p_full', '目標_全利確'),
-        ('sl_ma', '損切ライン(円)'), ('max_dd_pct', 'DD率'), ('risk_reward', 'R/R比'),
+        ('sl_ma', '損切ライン(円)'), ('max_dd_pct', '最大含損率'), ('risk_reward', 'R/R比'),
         ('rsi', 'RSI'), ('vol_ratio', '出来高倍率'), 
         ('avg_volume_5d', '5日平均出来高(株)'),
         ('momentum', '直近勝率'), ('backtest_raw', 'MA5実績'),
@@ -1266,9 +1266,9 @@ if st.session_state.analyzed_data:
         if col in df_csv.columns:
             df_csv[col] = pd.to_numeric(df_csv[col], errors='coerce').round(1)
 
-    # 4. DD率の小数点第1位丸め（例: -1.9%）
-    if 'DD率' in df_csv.columns:
-        df_csv['DD率'] = pd.to_numeric(df_csv['DD率'], errors='coerce').apply(
+    # 4. 最大含損率の小数点第1位丸め（例: -1.9%）
+    if '最大含損率' in df_csv.columns:
+        df_csv['最大含損率'] = pd.to_numeric(df_csv['最大含損率'], errors='coerce').apply(
             lambda x: f"{round(x, 1):.1f}%" if pd.notna(x) else '－'
         )
 
@@ -1313,7 +1313,7 @@ if st.session_state.analyzed_data:
         "週足上昇": {"char": "週", "prio": 30}, "週足下落": {"char": "週", "prio": 30},
         "戦略優位性": {"char": "戦", "prio": 40}, "青天井": {"char": "青", "prio": 50},
         "大型堅調": {"char": "堅", "prio": 55}, "高R/R比": {"char": "Ｒ", "prio": 60},
-        "低R/R比": {"char": "損", "prio": 60}, "低DD率": {"char": "安", "prio": 70},
+        "低R/R比": {"char": "損", "prio": 60}, "低含損率": {"char": "安", "prio": 70},
         "高DDリスク": {"char": "落", "prio": 70}, "早期回復": {"char": "復", "prio": 80},
         "回復遅延": {"char": "遅", "prio": 80}, "GC発生": {"char": "Ｇ", "prio": 90},
         "DC発生": {"char": "Ｄ", "prio": 90}, "出来高急増": {"char": "出", "prio": 100},
@@ -1423,15 +1423,3 @@ if st.session_state.analyzed_data:
         特定の銘柄の売買を推奨するものではなく、実際の投資判断や売買に用いることを目的としていません。
     </div>
     """, unsafe_allow_html=True)
-
-
-
-
-
-
-
-
-
-
-
-
