@@ -37,7 +37,7 @@ def get_market_status():
 status_label, jst_now = get_market_status()
 status_color = "#d32f2f" if "進行中" in status_label else "#1976d2"
 
-# --- CSSスタイル（サイドバー文字視認性・完全修正版） ---
+# --- CSSスタイル ---
 st.markdown(f"""
 <style> 
     /* 1. メイン画面レイアウト */
@@ -52,81 +52,47 @@ st.markdown(f"""
         vertical-align: middle;
     }}
 
-    /* 2. サイドバー全体の構造（最上部引き上げ・15px均等） */
+    /* 2. サイドバー全体の構造 */
     [data-testid="stSidebar"] {{ padding: 0px !important; }}
     [data-testid="stSidebarContent"] {{ padding: 0px !important; }}
     [data-testid="stSidebarUserContent"] {{
-        margin-top: -35px !important; /* 修正: -35pxだとWeb環境で見切れるため緩和 */
-        padding: 10px 15px 1rem 15px !important; /* 修正: 上部に余裕を持たせる */
+        margin-top: -35px !important; 
+        padding: 10px 15px 1rem 15px !important; 
         width: 100% !important;
     }}
     [data-testid="stSidebar"] > div:first-child {{ width: 260px !important; max-width: 260px !important; }}
 
-    /* --- サイドバー文字色：全ての要素を背景追従(inherit)に変更 --- */
-    
-    /* 入力欄のラベル (n点以上、使用AIモデル等) */
-    [data-testid="stSidebar"] label p {{ 
-        font-size: 11px !important; 
-        margin-bottom: 2px !important; 
-        font-weight: bold !important; 
-        color: inherit !important; 
-    }}
+    /* サイドバー文字色 */
+    [data-testid="stSidebar"] label p {{ font-size: 11px !important; margin-bottom: 2px !important; font-weight: bold !important; color: inherit !important; }}
+    .sidebar-header-style {{ font-size: 11px !important; font-weight: bold !important; margin: 5px 0 2px 0; display: block; color: inherit !important; }}
+    [data-testid="stSidebar"] .stCheckbox label div[data-testid="stMarkdownContainer"] p {{ font-size: 12px !important; color: inherit !important; transform: translateY(1.5px); }}
 
-    /* 🔍表示フィルター などのカスタム見出し */
-    .sidebar-header-style {{ 
-        font-size: 11px !important; 
-        font-weight: bold !important; 
-        margin: 5px 0 2px 0; 
-        display: block; 
-        color: inherit !important; 
-    }}
-
-    /* チェックボックスの横の文字 (適用、連続) */
-    [data-testid="stSidebar"] .stCheckbox label div[data-testid="stMarkdownContainer"] p {{
-        font-size: 12px !important;
-        color: inherit !important;
-        transform: translateY(1.5px);
-    }}
-
-    /* SYSTEM AUTHENTICATED 等のステータス表示 */
+    /* ステータス表示 */
     .slim-status {{ 
-        font-size: 11px !important; 
-        padding: 1px 8px !important; 
-        margin-bottom: 4px !important; 
-        border-radius: 3px; 
-        border-left: 2px solid #ccc; 
-        background-color: rgba(128, 128, 128, 0.1) !important; /* ほんのり背景色を付ける */
-        color: inherit !important; 
-        line-height: 1.2; 
-        font-weight: 500; 
+        font-size: 11px !important; padding: 1px 8px !important; margin-bottom: 4px !important; 
+        border-radius: 3px; border-left: 2px solid #ccc; background-color: rgba(128, 128, 128, 0.1) !important; 
+        color: inherit !important; line-height: 1.2; font-weight: 500; 
     }}
     .status-ok {{ border-left-color: #10b981 !important; color: #10b981 !important; }}
 
-    /* 3. サイドバー・パーツ配置調整 */
+    /* サイドバー・パーツ配置調整 */
     [data-testid="stSidebarUserContent"] .stSelectbox:first-of-type {{ margin-top: 5px !important; }}
     [data-testid="stSidebar"] .stCheckbox {{ margin-top: 4px !important; }}
-    [data-testid="stSidebar"] div[data-testid="stHorizontalBlock"]:has(.stButton) [data-testid="column"]:nth-child(2) .stCheckbox {{
-        padding-top: 10px !important; /* 連続ボタンの高さ合わせ */
-    }}
-    [data-testid="stSidebar"] div[data-testid="stHorizontalBlock"]:has(.stNumberInput) [data-testid="column"]:nth-child(2) .stCheckbox {{
-        padding-top: 36px !important; /* 適用ボタンの高さ合わせ */
-    }}
-
-    /* ウィジェット幅の固定 */
+    [data-testid="stSidebar"] div[data-testid="stHorizontalBlock"]:has(.stButton) [data-testid="column"]:nth-child(2) .stCheckbox {{ padding-top: 10px !important; }}
+    [data-testid="stSidebar"] div[data-testid="stHorizontalBlock"]:has(.stNumberInput) [data-testid="column"]:nth-child(2) .stCheckbox {{ padding-top: 36px !important; }}
     .stWidget, .stButton, .stSelectbox, .stTextArea {{ width: 100% !important; margin: 0px !important; }}
 
-    /* 4. テーブル設定（白背景固定で視認性確保） */
+    /* 4. テーブル設定 */
     .ai-table {{ 
         width: 100%; border-collapse: collapse; min-width: 1100px; 
         font-family: "Meiryo", sans-serif; font-size: 13px !important; 
-        background-color: white !important; 
-        color: black !important; 
+        background-color: white !important; color: black !important; 
     }}
     .ai-table th {{ background-color: #e0e0e0 !important; color: black !important; border: 1px solid #999; padding: 4px 2px; text-align: center; font-weight: bold; }}
     .ai-table td {{ border: 1px solid #ccc; padding: 4px 2px; vertical-align: top; text-align: center; color: black !important; }}
     .td-left {{ text-align: left !important; padding-left: 8px !important; }}
 
-    /* 背景色（テーブル内） */
+    /* 背景色 */
     .bg-aoteng {{ background-color: #E6F0FF !important; }} 
     .bg-low-liquidity {{ background-color: #FFE6E6 !important; }} 
     .bg-triage-high {{ background-color: #FFFFCC !important; }} 
@@ -136,9 +102,25 @@ st.markdown(f"""
     .custom-title img {{ height: 60px !important; margin-top: 15px;}}
     .big-font {{ font-size:14px !important; font-weight: bold; color: inherit !important; }}
     .update-badge {{ font-size: 10px; font-weight: bold; color: #ff6347; display: inline-block; vertical-align: middle; line-height: 1.0; margin-left: 5px; }}
-    .factor-badge {{ display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; font-size: 11px; font-weight: bold; border-radius: 4px; border: 1.5px solid; }}
+    .badge-container {{ margin-top: 4px; display: flex; flex-wrap: wrap; gap: 3px; justify-content: flex-start; }}
+    /* cursor: help を default に変更して、？マークが出ないようにしました */
+    .factor-badge {{ display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; font-size: 11px; font-weight: bold; border-radius: 4px; border: 1.5px solid; cursor: default; }}
     .badge-plus {{ color: #004d00 !important; background-color: #ccffcc !important; border-color: #008000 !important; }}
     .badge-minus {{ color: #800000 !important; background-color: #ffcccc !important; border-color: #cc0000 !important; }}
+
+    /* レジェンドアコーディオン */
+    details.legend-details summary {{
+        cursor: pointer; padding: 8px; background-color: #f8fafc;
+        border: 1px solid #e2e8f0; border-radius: 4px; font-weight: bold;
+        color: #475569; font-size: 13px; list-style: none; display: flex; align-items: center; gap: 8px;
+    }}
+    details.legend-details summary::after {{ content: "▼"; font-size: 10px; margin-left: auto; transition: transform 0.2s; }}
+    details.legend-details[open] summary::after {{ transform: rotate(180deg); }}
+    details.legend-details .legend-content {{
+        padding: 10px; border: 1px solid #e2e8f0; border-top: none; background-color: #ffffff;
+        display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px;
+    }}
+    .legend-item {{ display: flex; align-items: center; gap: 6px; font-size: 11px; color: #334155; }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -197,6 +179,44 @@ st.markdown(f"""
 </p>
 """, unsafe_allow_html=True)
 
+# --- バッジ凡例（アコーディオン・真の完全版） ---
+st.markdown("""
+<section style="margin-bottom: 15px;">
+    <details class="legend-details">
+        <summary>
+            <svg style="width:16px;height:16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+            アイコン・バッジ全リスト（クリックで開閉）
+        </summary>
+        <div class="legend-content">
+            <div class="legend-item"><span class="factor-badge badge-plus">新</span> <span>新高値ブレイク (+15)</span></div>
+            <div class="legend-item"><span class="factor-badge badge-plus">逆</span> <span>RSIダイバージェンス (+15)</span></div>
+            <div class="legend-item"><span class="factor-badge badge-plus">機</span> <span>RCI好転 (+10)</span></div>
+            <div class="legend-item"><span class="factor-badge badge-plus">戦</span> <span>戦略優位性 (+15)</span></div>
+            <div class="legend-item"><span class="factor-badge badge-plus">充</span> <span>スクイーズ (+10)</span></div>
+            <div class="legend-item"><span class="factor-badge badge-plus">青</span> <span>青天井モード (+15)</span></div>
+            <div class="legend-item"><span class="factor-badge badge-plus">Ｒ</span> <span>高リスクリワード (+20)</span></div>
+            <div class="legend-item"><span class="factor-badge badge-plus">週</span> <span>週足上昇トレンド (+5)</span></div>
+            <div class="legend-item"><span class="factor-badge badge-plus">堅</span> <span>大型堅調 (+10)</span></div>
+            <div class="legend-item"><span class="factor-badge badge-plus">安</span> <span>低含損率 (+5)</span></div>
+            <div class="legend-item"><span class="factor-badge badge-plus">復</span> <span>早期回復 (+5)</span></div>
+            <div class="legend-item"><span class="factor-badge badge-plus">Ｇ</span> <span>ゴールデンクロス (+5)</span></div>
+            <div class="legend-item"><span class="factor-badge badge-plus">出</span> <span>出来高急増 (+10)</span></div>
+            <div class="legend-item"><span class="factor-badge badge-plus">勢</span> <span>直近勢い (+5)</span></div>
+            <div class="legend-item"><span class="factor-badge badge-plus">適</span> <span>RSI適正 (+5)</span></div>
+            <div class="legend-item"><span class="factor-badge badge-minus">週</span> <span>週足下落トレンド (-20)</span></div>
+            <div class="legend-item"><span class="factor-badge badge-minus">損</span> <span>低リスクリワード (-25)</span></div>
+            <div class="legend-item"><span class="factor-badge badge-minus">落</span> <span>高含損リスク (-15)</span></div>
+            <div class="legend-item"><span class="factor-badge badge-minus">遅</span> <span>回復遅延 (-10)</span></div>
+            <div class="legend-item"><span class="factor-badge badge-minus">Ｄ</span> <span>デッドクロス (-10)</span></div>
+            <div class="legend-item"><span class="factor-badge badge-minus">市</span> <span>市場過熱 (-10)</span></div>
+            <div class="legend-item"><span class="factor-badge badge-minus">板</span> <span>流動性懸念 (-30)</span></div>
+            <div class="legend-item"><span class="factor-badge badge-minus">凪</span> <span>低ボラ (-10)</span></div>
+            <div class="legend-item"><span class="factor-badge badge-minus">熱</span> <span>RSIペナルティ (警告)</span></div>
+        </div>
+    </details>
+</section>
+""", unsafe_allow_html=True)
+
 with st.expander("📘 取扱説明書 (データ仕様・判定基準)"):
     st.markdown(f"""
     <p>
@@ -224,6 +244,45 @@ def toggle_continuous_run():
     if not st.session_state.get('run_continuously_checkbox_key', False):
          st.session_state.is_running_continuous = False
          st.session_state.wait_start_time = None
+
+# --- テクニカル指標ロジック (RCI/Divergence 追加) ---
+def calculate_rci(series, period=9):
+    """RCI (Rank Correlation Index) を計算"""
+    rci_values = []
+    n = period
+    date_ranks = np.arange(n, 0, -1) 
+    for i in range(len(series)):
+        if i < n - 1:
+            rci_values.append(None)
+            continue
+        window = series.iloc[i-n+1 : i+1]
+        price_ranks = window.rank(method='first', ascending=False).values
+        d = price_ranks - date_ranks
+        d2_sum = np.sum(d**2)
+        rci = (1 - (6 * d2_sum) / (n**3 - n)) * 100
+        rci_values.append(rci)
+    return pd.Series(rci_values, index=series.index)
+
+def check_bullish_divergence(df):
+    """強気のダイバージェンス（価格下落、RSI上昇）を検知"""
+    if len(df) < 30: return False
+    recent_slice = df.iloc[-8:] 
+    if recent_slice.empty: return False
+    min_price_idx_recent = recent_slice['Low'].idxmin()
+    min_price_recent = recent_slice.loc[min_price_idx_recent, 'Low']
+    rsi_recent = df.loc[min_price_idx_recent, 'RSI']
+    
+    past_slice = df.iloc[-40:-8]
+    if past_slice.empty: return False
+    min_price_idx_past = past_slice['Low'].idxmin()
+    min_price_past = past_slice.loc[min_price_idx_past, 'Low']
+    rsi_past = df.loc[min_price_idx_past, 'RSI']
+    
+    # 条件: 価格切り下げ(1%以上) かつ RSI切り上げ(5pt以上) かつ 過去RSIが40以下
+    is_price_lower = min_price_recent < min_price_past * 0.99
+    is_rsi_higher = rsi_recent > rsi_past + 5
+    is_rsi_low_level = rsi_past < 40 
+    return is_price_lower and is_rsi_higher and is_rsi_low_level
 
 # --- 出来高調整ウェイト ---
 WEIGHT_MODELS = {
@@ -386,7 +445,7 @@ market_25d_ratio = get_25day_ratio()
 
 def calculate_score_and_logic(df, info, vol_ratio, status):
     is_weekly_up = True; is_breakout = False; is_squeeze = False; is_plunge = False
-    if len(df) < 80: return 50, {}, "様子見", 0, 0, 0, 0, False, 0, 50, 0, "通常レンジ", "0%"
+    if len(df) < 80: return 50, {}, "様子見", 0, 0, 0, 0, False, 0, 50, 0, "通常レンジ", "0%", 0
 
     df = df.copy()
     df['SMA5'] = df['Close'].rolling(5).mean(); df['SMA25'] = df['Close'].rolling(25).mean()
@@ -399,6 +458,9 @@ def calculate_score_and_logic(df, info, vol_ratio, status):
     delta = df['Close'].diff()
     gain = (delta.where(delta > 0, 0)).rolling(14).mean(); loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
     rs = gain / loss; df['RSI'] = 100 - (100 / (1 + rs))
+    
+    # RCI 計算
+    df['RCI9'] = calculate_rci(df['Close'], period=9)
 
     last = df.iloc[-1]; prev = df.iloc[-2]; curr_price = round(float(last['Close']), 1)
     ma5, ma25, ma75 = last['SMA5'], last['SMA25'], last['SMA75']
@@ -409,7 +471,13 @@ def calculate_score_and_logic(df, info, vol_ratio, status):
     recent = df['Close'].diff().tail(5); up_days = int((recent > 0).sum())
     momentum_str = f"{(up_days / 5) * 100:.0f}%"
 
-    strategy, buy_target, p_half, p_full, sl_ma, is_aoteng, sl_pct = evaluate_strategy_new(df, info, vol_ratio, high_250d, atr_smoothed, curr_price, ma5, ma25, ma75, prev_ma5, rsi_val, atr_sl_calc)
+    # ダイバージェンス & RCI好転 チェック
+    is_divergence = check_bullish_divergence(df)
+    rci_val = last.get('RCI9', 0); prev_rci = prev.get('RCI9', 0)
+    is_rci_reversal = (prev_rci < -80 and rci_val > prev_rci and rci_val > -80) or \
+                      (prev_rci < -70 and rci_val > prev_rci + 10)
+
+    strategy, buy_target, p_half, p_full, sl_ma, is_aoteng, sl_pct = evaluate_strategy_new(df, info, vol_ratio, high_250d, atr_smoothed, curr_price, ma5, ma25, ma75, prev_ma5, rsi_val, atr_sl_calc, is_divergence, is_rci_reversal)
 
     if len(df) >= 76:
         lookback_75_high = df['High'].iloc[:-1].tail(75).max()
@@ -459,11 +527,17 @@ def calculate_score_and_logic(df, info, vol_ratio, status):
     if is_breakout: trend_sum += 15; factors["新高値ブレイク"] = 15
     if is_squeeze: trend_sum += 10; factors["スクイーズ"] = 10
     if "🚀" in strategy: trend_sum += 15; factors["戦略優位性"] = 15
+    if "💎" in strategy: trend_sum += 15; factors["戦略優位性"] = 15 # 反転戦略加点
     if is_aoteng and rsi_val < 80 and vol_ratio > 1.5: trend_sum += 15; factors["青天井"] = 15
+    
+    # 逆張り系加点
+    if is_divergence: trend_sum += 15; factors["RSIダイバー"] = 15
+    if is_rci_reversal: trend_sum += 10; factors["RCI好転"] = 10
+
     if is_large and len(df) >= 25:
         recent_25 = df.tail(25); mdd_25 = ((recent_25['Close'] / recent_25['Close'].cummax()) - 1).min()
         if mdd_25 > -0.03: trend_sum += 10; factors["大型堅調"] = 10
-    score += min(trend_sum, 35)
+    score += min(trend_sum, 40) # 上限緩和
 
     if buy_target > 0 and sl_ma > 0 and not is_aoteng:
         risk = buy_target - sl_ma; reward = ((p_half + p_full) / 2 if p_half > 0 else p_full) - buy_target
@@ -481,7 +555,21 @@ def calculate_score_and_logic(df, info, vol_ratio, status):
     if get_25day_ratio() >= 125.0: score -= 10; factors["市場過熱"] = -10
     if is_gc: score += 5; factors["GC発生"] = 5
     elif is_dc: score -= 10; factors["DC発生"] = -10
+    
     if 55 <= rsi_val <= 65: score += 5; factors["RSI適正"] = 5
+
+    # 【慣性仮説ロジック：時価総額に応じたRSIペナルティ基準】
+    # 大型ほど慣性が働きトレンドが継続しやすいため、高RSIでも許容する（閾値を上げる）。
+    # 小型ほど慣性が弱く反落しやすいため、厳しい閾値で減点する。
+    cat = get_market_cap_category(info.get("cap", 0))
+    rsi_penalty_threshold = 75 # default (mid)
+    if cat in ["超大型", "大型"]: rsi_penalty_threshold = 80 # 慣性で伸びるため緩和
+    elif cat in ["小型", "超小型"]: rsi_penalty_threshold = 70 # 急落リスクのため厳格化
+    
+    if rsi_val >= rsi_penalty_threshold and not is_aoteng: 
+        score -= 15
+        factors["RSIペナルティ"] = -15
+
     if vol_ratio > 1.5: score += 10; factors["出来高急増"] = 10
     if up_days >= 4: score += 5; factors["直近勢い"] = 5
     if last['Vol_SMA5'] < 1000: score -= 30; factors["流動性欠如"] = -30
@@ -490,7 +578,7 @@ def calculate_score_and_logic(df, info, vol_ratio, status):
     atr_comment = "ボラティリティが危険水域です。" if atr_p >= 5.0 else ("値動きが荒くなっています。" if atr_p >= 3.0 else "通常レンジ内です。")
     if is_squeeze: atr_comment += " ⚡スクイーズ発生中。"
 
-    return score, factors, strategy, buy_target, p_half, p_full, sl_ma, is_aoteng, sl_pct, rsi_val, atr_smoothed, atr_comment, momentum_str
+    return score, factors, strategy, buy_target, p_half, p_full, sl_ma, is_aoteng, sl_pct, rsi_val, atr_smoothed, atr_comment, momentum_str, rci_val
 
 def run_backtest_precise(df, market_cap):
     try:
@@ -607,10 +695,11 @@ def create_signals_pro_bear(df, info, vol_ratio_in):
     p_half = int(np.floor(ma5 - 1)) if ma5 else 0; p_full = int(np.floor(ma25 - 1)) if ma25 else 0
     return { "strategy": "🚀逆ロジ", "buy": int(np.floor(entry_price)), "p_half": p_half, "p_full": p_full, "sl_ma": int(np.floor(stop_price)), "signal_success": True }
 
-def evaluate_strategy_new(df, info, vol_ratio, high_250d, atr_val, curr_price, ma5, ma25, ma75, prev_ma5, rsi_val, atr_sl_price):
+def evaluate_strategy_new(df, info, vol_ratio, high_250d, atr_val, curr_price, ma5, ma25, ma75, prev_ma5, rsi_val, atr_sl_price, is_div, is_rci_rev):
     signals_bull = create_signals_pro_bull(df, info, vol_ratio)
     signals_bear = create_signals_pro_bear(df, info, vol_ratio)
     strategy, buy_target, p_half, p_full, sl_ma, is_aoteng = "様子見", int(ma5) if ma5 > 0 else 0, 0, 0, atr_sl_price, False
+    
     if signals_bull["signal_success"] and signals_bull["strategy"] == "🚀順ロジ":
          signals = signals_bull
          strategy, buy_target, p_half, p_full, sl_ma, is_aoteng = signals["strategy"], signals["buy"], signals["p_half"], signals["p_full"], signals["sl_ma"], False
@@ -619,6 +708,7 @@ def evaluate_strategy_new(df, info, vol_ratio, high_250d, atr_val, curr_price, m
          strategy, buy_target, p_half, p_full, sl_ma, is_aoteng = signals["strategy"], signals["buy"], signals["p_half"], signals["p_full"], signals["sl_ma"], False
     else:
          sl_ma = atr_sl_price
+         # 順張り判定
          if ma5 > ma25 > ma75 and curr_price > ma75: 
               strategy, buy_target = "🔥順張り", int(ma5)
               category_str = get_market_cap_category(info["cap"])
@@ -629,10 +719,17 @@ def evaluate_strategy_new(df, info, vol_ratio, high_250d, atr_val, curr_price, m
                    is_aoteng = True; max_high_today = df['High'].iloc[-1]; atr_trailing_price = max(0, max_high_today - (atr_val * 2.5))
                    p_full = int(np.floor(atr_trailing_price)); p_half = 0; sl_ma = p_full 
               else: p_half = p_half_candidate; p_full = p_full_candidate
-         elif rsi_val <= 30 or (curr_price < ma25 * 0.9 if ma25 else False):
+         
+         # 逆張り(底打ち)判定強化
+         elif (rsi_val <= 30) or (is_div) or (is_rci_rev and rsi_val <= 45):
+             strategy, buy_target = "💎底打反転", int(curr_price)
+             p_half_candidate = int(np.floor(ma5 - 1)) if ma5 else 0; p_full_candidate = int(np.floor(ma25 - 1)) if ma25 else 0 
+             p_half = p_half_candidate; p_full = p_full_candidate
+         elif (curr_price < ma25 * 0.9 if ma25 else False):
              strategy, buy_target = "🌊逆張り", int(curr_price)
              p_half_candidate = int(np.floor(ma5 - 1)) if ma5 else 0; p_full_candidate = int(np.floor(ma25 - 1)) if ma25 else 0 
              p_half = p_half_candidate; p_full = p_full_candidate
+
     sl_pct = ((curr_price / sl_ma) - 1) * 100 if curr_price > 0 and sl_ma > 0 else 0.0
     return strategy, buy_target, p_half, p_full, sl_ma, is_aoteng, sl_pct
 
@@ -660,13 +757,16 @@ def get_stock_data(ticker, current_run_count):
         avg_vol_5d = df['Vol_SMA5'].iloc[-1] if not pd.isna(df['Vol_SMA5'].iloc[-1]) else 0
         vol_weight = get_volume_weight(jst_now_local, info["cap"])
         v_ratio = info['volume'] / (avg_vol_5d * vol_weight) if vol_weight > 0 and avg_vol_5d > 0 else 1.0
-        raw_score, factors, strategy, buy_target, p_half, p_full, sl_ma, is_aoteng, sl_pct, rsi_val, atr_smoothed, atr_comment, momentum_str = calculate_score_and_logic(df, info, v_ratio, status)
+        
+        # 新ロジック呼び出し
+        raw_score, factors, strategy, buy_target, p_half, p_full, sl_ma, is_aoteng, sl_pct, rsi_val, atr_smoothed, atr_comment, momentum_str, rci_val = calculate_score_and_logic(df, info, v_ratio, status)
+        
         current_score = max(0, min(100, raw_score))
         if ticker not in st.session_state.score_history: st.session_state.score_history[ticker] = {'pre_market_score': current_score}
         pre_score = st.session_state.score_history[ticker].get('pre_market_score', current_score)
         score_diff = current_score - pre_score; st.session_state.score_history[ticker]['current_score'] = current_score
         current_atr_sl = round(curr_price - max(atr_smoothed * 1.5, curr_price * 0.01), 1)
-        df['SMA25'] = df['Close'].rolling(25).mean() # 追加
+        df['SMA25'] = df['Close'].rolling(25).mean() 
         current_ma25 = df['SMA25'].iloc[-1] if not pd.isna(df['SMA25'].iloc[-1]) else 0
         atr_pct_val = (atr_smoothed / curr_price * 100 if curr_price > 0 else 0)
         risk_reward_calc = 0.0
@@ -704,7 +804,7 @@ def get_stock_data(ticker, current_run_count):
         return {
             "code": ticker, "name": info["name"], "price": curr_price, "cap_val": info["cap"], "cap_disp": fmt_market_cap(info["cap"]),
             "per": info["per"], "pbr": info["pbr"], "rsi": rsi_val, "rsi_disp": f"{rsi_val:.1f}", 
-            "vol_ratio": v_ratio, "strategy": strategy, "score": current_score, "score_diff": score_diff,
+            "rci": rci_val, "vol_ratio": v_ratio, "strategy": strategy, "score": current_score, "score_diff": score_diff,
             "buy": buy_target, "p_half": p_half, "p_full": p_full, "backtest": bt_str, "backtest_raw": bt_str,
             "max_dd_pct": max_dd_pct, "sl_pct": sl_pct, "sl_ma": sl_ma, "ma25": current_ma25, "atr_sl_price": current_atr_sl,
             "avg_volume_5d": avg_vol_5d, "is_low_liquidity": avg_vol_5d < 1000, "is_aoteng": is_aoteng, 
@@ -744,6 +844,7 @@ def batch_analyze_with_ai(data_list):
         sl_ma = d.get('sl_ma', 0)
         atr_sl_price = d.get('atr_sl_price', 0)
         ma25_sl_price = d.get('ma25', 0) * 0.995 
+        rci_val = d.get('rci', 0)
         
         low_liq = "致命的低流動性:警告(1000株未満)" if d.get('avg_volume_5d', 0) < 1000 else "流動性:問題なし"
         atr_msg = d.get('atr_comment', '') 
@@ -756,7 +857,7 @@ def batch_analyze_with_ai(data_list):
         
         data_for_ai += (
             f"ID:{d['code']}: 名称:{d['name']} | 点:{d['score']} | 戦略:{d['strategy']} | "
-            f"RSI:{d['rsi']:.1f} | 乖離:{ma_div:+.1f}% | R/R:{rr_disp} | MDD:{mdd:+.1f}% | "
+            f"RSI:{d['rsi']:.1f} | RCI:{rci_val:.1f} | 乖離:{ma_div:+.1f}% | R/R:{rr_disp} | MDD:{mdd:+.1f}% | "
             f"SL_R/R:{sl_ma:,.0f} | SL_ATR:{atr_sl_price:,.0f} | SL_MA25:{ma25_sl_price:,.0f} | "
             f"LIQUIDITY:{low_liq} | ATR_MSG:{atr_msg}{earnings_info}\n"
         )
@@ -785,7 +886,7 @@ def batch_analyze_with_ai(data_list):
    - 75点 (高評価): 75文字以下。
    - 65点以下 (中立/様子見): 65文字以下。
 8. 市場環境が【明確な過熱ゾーン】の場合、全てのコメントのトーンを控えめにし、「市場全体が過熱しているため、この銘柄にも調整が入るリスクがある」といった<b>強い警戒感</b>を盛り込んでください。
-9. 戦略の根拠、RSIの状態、出来高倍率、およびR/R比を具体的に盛り込んでください。特に、RSIが55.0から65.0の範囲にある場合（スイートスポット）は、「トレンドの勢いが継続しやすい中立的な水準」といった評価を用いてください。
+9. 戦略の根拠、RSIの状態、RCIの反転、出来高倍率、およびR/R比を具体的に盛り込んでください。特に、RCIが底値圏(-80以下)から反転している場合は、リバウンド期待に言及してください。
 10. <b>GC:発生またはDC:発生の銘柄については、コメント内で必ずその事実に言及してください。</b>
 11. 【リスク情報と撤退基準】
     - リスク情報（MDD、SL乖離率）を参照し、リスク管理の重要性に言及してください。
@@ -800,7 +901,7 @@ def batch_analyze_with_ai(data_list):
 
 【出力形式】ID:コード | コメント
 （例）
-ID:9984 | <b>ソフトバンクグループ</b>｜RSIは中立圏に位置し、MA25_SL（6,500円）を終値で割るか、ATR_SL（6,400円）を割るかのどちらかをロスカット基準としてご検討ください。
+ID:9984 | <b>ソフトバンクグループ</b>｜RCIが-80から反転し底打ちを示唆。MA25_SL（6,500円）を終値で割るか、ATR_SL（6,400円）を割るかのどちらかをロスカット基準としてご検討ください。
 
 【最後に】リストの最後に「END_OF_LIST」と書き、その後に続けて「アイの独り言（常体・独白調）」を1行で書いてください。語尾に「ね」や「だわ」などは使わず、冷静な口調で。※見出し不要。独り言は、市場25日騰落レシオ({r25:.2f}%)を総括し、規律ある撤退の重要性に言及する。
 """
@@ -902,13 +1003,12 @@ with st.sidebar:
         st.session_state.selected_model_name = st.selectbox("使用AIモデル", options=["gemma-3-12b-it", "gemini-2.5-flash"], index=0)
         st.markdown('<hr style="margin: 10px 0; border: 0; border-top: 1px solid #eee;">', unsafe_allow_html=True)
         
-        # ソート順に「R/R比順 (高い順)」を追加
         st.session_state.sort_option_key = st.selectbox(
             "📊 結果のソート順", 
             options=[
                 "スコア順 (高い順)", 
                 "更新回数順", 
-                "R/R比順 (高い順)",  # ← これを追加
+                "R/R比順 (高い順)", 
                 "時価総額順 (高い順)", 
                 "出来高倍率順 (高い順)",
                 "RSI順 (低い順)", 
@@ -930,8 +1030,6 @@ with st.sidebar:
         st.session_state.ui_filter_max_rsi = col_f5.number_input("RSI (n未満)", 0, 100, st.session_state.ui_filter_max_rsi, 5)
         st.session_state.ui_filter_rsi_on = col_f6.checkbox("適用", value=st.session_state.ui_filter_rsi_on, key='f_rsi_check')
         
-        #st.markdown('<div style="margin-top: 10px;"></div>', unsafe_allow_html=True)
-
         tickers_input = st.text_area(f"銘柄コード (上限10銘柄/回)", value=st.session_state.get('tickers_input_value',''), placeholder="7203\n8306", height=150)
         if tickers_input != st.session_state.get('tickers_input_value'):
             st.session_state.tickers_input_value = tickers_input
@@ -1211,7 +1309,7 @@ if st.session_state.analyzed_data:
                 lines.append(f"全:{fmt_floor(p_full)} ({pct_f:+.1f}%)")
             if not lines: return "目標超過"
             return "<br>".join(lines)
-        return "MA回帰目標" if "逆" in row['strategy'] else "-"
+        return "MA回帰目標" if "逆" in row['strategy'] or "底" in row['strategy'] else "-"
     df['target_txt'] = df.apply(format_target, axis=1)
 
     def format_rsi_atr(row):
@@ -1229,15 +1327,14 @@ if st.session_state.analyzed_data:
     df['No'] = range(1, len(df) + 1)
     df['No'] = df.apply(lambda row: f"{row['No']} <span class='update-badge'>更新</span>" if row.get('is_updated_in_this_run') and row.get('update_count', 1) > 1 else f"{row['No']}", axis=1)
 
-# --- CSV用データ加工（PBR第2位 / その他第1位 / 損切整数 版） ---
-    # CSVに出力する項目と名前を定義
+    # --- CSV用データ加工 ---
     final_csv_columns = [
         ('code', 'コード'), ('name', '企業名'), 
         ('cap_val', '時価総額(億円)'),
         ('score', '総合点'), ('strategy', '分析戦略'), ('price', '現在値'),
         ('buy', '想定水準(価格)'), ('p_half', '目標_半利確'), ('p_full', '目標_全利確'),
         ('sl_ma', '損切ライン(円)'), ('max_dd_pct', '最大含損率'), ('risk_reward', 'R/R比'),
-        ('rsi', 'RSI'), ('vol_ratio', '出来高倍率'), 
+        ('rsi', 'RSI'), ('rci', 'RCI'), ('vol_ratio', '出来高倍率'), 
         ('avg_volume_5d', '5日平均出来高(株)'),
         ('momentum', '直近勝率'), ('backtest_raw', 'MA5実績'),
         ('per', 'PER'), ('pbr', 'PBR'), ('comment', 'アイの所感'),
@@ -1245,56 +1342,39 @@ if st.session_state.analyzed_data:
     ]
     
     df_csv = df.copy()
-    
-    # 1. カラム名のマッピングと抽出
     rename_map = {key: name for key, name in final_csv_columns}
     df_csv.rename(columns=rename_map, inplace=True)
     available_cols = [name for _, name in final_csv_columns if name in df_csv.columns]
     df_csv = df_csv[available_cols]
 
-    # 2. PER/PBRの数値化と丸め（PBRのみ第2位、PERは第1位）
     if 'PER' in df_csv.columns:
         df_csv['PER'] = df_csv['PER'].astype(str).str.replace('倍', '').str.replace(',', '')
         df_csv['PER'] = pd.to_numeric(df_csv['PER'], errors='coerce').round(1)
-    
     if 'PBR' in df_csv.columns:
         df_csv['PBR'] = df_csv['PBR'].astype(str).str.replace('倍', '').str.replace(',', '')
-        df_csv['PBR'] = pd.to_numeric(df_csv['PBR'], errors='coerce').round(2) # PBRのみ第2位
+        df_csv['PBR'] = pd.to_numeric(df_csv['PBR'], errors='coerce').round(2) 
 
-    # 3. R/R比、出来高倍率、RSIを小数点第1位で丸め
-    for col in ['R/R比', '出来高倍率', 'RSI']:
+    for col in ['R/R比', '出来高倍率', 'RSI', 'RCI']:
         if col in df_csv.columns:
             df_csv[col] = pd.to_numeric(df_csv[col], errors='coerce').round(1)
 
-    # 4. 最大含損率の小数点第1位丸め（例: -1.9%）
     if '最大含損率' in df_csv.columns:
-        df_csv['最大含損率'] = pd.to_numeric(df_csv['最大含損率'], errors='coerce').apply(
-            lambda x: f"{round(x, 1):.1f}%" if pd.notna(x) else '－'
-        )
+        df_csv['最大含損率'] = pd.to_numeric(df_csv['最大含損率'], errors='coerce').apply(lambda x: f"{round(x, 1):.1f}%" if pd.notna(x) else '－')
 
-    # 5. 損切ライン(円)を四捨五入してカンマ区切り整数にする
     if '損切ライン(円)' in df_csv.columns:
-        df_csv['損切ライン(円)'] = pd.to_numeric(df_csv['損切ライン(円)'], errors='coerce').apply(
-            lambda x: f"{int(round(x)):,}" if pd.notna(x) else '－'
-        )
+        df_csv['損切ライン(円)'] = pd.to_numeric(df_csv['損切ライン(円)'], errors='coerce').apply(lambda x: f"{int(round(x)):,}" if pd.notna(x) else '－')
 
-    # 6. 決算日の空欄補完（－）
     if '決算日' in df_csv.columns:
         df_csv['決算日'] = df_csv['決算日'].replace(['', 'None', 'nan', 'NaN'], np.nan).fillna('－')
 
-    # 7. テキスト列の掃除
     for col in ['アイの所感', 'MA5実績']:
         if col in df_csv.columns:
             df_csv[col] = df_csv[col].apply(clean_html_tags).apply(remove_emojis_and_special_chars)
 
-    # 8. 全体の空値を「－」で統一
     df_csv = df_csv.fillna('－')
-
     csv_str = df_csv.to_csv(index=False, encoding='utf-8-sig')
-
     b64 = base64.b64encode(csv_str.encode('utf-8-sig')).decode()
     href = f'data:text/csv;base64,{b64}'
-    
     jst_now_for_csv = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=9)
     filename = f'analysis_{jst_now_for_csv.strftime("%Y%m%d_%H%M")}.csv'
 
@@ -1321,6 +1401,7 @@ if st.session_state.analyzed_data:
         "回復遅延": {"char": "遅", "prio": 80}, "GC発生": {"char": "Ｇ", "prio": 90},
         "DC発生": {"char": "Ｄ", "prio": 90}, "出来高急増": {"char": "出", "prio": 100},
         "直近勢い": {"char": "勢", "prio": 110}, "RSI適正": {"char": "適", "prio": 120},
+        "RSIダイバー": {"char": "逆", "prio": 125}, "RCI好転": {"char": "機", "prio": 126},
         "市場過熱": {"char": "市", "prio": 130}, "流動性欠如": {"char": "板", "prio": 140},
         "低ボラ": {"char": "凪", "prio": 150}, "RSIペナルティ": {"char": "熱", "prio": 160},
     }
@@ -1334,7 +1415,7 @@ if st.session_state.analyzed_data:
             bg_class = ''
             if row.get('is_low_liquidity'): bg_class = 'bg-low-liquidity'
             elif row.get('is_aoteng'): bg_class = 'bg-aoteng'
-            elif row.get('score', 0) >= 75: bg_class = 'bg-triage-high' # display用dfではscoreは数値のまま
+            elif row.get('score', 0) >= 75: bg_class = 'bg-triage-high' 
             
             if "bg-triage-high" not in bg_class and "color:red" in str(row['score_disp']):
                  bg_class = 'bg-triage-high'
