@@ -1365,7 +1365,7 @@ if st.session_state.analyzed_data:
         df_csv['損切ライン(円)'] = pd.to_numeric(df_csv['損切ライン(円)'], errors='coerce').apply(lambda x: f"{int(round(x)):,}" if pd.notna(x) else '－')
 
     if '決算日' in df_csv.columns:
-        df_csv['決算日'] = df_csv['決算日'].replace(['', 'None', 'nan', 'NaN'], np.nan).fillna('－')
+        df_csv['決算日'] = df_csv['決算日'].replace(['', 'None', 'nan', 'NaN'], np.nan).infer_objects(copy=False).fillna('－')
 
     for col in ['アイの所感', 'MA5実績']:
         if col in df_csv.columns:
