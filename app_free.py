@@ -346,10 +346,18 @@ def fmt_market_cap(val):
     except: return "-"
         
 def fetch_with_retry(url, max_retry=3):
-    headers = {"User-Agent": "Mozilla/5.0"}
+    # 403 Forbidden回避のためヘッダーを強化
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
+        "Referer": "https://kabutan.jp/"
+    }
     for attempt in range(max_retry):
         try:
-            res = requests.get(url, headers=headers, timeout=8) 
+            # サーバー負荷軽減のためランダムスリープ
+            time.sleep(random.uniform(0.5, 1.5))
+            res = requests.get(url, headers=headers, timeout=10) 
             res.raise_for_status() 
             return res
         except Exception:
@@ -409,7 +417,9 @@ def get_stock_info(code):
             def clean_tag_and_br(s): return re.sub(r'<[^>]+>', '', s).replace("<br>", "").strip()
             if len(tds) >= 2: data["per"] = clean_tag_and_br(tds[0]); data["pbr"] = clean_tag_and_br(tds[1])
         ohlc_map = {"始値": "open", "高値": "high", "安値": "low", "終値": "close"}
-        ohlc_table_match = re.search(r'<(?:h2|div)[^>]*>\s*12月\d+日.*?<table[^>]*>(.*?)</table>', html, re.DOTALL)
+        
+        # 1月問題の修正：月をハードコードせず、数値としてマッチさせる
+        ohlc_table_match = re.search(r'<(?:h2|div)[^>]*>\s*\d+月\d+日.*?<table[^>]*>(.*?)</table>', html, re.DOTALL)
         ohlc_content = ohlc_table_match.group(1) if ohlc_table_match else html
         for key, val_key in ohlc_map.items():
             m = re.search(fr'<th[^>]*>{key}</th>\s*<td[^>]*>([\d,.]+)</td>', ohlc_content)
@@ -521,9 +531,9 @@ def calculate_score_and_logic(df, info, vol_ratio, status):
     for i, (_, row_d) in enumerate(recovery_check.iterrows()):
         if row_d['Close'] >= row_d['Peak'] * 0.95: recovery_days = i; break
 
-    score = 50; factors = {"基礎点": 50}; trend_sum = 0
-    if is_weekly_up: trend_sum += 5; factors["週足上昇"] = 5
-    else: score -= 20; factors["週足下落"] = -20
+    score = 50; factors = {"基礎点": 50}
+    if is_weekly_up: trend_sum = 5; factors["週足上昇"] = 5
+    else: score -= 20; factors["週足下落"] = -20; trend_sum = 0
     if is_breakout: trend_sum += 15; factors["新高値ブレイク"] = 15
     if is_squeeze: trend_sum += 10; factors["スクイーズ"] = 10
     if "🚀" in strategy: trend_sum += 15; factors["戦略優位性"] = 15
@@ -558,13 +568,11 @@ def calculate_score_and_logic(df, info, vol_ratio, status):
     
     if 55 <= rsi_val <= 65: score += 5; factors["RSI適正"] = 5
 
-    # 【慣性仮説ロジック：時価総額に応じたRSIペナルティ基準】
-    # 大型ほど慣性が働きトレンドが継続しやすいため、高RSIでも許容する（閾値を上げる）。
-    # 小型ほど慣性が弱く反落しやすいため、厳しい閾値で減点する。
+    # 時価総額に応じたRSIペナルティ基準
     cat = get_market_cap_category(info.get("cap", 0))
-    rsi_penalty_threshold = 75 # default (mid)
-    if cat in ["超大型", "大型"]: rsi_penalty_threshold = 80 # 慣性で伸びるため緩和
-    elif cat in ["小型", "超小型"]: rsi_penalty_threshold = 70 # 急落リスクのため厳格化
+    rsi_penalty_threshold = 75 
+    if cat in ["超大型", "大型"]: rsi_penalty_threshold = 80 
+    elif cat in ["小型", "超小型"]: rsi_penalty_threshold = 70 
     
     if rsi_val >= rsi_penalty_threshold and not is_aoteng: 
         score -= 15
@@ -758,7 +766,6 @@ def get_stock_data(ticker, current_run_count):
         vol_weight = get_volume_weight(jst_now_local, info["cap"])
         v_ratio = info['volume'] / (avg_vol_5d * vol_weight) if vol_weight > 0 and avg_vol_5d > 0 else 1.0
         
-        # 新ロジック呼び出し
         raw_score, factors, strategy, buy_target, p_half, p_full, sl_ma, is_aoteng, sl_pct, rsi_val, atr_smoothed, atr_comment, momentum_str, rci_val = calculate_score_and_logic(df, info, v_ratio, status)
         
         current_score = max(0, min(100, raw_score))
@@ -893,7 +900,7 @@ def batch_analyze_with_ai(data_list):
     - **【決算リスク警告（最優先）】**: `EARNINGS_DAYS:X` があり、Xが7以下の場合は、冒頭に「⚠️あとX日で決算発表です。持ち越しには十分ご注意ください。」と警告してください。
     - **流動性**: 致命的低流動性:警告(1000株未満)の銘柄は、冒頭で「平均出来高が1,000株未満と極めて低く、<b>流動性リスク</b>を伴います。」と警告してください。
     - **【ATRリスク】**: ATR_MSGがある場合、ボラティリティリスクとして必ずコメントに含めてください。
-    - **撤退基準（MA25/ATR併記）:** コメントの末尾で、**構造的崩壊ライン**の**MA25_SL（X円）**と、**ボラティリティ基準**の**ATR_SL（Y円）**を**両方とも**言及し、「**MA25を終値で割るか、ATR_SLを割るかのどちらかをロスカット基準としてご検討ください**」という趣旨を明確に伝えてください。
+    - **撤退基準（MA25/ATR併記）:** コメントの末尾で、**構造的崩壊ライン**の**MA25_SL（X円）**と、**ボラティリティ基準**の**ATR_SL（Y円）**を**両方とも**言言及し、「**MA25を終値で割るか、ATR_SLを割るかのどちらかをロスカット基準としてご検討ください**」という趣旨を明確に伝えてください。
     - **青天井領域:** ターゲット情報が「青天井」の場合、<b>「利益目標は固定目標ではなく、動的なATRトレーリング・ストップ（X円）に切り替わっています。」</b>という趣旨を含めてください。
 
 【銘柄データ】
@@ -918,7 +925,7 @@ ID:9984 | <b>ソフトバンクグループ</b>｜RCIが-80から反転し底打
         parts = text.split("END_OF_LIST", 1)
         comment_lines = parts[0].strip().split("\n")
         monologue = parts[1].strip()
-        monologue = re.sub(r'\*\*(.*?)\*\*', r'\1', monologue).replace('**', '').strip() 
+        monologue = monologue.replace('**', '').strip() 
         
         for line in comment_lines:
             line = line.strip()
@@ -927,7 +934,7 @@ ID:9984 | <b>ソフトバンクグループ</b>｜RCIが-80から反転し底打
                     c_code_part, c_com = line.split("|", 1)
                     c_code = c_code_part.replace("ID:", "").strip()
                     c_com_cleaned = c_com.strip()
-                    c_com_cleaned = re.sub(r'\*\*(.*?)\*\*', r'\1', c_com_cleaned).replace('**', '').strip() 
+                    c_com_cleaned = c_com_cleaned.replace('**', '').strip() 
                     CLEANUP_PATTERN_START = r'^(<b>.*?</b>)\s*[:：].*?' 
                     c_com_cleaned = re.sub(CLEANUP_PATTERN_START, r'\1', c_com_cleaned).strip()
                     c_com_cleaned = re.sub(r'^[\s\:\｜\-\・\*\,\.]*', '', c_com_cleaned).strip()
@@ -1000,7 +1007,7 @@ with st.sidebar:
                 st.rerun()
             api_key = None
 
-        st.session_state.selected_model_name = st.selectbox("使用AIモデル", options=["gemma-3-12b-it", "gemini-2.5-flash"], index=0)
+        st.session_state.selected_model_name = st.selectbox("使用AIモデル", options=["gemma-3-12b-it", "gemini-2.5-flash", "gemini-2.5-pro"], index=0)
         st.markdown('<hr style="margin: 10px 0; border: 0; border-top: 1px solid #eee;">', unsafe_allow_html=True)
         
         st.session_state.sort_option_key = st.selectbox(
@@ -1417,7 +1424,7 @@ if st.session_state.analyzed_data:
             elif row.get('is_aoteng'): bg_class = 'bg-aoteng'
             elif row.get('score', 0) >= 75: bg_class = 'bg-triage-high' 
             
-            if "bg-triage-high" not in bg_class and "color:red" in str(row['score_disp']):
+            if "bg-triage-high" in bg_class or "color:red" in str(row['score_disp']):
                  bg_class = 'bg-triage-high'
 
             row_cells = []
