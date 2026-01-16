@@ -1047,28 +1047,35 @@ with st.sidebar:
         analyze_start_clicked = False; clear_button_clicked = False; reload_button_clicked = False
 # ボタン処理
 if clear_button_clicked or reload_button_clicked: st.rerun() 
+# ▼▼▼ 修正後のクリア処理ブロック ▼▼▼
+
+# クリア処理を安全に行うための関数（コールバック）
+def perform_clear_all():
+    st.session_state.analyzed_data = []
+    st.session_state.ai_monologue = ""
+    st.session_state.error_messages = []
+    st.session_state.clear_confirmed = False
+    st.session_state.score_history = {} 
+    # コールバック内であれば、入力欄の値（キー）を書き換えてもエラーになりません
+    st.session_state.tickers_input_value = "" 
+    st.session_state.analysis_index = 0 
+    st.session_state.current_input_hash = "" 
+    st.session_state.is_running_continuous = False
+    st.session_state.wait_start_time = None
+    st.session_state.run_continuously_checkbox = False 
+
 if st.session_state.clear_confirmed:
     st.warning("⚠️ 本当に分析結果をすべてクリアしますか？この操作は取り消せません。", icon="🚨")
     col_confirm, col_cancel, col_clear_spacer = st.columns([0.2, 0.2, 0.6])
-    if col_confirm.button("✅ はい、クリアします", use_container_width=False): 
-        st.session_state.analyzed_data = []
-        st.session_state.ai_monologue = ""
-        st.session_state.error_messages = []
-        st.session_state.clear_confirmed = False
-        st.session_state.overflow_tickers = "" 
-        st.session_state.analysis_run_count = 0 
-        st.session_state.is_first_session_run = True 
-        st.session_state.score_history = {} 
-        st.session_state.tickers_input_value = "" 
-        st.session_state.analysis_index = 0 
-        st.session_state.current_input_hash = "" 
-        st.session_state.is_running_continuous = False
-        st.session_state.wait_start_time = None
-        st.session_state.run_continuously_checkbox = False 
-        st.rerun() 
+    
+    # on_click引数を使って関数を呼び出すことで、再描画前に値をリセットできます
+    col_confirm.button("✅ はい、クリアします", on_click=perform_clear_all, use_container_width=False)
+    
     if col_cancel.button("❌ キャンセル", use_container_width=False): 
         st.session_state.clear_confirmed = False
-        st.rerun() 
+        st.rerun()
+
+# ▲▲▲ 修正後のクリア処理ブロック ▲▲▲
 
 if not st.session_state.authenticated:
     st.info("⬅️ サイドバーでユーザー名を入力して認証してください。")
