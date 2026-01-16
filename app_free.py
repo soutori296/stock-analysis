@@ -960,7 +960,7 @@ with st.sidebar:
                     st.error("パスワードが違います")
         st.stop()
 
-    # 認証後コントロール
+# 認証後コントロール
     api_key = None
     if st.session_state.authenticated:
         st.markdown('<div class="slim-status status-ok">SYSTEM AUTHENTICATED</div>', unsafe_allow_html=True)
@@ -1012,10 +1012,20 @@ with st.sidebar:
         st.session_state.ui_filter_max_rsi = col_f5.number_input("RSI (n未満)", 0, 100, st.session_state.ui_filter_max_rsi, 5)
         st.session_state.ui_filter_rsi_on = col_f6.checkbox("適用", value=st.session_state.ui_filter_rsi_on, key='f_rsi_check')
         
-        tickers_input = st.text_area(f"銘柄コード (上限10銘柄/回)", value=st.session_state.get('tickers_input_value',''), placeholder="7203\n8306", height=150)
-        if tickers_input != st.session_state.get('tickers_input_value'):
-            st.session_state.tickers_input_value = tickers_input
+        # ▼▼▼ 入力欄の不具合修正箇所 ▼▼▼
+        # 入力内容変更時にインデックスをリセットする関数
+        def on_tickers_change():
             st.session_state.analysis_index = 0
+
+        # keyを指定してStreamlitに入力管理を任せる（これで消えなくなります）
+        st.text_area(
+            "銘柄コード (上限10銘柄/回)",
+            key="tickers_input_value",  # session_stateと自動連携
+            placeholder="7203\n8306",
+            height=150,
+            on_change=on_tickers_change # 変更時にリセット関数を実行
+        )
+        # ▲▲▲ 修正箇所ここまで ▲▲▲
 
         col_start, col_cont = st.columns([0.6, 0.4]) 
         col_cont.checkbox("連続", value=st.session_state.get('run_continuously_checkbox', False), key='run_continuously_checkbox_key', on_change=toggle_continuous_run)
@@ -1035,7 +1045,6 @@ with st.sidebar:
                  st.rerun()
     else:
         analyze_start_clicked = False; clear_button_clicked = False; reload_button_clicked = False
-
 # ボタン処理
 if clear_button_clicked or reload_button_clicked: st.rerun() 
 if st.session_state.clear_confirmed:
@@ -1154,7 +1163,7 @@ if analyze_start_clicked or (st.session_state.is_running_continuous and st.sessi
                 is_analysis_complete = (end_index >= total_tickers)
                 if is_analysis_complete:
                      st.success(f"🎉 全{total_tickers}銘柄完了。")
-                     st.session_state.tickers_input_value = "" 
+                     # st.session_state.tickers_input_value = ""  <-- エラー原因のこの行を削除しました
                      st.session_state.analysis_index = 0 
                      st.session_state.is_running_continuous = False 
                      st.session_state.wait_start_time = None 
