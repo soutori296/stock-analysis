@@ -103,7 +103,6 @@ st.markdown(f"""
     .big-font {{ font-size:14px !important; font-weight: bold; color: inherit !important; }}
     .update-badge {{ font-size: 10px; font-weight: bold; color: #ff6347; display: inline-block; vertical-align: middle; line-height: 1.0; margin-left: 5px; }}
     .badge-container {{ margin-top: 4px; display: flex; flex-wrap: wrap; gap: 3px; justify-content: flex-start; }}
-    /* cursor: help を default に変更して、？マークが出ないようにしました */
     .factor-badge {{ display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; font-size: 11px; font-weight: bold; border-radius: 4px; border: 1.5px solid; cursor: default; }}
     .badge-plus {{ color: #004d00 !important; background-color: #ccffcc !important; border-color: #008000 !important; }}
     .badge-minus {{ color: #800000 !important; background-color: #ffcccc !important; border-color: #cc0000 !important; }}
@@ -138,31 +137,28 @@ except Exception: SECRET_HASH = hash_password("default_password_for_local_test")
 MANUAL_URL = "https://soutori296.stars.ne.jp/SoutoriWebShop/ai2_manual.html" 
 
 # --- セッションステート初期化 ---
-if 'analyzed_data' not in st.session_state: st.session_state.analyzed_data = []
-if 'ai_monologue' not in st.session_state: st.session_state.ai_monologue = ""
-if 'error_messages' not in st.session_state: st.session_state.error_messages = []
-if 'clear_confirmed' not in st.session_state: st.session_state.clear_confirmed = False 
-if 'tickers_input_value' not in st.session_state: st.session_state.tickers_input_value = "" 
-if 'analysis_run_count' not in st.session_state: st.session_state.analysis_run_count = 0 
-if 'is_first_session_run' not in st.session_state: st.session_state.is_first_session_run = True 
-if 'analysis_index' not in st.session_state: st.session_state.analysis_index = 0 
-if 'current_input_hash' not in st.session_state: st.session_state.current_input_hash = "" 
-if 'sort_option_key' not in st.session_state: st.session_state.sort_option_key = "スコア順 (高い順)"
-if 'selected_model_name' not in st.session_state: st.session_state.selected_model_name = "gemma-3-12b-it"
-if 'score_history' not in st.session_state: st.session_state.score_history = {} 
-if 'ui_filter_min_score' not in st.session_state: st.session_state.ui_filter_min_score = 75 
-if 'ui_filter_min_liquid_man' not in st.session_state: st.session_state.ui_filter_min_liquid_man = 1.0 
-if 'ui_filter_score_on' not in st.session_state: st.session_state.ui_filter_score_on = False
-if 'ui_filter_liquid_on' not in st.session_state: st.session_state.ui_filter_liquid_on = False
-if 'ui_filter_max_rsi' not in st.session_state: st.session_state.ui_filter_max_rsi = 70 
-if 'ui_filter_rsi_on' not in st.session_state: st.session_state.ui_filter_rsi_on = False
-if 'is_running_continuous' not in st.session_state: st.session_state.is_running_continuous = False 
-if 'wait_start_time' not in st.session_state: st.session_state.wait_start_time = None
-if 'run_continuously_checkbox' not in st.session_state: st.session_state.run_continuously_checkbox = False 
-if 'gemini_api_key_input' not in st.session_state: st.session_state.gemini_api_key_input = "" 
-if 'authenticated' not in st.session_state: st.session_state.authenticated = IS_LOCAL_SKIP_AUTH
+state_keys = [
+    'analyzed_data', 'ai_monologue', 'error_messages', 'clear_confirmed', 
+    'tickers_input_value', 'analysis_run_count', 'is_first_session_run', 
+    'analysis_index', 'current_input_hash', 'sort_option_key', 
+    'selected_model_name', 'score_history', 'ui_filter_min_score', 
+    'ui_filter_min_liquid_man', 'ui_filter_score_on', 'ui_filter_liquid_on', 
+    'ui_filter_max_rsi', 'ui_filter_rsi_on', 'is_running_continuous', 
+    'wait_start_time', 'run_continuously_checkbox', 'gemini_api_key_input', 
+    'authenticated', 'trigger_copy_filtered_data'
+]
+for k in state_keys:
+    if k not in st.session_state:
+        if k == 'authenticated': st.session_state[k] = IS_LOCAL_SKIP_AUTH
+        elif k == 'ui_filter_min_score': st.session_state[k] = 75
+        elif k == 'ui_filter_min_liquid_man': st.session_state[k] = 1.0
+        elif k == 'ui_filter_max_rsi': st.session_state[k] = 70
+        elif k == 'sort_option_key': st.session_state[k] = "スコア順 (高い順)"
+        elif k == 'selected_model_name': st.session_state[k] = "gemma-3-12b-it"
+        elif k in ['analyzed_data', 'error_messages']: st.session_state[k] = []
+        elif k == 'score_history': st.session_state[k] = {}
+        else: st.session_state[k] = False if 'on' in k or 'confirmed' in k or 'is_' in k or 'checkbox' in k else ""
 
-# --- 分析上限定数 ---
 MAX_TICKERS = 10 
 
 # --- タイトル表示 ---
@@ -179,7 +175,7 @@ st.markdown(f"""
 </p>
 """, unsafe_allow_html=True)
 
-# --- バッジ凡例（アコーディオン・真の完全版） ---
+# --- バッジ凡例 ---
 st.markdown("""
 <section style="margin-bottom: 15px;">
     <details class="legend-details">
@@ -245,9 +241,102 @@ def toggle_continuous_run():
          st.session_state.is_running_continuous = False
          st.session_state.wait_start_time = None
 
-# --- テクニカル指標ロジック (RCI/Divergence 追加) ---
+def fetch_with_retry(url, max_retry=3):
+    """403 Forbidden回避のためのヘッダー強化"""
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+        "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
+        "Referer": "https://kabutan.jp/"
+    }
+    for attempt in range(max_retry):
+        try:
+            time.sleep(random.uniform(1.0, 2.5))
+            res = requests.get(url, headers=headers, timeout=15) 
+            if res.status_code == 403:
+                time.sleep(5)
+                continue
+            res.raise_for_status() 
+            return res
+        except Exception:
+            if attempt == max_retry - 1: raise 
+            time.sleep(2 + attempt * 2) 
+    raise Exception("データ取得リトライ失敗")
+
+@st.cache_data(ttl=1) 
+def get_stock_info(code):
+    """株探から個別情報を取得 (月名問題・出来高正規表現修正)"""
+    url = f"https://kabutan.jp/stock/?code={code}"
+    data = {"name": "不明", "per": "-", "pbr": "-", "price": None, "volume": 0.0, "cap": 0, "open": None, "high": None, "low": None, "close": None, "issued_shares": 0.0, "earnings_date": None, "earnings_status": ""}
+    try:
+        res = fetch_with_retry(url) 
+        res.encoding = res.apparent_encoding
+        html = res.text.replace("\n", "").replace("\r", "")
+        
+        m_name = re.search(r'<title>(.*?)【', html)
+        if m_name: data["name"] = re.sub(r'[\(\（].*?[\)\）]', '', m_name.group(1).strip()).replace("<br>", " ").strip()
+        m_price = re.search(r'(?:現在値|終値)</th>\s*<td[^>]*>([\d,.]+)</td>', html)
+        if m_price: data["price"] = safe_float_convert(m_price.group(1))
+        
+        # 出来高の正規表現をより柔軟に (spanタグ等に対応)
+        m_vol = re.search(r'出来高</th>\s*<td[^>]*>(?:<span[^>]*>)?([\d,.]+)(?:</span>)?.*?株</td>', html)
+        if m_vol: data["volume"] = safe_float_convert(m_vol.group(1))
+        
+        m_cap = re.search(r'時価総額</th>\s*<td[^>]*>(.*?)</td>', html)
+        if m_cap:
+            cap_str = re.sub(r'<[^>]+>', '', m_cap.group(1)).strip().replace('\n', '').replace('\r', '') 
+            val = 0
+            if "兆" in cap_str:
+                parts = cap_str.split("兆")
+                trillion = safe_float_convert(parts[0]); billion = safe_float_convert(parts[1]) if len(parts) > 1 else 0
+                val = trillion * 10000 + billion
+            elif "億" in cap_str:
+                val = safe_float_convert(cap_str)
+            data["cap"] = val
+
+        i3_match = re.search(r'<div id="stockinfo_i3">.*?<tbody>(.*?)</tbody>', html)
+        if i3_match:
+            tds = re.findall(r'<td.*?>(.*?)</td>', i3_match.group(1))
+            def clean_tag_and_br(s): return re.sub(r'<[^>]+>', '', s).replace("<br>", "").strip()
+            if len(tds) >= 2: data["per"] = clean_tag_and_br(tds[0]); data["pbr"] = clean_tag_and_br(tds[1])
+
+        # 月名(12月等)に依存しないように \d+月 に修正
+        ohlc_table_match = re.search(r'<(?:h2|div)[^>]*>\s*\d+月\d+日.*?<table[^>]*>(.*?)</table>', html, re.DOTALL)
+        ohlc_content = ohlc_table_match.group(1) if ohlc_table_match else html
+        ohlc_map = {"始値": "open", "高値": "high", "安値": "low", "終値": "close"}
+        for key, val_key in ohlc_map.items():
+            m = re.search(fr'<th[^>]*>{key}</th>\s*<td[^>]*>([\d,.]+)</td>', ohlc_content)
+            if m: data[val_key] = safe_float_convert(m.group(1))
+            
+        m_issued = re.search(r'発行済株式数.*?<td>([\d,.]+).*?株</td>', html)
+        if m_issued: data["issued_shares"] = safe_float_convert(m_issued.group(1))
+        m_earn_plan = re.search(r'決算発表予定日.*?(\d{4})/(\d{1,2})/(\d{1,2})', html)
+        if m_earn_plan:
+            data["earnings_date"] = datetime.datetime(int(m_earn_plan.group(1)), int(m_earn_plan.group(2)), int(m_earn_plan.group(3)))
+            data["earnings_status"] = "upcoming"
+        else:
+            m_earn_done = re.search(r'決算.*?(\d{4})/(\d{1,2})/(\d{1,2}).*?発表', html)
+            if m_earn_done:
+                data["earnings_date"] = datetime.datetime(int(m_earn_done.group(1)), int(m_earn_done.group(2)), int(m_earn_done.group(3)))
+                data["earnings_status"] = "done"
+        return data
+    except Exception as e:
+        st.session_state.error_messages.append(f"データ取得エラー ({code}): {e}")
+        return data
+
+@st.cache_data(ttl=300, show_spinner="市場25日騰落レシオを取得中...")
+def get_25day_ratio():
+    url = "https://nikkeiyosoku.com/up_down_ratio/"
+    try:
+        res = fetch_with_retry(url); res.encoding = res.apparent_encoding
+        m_ratio = re.search(r'<p class="stock-txt">([0-9\.]+)', res.text.replace("\n", ""))
+        return float(m_ratio.group(1).strip()) if m_ratio else 100.0
+    except: return 100.0
+    
+market_25d_ratio = get_25day_ratio()
+
+# --- テクニカル指標ロジック (RCI/Divergence) ---
 def calculate_rci(series, period=9):
-    """RCI (Rank Correlation Index) を計算"""
     rci_values = []
     n = period
     date_ranks = np.arange(n, 0, -1) 
@@ -264,25 +353,18 @@ def calculate_rci(series, period=9):
     return pd.Series(rci_values, index=series.index)
 
 def check_bullish_divergence(df):
-    """強気のダイバージェンス（価格下落、RSI上昇）を検知"""
     if len(df) < 30: return False
     recent_slice = df.iloc[-8:] 
     if recent_slice.empty: return False
     min_price_idx_recent = recent_slice['Low'].idxmin()
     min_price_recent = recent_slice.loc[min_price_idx_recent, 'Low']
     rsi_recent = df.loc[min_price_idx_recent, 'RSI']
-    
     past_slice = df.iloc[-40:-8]
     if past_slice.empty: return False
     min_price_idx_past = past_slice['Low'].idxmin()
     min_price_past = past_slice.loc[min_price_idx_past, 'Low']
     rsi_past = df.loc[min_price_idx_past, 'RSI']
-    
-    # 条件: 価格切り下げ(1%以上) かつ RSI切り上げ(5pt以上) かつ 過去RSIが40以下
-    is_price_lower = min_price_recent < min_price_past * 0.99
-    is_rsi_higher = rsi_recent > rsi_past + 5
-    is_rsi_low_level = rsi_past < 40 
-    return is_price_lower and is_rsi_higher and is_rsi_low_level
+    return min_price_recent < min_price_past * 0.99 and rsi_recent > rsi_past + 5 and rsi_past < 40
 
 # --- 出来高調整ウェイト ---
 WEIGHT_MODELS = {
@@ -344,26 +426,6 @@ def fmt_market_cap(val):
             else: return f"{cho}兆{oku}億円" 
         else: return f"{val_int}億円"
     except: return "-"
-        
-def fetch_with_retry(url, max_retry=3):
-    # 403 Forbidden回避のためヘッダーを強化
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-        "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
-        "Referer": "https://kabutan.jp/"
-    }
-    for attempt in range(max_retry):
-        try:
-            # サーバー負荷軽減のためランダムスリープ
-            time.sleep(random.uniform(0.5, 1.5))
-            res = requests.get(url, headers=headers, timeout=10) 
-            res.raise_for_status() 
-            return res
-        except Exception:
-            if attempt == max_retry - 1: raise 
-            time.sleep(1 + attempt * 2) 
-    raise Exception("データ取得リトライ失敗")
 
 def safe_float_convert(s):
     try:
@@ -379,273 +441,6 @@ def remove_emojis_and_special_chars(text):
     emoji_pattern = re.compile("[\U0001F600-\U0001F64F\U0001F300-\U0001F5FF\U0001F680-\U0001F6FF\U0001F700-\U0001F77F\U0001F780-\U0001F7FF\U0001F800-\U0001F8FF\U0001F900-\U0001F9FF\U0001FA00-\U0001FA6F\U0001FA70-\U0001FAFF\U00002702-\U000027B0\U000024C2-\U0001F251]+", flags=re.UNICODE)
     if pd.isna(text) or not isinstance(text, str): return text
     return emoji_pattern.sub(r'', text)
-
-@st.cache_data(ttl=1) 
-def get_stock_info(code):
-    url = f"https://kabutan.jp/stock/?code={code}"
-    data = {"name": "不明", "per": "-", "pbr": "-", "price": None, "volume": None, "cap": 0, "open": None, "high": None, "low": None, "close": None, "issued_shares": 0.0, "earnings_date": None, "earnings_status": ""}
-    try:
-        res = fetch_with_retry(url) 
-        res.encoding = res.apparent_encoding
-        html = res.text.replace("\n", "")
-        
-        m_name = re.search(r'<title>(.*?)【', html)
-        if m_name: data["name"] = re.sub(r'[\(\（].*?[\)\）]', '', m_name.group(1).strip()).replace("<br>", " ").strip()
-        m_price = re.search(r'(?:現在値|終値)</th>\s*<td[^>]*>([\d,.]+)</td>', html)
-        if m_price: data["price"] = safe_float_convert(m_price.group(1))
-        m_vol = re.search(r'出来高</th>\s*<td[^>]*>([\d,.]+).*?株</td>', html)
-        if m_vol: data["volume"] = safe_float_convert(m_vol.group(1))
-        m_cap = re.search(r'時価総額</th>\s*<td[^>]*>(.*?)</td>', html)
-        if m_cap:
-            cap_str = re.sub(r'<[^>]+>', '', m_cap.group(1)).strip().replace('\n', '').replace('\r', '') 
-            val = 0
-            if "兆" in cap_str:
-                parts = cap_str.split("兆")
-                trillion = safe_float_convert(parts[0]); billion = 0
-                if len(parts) > 1 and "億" in parts[1]:
-                    b_match = re.search(r'([\d,.]+)', parts[1])
-                    if b_match: billion = safe_float_convert(b_match.group(1))
-                val = trillion * 10000 + billion
-            elif "億" in cap_str:
-                b_match = re.search(r'([\d,.]+)', cap_str)
-                if b_match: val = safe_float_convert(b_match.group(1))
-            data["cap"] = val
-        i3_match = re.search(r'<div id="stockinfo_i3">.*?<tbody>(.*?)</tbody>', html)
-        if i3_match:
-            tbody = i3_match.group(1)
-            tds = re.findall(r'<td.*?>(.*?)</td>', tbody)
-            def clean_tag_and_br(s): return re.sub(r'<[^>]+>', '', s).replace("<br>", "").strip()
-            if len(tds) >= 2: data["per"] = clean_tag_and_br(tds[0]); data["pbr"] = clean_tag_and_br(tds[1])
-        ohlc_map = {"始値": "open", "高値": "high", "安値": "low", "終値": "close"}
-        
-        # 1月問題の修正：月をハードコードせず、数値としてマッチさせる
-        ohlc_table_match = re.search(r'<(?:h2|div)[^>]*>\s*\d+月\d+日.*?<table[^>]*>(.*?)</table>', html, re.DOTALL)
-        ohlc_content = ohlc_table_match.group(1) if ohlc_table_match else html
-        for key, val_key in ohlc_map.items():
-            m = re.search(fr'<th[^>]*>{key}</th>\s*<td[^>]*>([\d,.]+)</td>', ohlc_content)
-            if m: data[val_key] = safe_float_convert(m.group(1))
-        m_issued = re.search(r'発行済株式数.*?<td>([\d,.]+).*?株</td>', html)
-        if m_issued: data["issued_shares"] = safe_float_convert(m_issued.group(1))
-        m_earn_plan = re.search(r'決算発表予定日.*?(\d{4})/(\d{1,2})/(\d{1,2})', html)
-        if m_earn_plan:
-            data["earnings_date"] = datetime.datetime(int(m_earn_plan.group(1)), int(m_earn_plan.group(2)), int(m_earn_plan.group(3)))
-            data["earnings_status"] = "upcoming"
-        else:
-            m_earn_done = re.search(r'決算.*?(\d{4})/(\d{1,2})/(\d{1,2}).*?発表', html)
-            if m_earn_done:
-                data["earnings_date"] = datetime.datetime(int(m_earn_done.group(1)), int(m_earn_done.group(2)), int(m_earn_done.group(3)))
-                data["earnings_status"] = "done"
-        return data
-    except Exception as e:
-        st.session_state.error_messages.append(f"データ取得エラー (コード:{code}): Kabutan解析失敗。詳細: {e}")
-        return data
-
-@st.cache_data(ttl=300, show_spinner="市場25日騰落レシオを取得中...")
-def get_25day_ratio():
-    url = "https://nikkeiyosoku.com/up_down_ratio/"
-    default_ratio = 100.0 
-    try:
-        res = fetch_with_retry(url); res.encoding = res.apparent_encoding
-        m_ratio = re.search(r'<p class="stock-txt">([0-9\.]+)', res.text.replace("\n", ""))
-        if m_ratio: return float(m_ratio.group(1).strip())
-        return default_ratio
-    except Exception: return default_ratio
-    
-market_25d_ratio = get_25day_ratio()
-
-def calculate_score_and_logic(df, info, vol_ratio, status):
-    is_weekly_up = True; is_breakout = False; is_squeeze = False; is_plunge = False
-    if len(df) < 80: return 50, {}, "様子見", 0, 0, 0, 0, False, 0, 50, 0, "通常レンジ", "0%", 0
-
-    df = df.copy()
-    df['SMA5'] = df['Close'].rolling(5).mean(); df['SMA25'] = df['Close'].rolling(25).mean()
-    df['SMA75'] = df['Close'].rolling(75).mean(); df['Vol_SMA5'] = df['Volume'].rolling(5).mean()
-    df['High_Low'] = df['High'] - df['Low']
-    df['High_PrevClose'] = abs(df['High'] - df['Close'].shift(1))
-    df['Low_PrevClose'] = abs(df['Low'] - df['Close'].shift(1))
-    df['TR'] = df[['High_Low', 'High_PrevClose', 'Low_PrevClose']].max(axis=1)
-    df['ATR'] = df['TR'].rolling(14).mean(); df['ATR_SMA3'] = df['ATR'].rolling(3).mean()
-    delta = df['Close'].diff()
-    gain = (delta.where(delta > 0, 0)).rolling(14).mean(); loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
-    rs = gain / loss; df['RSI'] = 100 - (100 / (1 + rs))
-    
-    # RCI 計算
-    df['RCI9'] = calculate_rci(df['Close'], period=9)
-
-    last = df.iloc[-1]; prev = df.iloc[-2]; curr_price = round(float(last['Close']), 1)
-    ma5, ma25, ma75 = last['SMA5'], last['SMA25'], last['SMA75']
-    prev_ma5, prev_ma25 = prev['SMA5'], prev['SMA25']
-    rsi_val = last['RSI']; atr_smoothed = last['ATR_SMA3']
-    high_250d = df['High'].iloc[:-1].tail(250).max()
-    atr_sl_calc = round(curr_price - max(atr_smoothed * 1.5, curr_price * 0.01), 1)
-    recent = df['Close'].diff().tail(5); up_days = int((recent > 0).sum())
-    momentum_str = f"{(up_days / 5) * 100:.0f}%"
-
-    # ダイバージェンス & RCI好転 チェック
-    is_divergence = check_bullish_divergence(df)
-    rci_val = last.get('RCI9', 0); prev_rci = prev.get('RCI9', 0)
-    is_rci_reversal = (prev_rci < -80 and rci_val > prev_rci and rci_val > -80) or \
-                      (prev_rci < -70 and rci_val > prev_rci + 10)
-
-    strategy, buy_target, p_half, p_full, sl_ma, is_aoteng, sl_pct = evaluate_strategy_new(df, info, vol_ratio, high_250d, atr_smoothed, curr_price, ma5, ma25, ma75, prev_ma5, rsi_val, atr_sl_calc, is_divergence, is_rci_reversal)
-
-    if len(df) >= 76:
-        lookback_75_high = df['High'].iloc[:-1].tail(75).max()
-        if curr_price > lookback_75_high: is_breakout = True
-
-    if is_breakout:
-        strategy = "🚀ブレイク"; buy_target = curr_price  
-        cat = get_market_cap_category(info.get("cap", 0))
-        if is_aoteng:
-            max_high_today = df['High'].iloc[-1]; atr_trailing = max(0, max_high_today - (atr_smoothed * 2.5))
-            sl_ma = round(atr_trailing, 1); p_full = sl_ma; p_half = 0
-        else:
-            p_half = round(buy_target * (1 + get_target_pct_new(cat, True)), 1)
-            p_full = round(buy_target * (1 + get_target_pct_new(cat, False)), 1)
-            sl_ma = round(max(atr_sl_calc, buy_target * 0.97), 1)
-        sl_pct = ((curr_price / sl_ma) - 1) * 100 if sl_ma > 0 else 0.0
-
-    if len(df) >= 120:
-        bb_mid = df['Close'].rolling(20).mean(); bb_width = (4 * df['Close'].rolling(20).std()) / bb_mid
-        if bb_width.iloc[-1] <= bb_width.rolling(120).min().iloc[-1] * 1.1: is_squeeze = True
-
-    try:
-        df_w = df.resample('W-FRI').agg({'Close': 'last'})
-        if len(df_w) >= 13:
-            df_w['SMA13'] = df_w['Close'].rolling(13).mean()
-            is_weekly_up = df_w['Close'].iloc[-1] >= df_w['SMA13'].iloc[-1]
-    except: is_weekly_up = True
-
-    is_gc = (ma5 > ma25) and (prev_ma5 <= prev_ma25) and (abs(ma5-ma25)/ma25 > 0.005)
-    is_dc = (ma5 < ma25) and (prev_ma5 >= prev_ma25) and (abs(ma5-ma25)/ma25 > 0.005)
-
-    dd_75 = df.tail(75).copy(); max_1d_drop = dd_75['Close'].pct_change(1).min(); max_3d_drop = dd_75['Close'].pct_change(3).min()
-    is_large = info.get("cap", 0) >= 3000
-    if (is_large and (max_1d_drop <= -0.04 or max_3d_drop <= -0.08)) or (not is_large and (max_1d_drop <= -0.07 or max_3d_drop <= -0.12)): is_plunge = True
-
-    dd_data = df.tail(75).copy(); dd_data['Peak'] = dd_data['Close'].cummax()
-    dd_data['DD'] = (dd_data['Close'] / dd_data['Peak']) - 1
-    max_dd_val = dd_data['DD'].min(); mdd_day_index = dd_data['DD'].idxmin()
-    recovery_check = dd_data[dd_data.index >= mdd_day_index]
-    recovery_days = 999
-    for i, (_, row_d) in enumerate(recovery_check.iterrows()):
-        if row_d['Close'] >= row_d['Peak'] * 0.95: recovery_days = i; break
-
-    score = 50; factors = {"基礎点": 50}
-    if is_weekly_up: trend_sum = 5; factors["週足上昇"] = 5
-    else: score -= 20; factors["週足下落"] = -20; trend_sum = 0
-    if is_breakout: trend_sum += 15; factors["新高値ブレイク"] = 15
-    if is_squeeze: trend_sum += 10; factors["スクイーズ"] = 10
-    if "🚀" in strategy: trend_sum += 15; factors["戦略優位性"] = 15
-    if "💎" in strategy: trend_sum += 15; factors["戦略優位性"] = 15 # 反転戦略加点
-    if is_aoteng and rsi_val < 80 and vol_ratio > 1.5: trend_sum += 15; factors["青天井"] = 15
-    
-    # 逆張り系加点
-    if is_divergence: trend_sum += 15; factors["RSIダイバー"] = 15
-    if is_rci_reversal: trend_sum += 10; factors["RCI好転"] = 10
-
-    if is_large and len(df) >= 25:
-        recent_25 = df.tail(25); mdd_25 = ((recent_25['Close'] / recent_25['Close'].cummax()) - 1).min()
-        if mdd_25 > -0.03: trend_sum += 10; factors["大型堅調"] = 10
-    score += min(trend_sum, 40) # 上限緩和
-
-    if buy_target > 0 and sl_ma > 0 and not is_aoteng:
-        risk = buy_target - sl_ma; reward = ((p_half + p_full) / 2 if p_half > 0 else p_full) - buy_target
-        if risk > 0 and reward > 0:
-            rr = reward / risk
-            if rr >= 2.0: score += 20; factors["高R/R比"] = 20
-            elif rr < 1.0: score -= 25; factors["低R/R比"] = -25
-
-    dd_abs = abs(max_dd_val * 100)
-    if dd_abs < 1.0: score += 5; factors["低含損率"] = 5
-    elif dd_abs > 15.0: score -= 20; factors["高含損リスク"] = -20 
-    elif is_plunge: score -= 15; factors["高含損リスク"] = -15   
-    if recovery_days <= 20: score += 5; factors["早期回復"] = 5
-    elif recovery_days >= 100: score -= 10; factors["回復遅延"] = -10
-    if get_25day_ratio() >= 125.0: score -= 10; factors["市場過熱"] = -10
-    if is_gc: score += 5; factors["GC発生"] = 5
-    elif is_dc: score -= 10; factors["DC発生"] = -10
-    
-    if 55 <= rsi_val <= 65: score += 5; factors["RSI適正"] = 5
-
-    # 時価総額に応じたRSIペナルティ基準
-    cat = get_market_cap_category(info.get("cap", 0))
-    rsi_penalty_threshold = 75 
-    if cat in ["超大型", "大型"]: rsi_penalty_threshold = 80 
-    elif cat in ["小型", "超小型"]: rsi_penalty_threshold = 70 
-    
-    if rsi_val >= rsi_penalty_threshold and not is_aoteng: 
-        score -= 15
-        factors["RSIペナルティ"] = -15
-
-    if vol_ratio > 1.5: score += 10; factors["出来高急増"] = 10
-    if up_days >= 4: score += 5; factors["直近勢い"] = 5
-    if last['Vol_SMA5'] < 1000: score -= 30; factors["流動性欠如"] = -30
-    atr_p = (atr_smoothed / curr_price) * 100
-    if atr_p < 0.5: score -= 10; factors["低ボラ"] = -10
-    atr_comment = "ボラティリティが危険水域です。" if atr_p >= 5.0 else ("値動きが荒くなっています。" if atr_p >= 3.0 else "通常レンジ内です。")
-    if is_squeeze: atr_comment += " ⚡スクイーズ発生中。"
-
-    return score, factors, strategy, buy_target, p_half, p_full, sl_ma, is_aoteng, sl_pct, rsi_val, atr_smoothed, atr_comment, momentum_str, rci_val
-
-def run_backtest_precise(df, market_cap):
-    try:
-        if len(df) < 80: return "データ不足", 0.0, 0, 0.0, 0.0, 0, 0
-        category = get_market_cap_category(market_cap); target_pct = get_target_pct_new(category, is_half=False) 
-        wins, losses, max_dd_pct = 0, 0, 0.0 
-        test_data = df.tail(75).copy(); n = len(test_data)
-        test_data['SMA5'] = test_data['Close'].rolling(5).mean(); test_data['SMA25'] = test_data['Close'].rolling(25).mean()
-        test_data['High_250d'] = test_data['High'].rolling(250, min_periods=1).max()
-        test_data['PrevClose'] = test_data['Close'].shift(1)
-        test_data['High_Low'] = test_data['High'] - test_data['Low']
-        test_data['High_PrevClose'] = abs(test_data['High'] - test_data['PrevClose'])
-        test_data['Low_PrevClose'] = abs(test_data['Low'] - test_data['PrevClose'])
-        test_data['TR'] = test_data[['High_Low', 'High_PrevClose', 'Low_PrevClose']].max(axis=1)
-        test_data['ATR'] = test_data['TR'].rolling(14).mean()
-        test_data['Vol_SMA5'] = test_data['Volume'].rolling(5).mean()
-        
-        i = 1 
-        while i < n - 10: 
-            prev_row = test_data.iloc[i - 1]; curr_row = test_data.iloc[i]
-            prev_low, prev_close, prev_sma5, prev_sma25 = prev_row.get('Low', 0), prev_row.get('Close', 0), prev_row.get('SMA5', 0), prev_row.get('SMA25', 0)
-            if pd.isna(prev_low) or pd.isna(prev_sma5) or pd.isna(prev_sma25) or prev_sma5 == 0 or prev_sma25 == 0: i += 1; continue
-            is_prev_bull_trend = prev_sma5 > prev_sma25; is_prev_ma5_touch = prev_low <= prev_sma5 * 1.005 
-            open_price, close_price, high_price = curr_row.get('Open', 0), curr_row.get('Close', 0), curr_row.get('High', 0)
-            is_gap_down = open_price < prev_close * 0.99; is_ma5_signal = False
-            if is_prev_bull_trend and is_prev_ma5_touch and not is_gap_down:
-                 if close_price > open_price or high_price >= prev_row.get('High', 0): is_ma5_signal = True
-            is_aoteng_signal = False
-            is_ath = curr_row.get('High', 0) >= curr_row.get('High_250d', 0) and curr_row.get('High_250d', 0) > 0
-            curr_vol_sma5 = curr_row.get('Vol_SMA5', 0)
-            if is_ath and curr_row.get('Volume', 0) >= curr_vol_sma5 * 1.5: is_aoteng_signal = True
-            if is_ma5_signal or is_aoteng_signal:
-                entry_price = prev_sma5 if is_ma5_signal and not is_aoteng_signal else close_price 
-                if entry_price == 0: i += 1; continue
-                if is_aoteng_signal: target_price = entry_price * 1.5; tsl_price = entry_price - (curr_row.get('ATR', 0) * 2.5)
-                else: target_price = entry_price * (1 + target_pct); tsl_price = entry_price * 0.97 
-                is_win, hold_days, trade_min_low = False, 0, entry_price 
-                for j in range(1, 11): 
-                    if i + j >= n: break
-                    future = test_data.iloc[i + j]
-                    future_high, future_low = future.get('High', 0), future.get('Low', 0) 
-                    hold_days = j
-                    if future_low is not None and not pd.isna(future_low): trade_min_low = min(trade_min_low, future_low)
-                    if future_high >= target_price and not is_aoteng_signal: is_win = True; break
-                    sl_level = tsl_price
-                    if future_low <= sl_level: break 
-                if is_aoteng_signal and hold_days == 10 and trade_min_low > sl_level: is_win = True
-                if is_win: wins += 1
-                else: losses += 1
-                if entry_price > 0 and trade_min_low < entry_price:
-                    max_dd_pct = min(max_dd_pct, ((trade_min_low / entry_price) - 1) * 100) 
-                i += max(1, hold_days) 
-            i += 1
-        total_trades = wins + losses; win_rate_pct = (wins / total_trades) * 100 if total_trades > 0 else 0.0
-        bt_str_new = f'{win_rate_pct:.0f}%' 
-        if total_trades == 0: return "機会なし", 0.0, 0, 0.0, target_pct, 0, 0 
-        return bt_str_new, win_rate_pct, total_trades, max_dd_pct, target_pct, wins, losses
-    except Exception as e: return f"計算エラー: {e}", 0.0, 0, 0.0, 0.0, 0, 0
-run_backtest = run_backtest_precise
 
 def create_signals_pro_bull(df, info, vol_ratio_in):
     last = df.iloc[-1]; prev = df.iloc[-2] if len(df) >= 2 else last
@@ -733,13 +528,205 @@ def evaluate_strategy_new(df, info, vol_ratio, high_250d, atr_val, curr_price, m
              strategy, buy_target = "💎底打反転", int(curr_price)
              p_half_candidate = int(np.floor(ma5 - 1)) if ma5 else 0; p_full_candidate = int(np.floor(ma25 - 1)) if ma25 else 0 
              p_half = p_half_candidate; p_full = p_full_candidate
-         elif (curr_price < ma25 * 0.9 if ma25 else False):
+         elif (ma25 > 0 and curr_price < ma25 * 0.9):
              strategy, buy_target = "🌊逆張り", int(curr_price)
              p_half_candidate = int(np.floor(ma5 - 1)) if ma5 else 0; p_full_candidate = int(np.floor(ma25 - 1)) if ma25 else 0 
              p_half = p_half_candidate; p_full = p_full_candidate
 
     sl_pct = ((curr_price / sl_ma) - 1) * 100 if curr_price > 0 and sl_ma > 0 else 0.0
     return strategy, buy_target, p_half, p_full, sl_ma, is_aoteng, sl_pct
+
+def calculate_score_and_logic(df, info, vol_ratio, status):
+    is_weekly_up = True; is_breakout = False; is_squeeze = False; is_plunge = False
+    if len(df) < 80: return 50, {}, "様子見", 0, 0, 0, 0, False, 0, 50, 0, "通常レンジ", "0%", 0
+
+    df = df.copy()
+    df['SMA5'] = df['Close'].rolling(5).mean(); df['SMA25'] = df['Close'].rolling(25).mean()
+    df['SMA75'] = df['Close'].rolling(75).mean(); df['Vol_SMA5'] = df['Volume'].rolling(5).mean()
+    df['High_Low'] = df['High'] - df['Low']
+    df['High_PrevClose'] = abs(df['High'] - df['Close'].shift(1))
+    df['Low_PrevClose'] = abs(df['Low'] - df['Close'].shift(1))
+    df['TR'] = df[['High_Low', 'High_PrevClose', 'Low_PrevClose']].max(axis=1)
+    df['ATR'] = df['TR'].rolling(14).mean(); df['ATR_SMA3'] = df['ATR'].rolling(3).mean()
+    delta = df['Close'].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(14).mean(); loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
+    rs = gain / loss; df['RSI'] = 100 - (100 / (1 + rs))
+    
+    # RCI 計算
+    df['RCI9'] = calculate_rci(df['Close'], period=9)
+
+    last = df.iloc[-1]; prev = df.iloc[-2]; curr_price = round(float(last['Close']), 1)
+    ma5, ma25, ma75 = last['SMA5'], last['SMA25'], last['SMA75']
+    prev_ma5, prev_ma25 = prev['SMA5'], prev['SMA25']
+    rsi_val = last['RSI']; atr_smoothed = last['ATR_SMA3']
+    high_250d = df['High'].iloc[:-1].tail(250).max()
+    atr_sl_calc = round(curr_price - max(atr_smoothed * 1.5, curr_price * 0.01), 1)
+    recent = df['Close'].diff().tail(5); up_days = int((recent > 0).sum())
+    momentum_str = f"{(up_days / 5) * 100:.0f}%"
+
+    # ダイバージェンス & RCI好転 チェック
+    is_divergence = check_bullish_divergence(df)
+    rci_val = last.get('RCI9', 0); prev_rci = prev.get('RCI9', 0)
+    is_rci_reversal = (prev_rci < -80 and rci_val > prev_rci and rci_val > -80) or \
+                      (prev_rci < -70 and rci_val > prev_rci + 10)
+
+    strategy, buy_target, p_half, p_full, sl_ma, is_aoteng, sl_pct = evaluate_strategy_new(df, info, vol_ratio, high_250d, atr_smoothed, curr_price, ma5, ma25, ma75, prev_ma5, rsi_val, atr_sl_calc, is_divergence, is_rci_reversal)
+
+    if len(df) >= 76:
+        lookback_75_high = df['High'].iloc[:-1].tail(75).max()
+        if curr_price > lookback_75_high: is_breakout = True
+
+    if is_breakout:
+        strategy = "🚀ブレイク"; buy_target = curr_price  
+        cat = get_market_cap_category(info.get("cap", 0))
+        if is_aoteng:
+            max_high_today = df['High'].iloc[-1]; atr_trailing = max(0, max_high_today - (atr_smoothed * 2.5))
+            sl_ma = round(atr_trailing, 1); p_full = sl_ma; p_half = 0
+        else:
+            p_half = round(buy_target * (1 + get_target_pct_new(cat, True)), 1)
+            p_full = round(buy_target * (1 + get_target_pct_new(cat, False)), 1)
+            sl_ma = round(max(atr_sl_calc, buy_target * 0.97), 1)
+        sl_pct = ((curr_price / sl_ma) - 1) * 100 if sl_ma > 0 else 0.0
+
+    if len(df) >= 120:
+        bb_mid = df['Close'].rolling(20).mean(); bb_width = (4 * df['Close'].rolling(20).std()) / bb_mid
+        if bb_width.iloc[-1] <= bb_width.rolling(120).min().iloc[-1] * 1.1: is_squeeze = True
+
+    try:
+        df_w = df.resample('W-FRI').agg({'Close': 'last'})
+        if len(df_w) >= 13:
+            df_w['SMA13'] = df_w['Close'].rolling(13).mean()
+            is_weekly_up = df_w['Close'].iloc[-1] >= df_w['SMA13'].iloc[-1]
+    except: is_weekly_up = True
+
+    is_gc = (ma5 > ma25) and (prev_ma5 <= prev_ma25) and (abs(ma5-ma25)/ma25 > 0.005)
+    is_dc = (ma5 < ma25) and (prev_ma5 >= prev_ma25) and (abs(ma5-ma25)/ma25 > 0.005)
+
+    dd_75 = df.tail(75).copy(); max_1d_drop = dd_75['Close'].pct_change(1).min(); max_3d_drop = dd_75['Close'].pct_change(3).min()
+    is_large = info.get("cap", 0) >= 3000
+    if (is_large and (max_1d_drop <= -0.04 or max_3d_drop <= -0.08)) or (not is_large and (max_1d_drop <= -0.07 or max_3d_drop <= -0.12)): is_plunge = True
+
+    dd_data = df.tail(75).copy(); dd_data['Peak'] = dd_data['Close'].cummax()
+    dd_data['DD'] = (dd_data['Close'] / dd_data['Peak']) - 1
+    max_dd_val = dd_data['DD'].min(); mdd_day_index = dd_data['DD'].idxmin()
+    recovery_check = dd_data[dd_data.index >= mdd_day_index]
+    recovery_days = 999
+    for i, (_, row_d) in enumerate(recovery_check.iterrows()):
+        if row_d['Close'] >= row_d['Peak'] * 0.95: recovery_days = i; break
+
+    score = 50; factors = {"基礎点": 50}; trend_sum = 0
+    if is_weekly_up: trend_sum += 5; factors["週足上昇"] = 5
+    else: score -= 20; factors["週足下落"] = -20
+    if is_breakout: trend_sum += 15; factors["新高値ブレイク"] = 15
+    if is_squeeze: trend_sum += 10; factors["スクイーズ"] = 10
+    if "🚀" in strategy: trend_sum += 15; factors["戦略優位性"] = 15
+    if "💎" in strategy: trend_sum += 15; factors["戦略優位性"] = 15 
+    if is_aoteng and rsi_val < 80 and vol_ratio > 1.5: trend_sum += 15; factors["青天井"] = 15
+    
+    if is_divergence: trend_sum += 15; factors["RSIダイバー"] = 15
+    if is_rci_reversal: trend_sum += 10; factors["RCI好転"] = 10
+
+    if is_large and len(df) >= 25:
+        recent_25 = df.tail(25); mdd_25 = ((recent_25['Close'] / recent_25['Close'].cummax()) - 1).min()
+        if mdd_25 > -0.03: trend_sum += 10; factors["大型堅調"] = 10
+    score += min(trend_sum, 40) 
+
+    if buy_target > 0 and sl_ma > 0 and not is_aoteng:
+        risk = buy_target - sl_ma; reward = ((p_half + p_full) / 2 if p_half > 0 else p_full) - buy_target
+        if risk > 0 and reward > 0:
+            rr = reward / risk
+            if rr >= 2.0: score += 20; factors["高R/R比"] = 20
+            elif rr < 1.0: score -= 25; factors["低R/R比"] = -25
+
+    dd_abs = abs(max_dd_val * 100)
+    if dd_abs < 1.0: score += 5; factors["低含損率"] = 5
+    elif dd_abs > 15.0: score -= 20; factors["高含損リスク"] = -20 
+    elif is_plunge: score -= 15; factors["高含損リスク"] = -15   
+    if recovery_days <= 20: score += 5; factors["早期回復"] = 5
+    elif recovery_days >= 100: score -= 10; factors["回復遅延"] = -10
+    if get_25day_ratio() >= 125.0: score -= 10; factors["市場過熱"] = -10
+    if is_gc: score += 5; factors["GC発生"] = 5
+    elif is_dc: score -= 10; factors["DC発生"] = -10
+    
+    if 55 <= rsi_val <= 65: score += 5; factors["RSI適正"] = 5
+
+    cat = get_market_cap_category(info.get("cap", 0))
+    rsi_penalty_threshold = 75 
+    if cat in ["超大型", "大型"]: rsi_penalty_threshold = 80 
+    elif cat in ["小型", "超小型"]: rsi_penalty_threshold = 70 
+    
+    if rsi_val >= rsi_penalty_threshold and not is_aoteng: 
+        score -= 15
+        factors["RSIペナルティ"] = -15
+
+    if vol_ratio > 1.5: score += 10; factors["出来高急増"] = 10
+    if up_days >= 4: score += 5; factors["直近勢い"] = 5
+    if last['Vol_SMA5'] < 1000: score -= 30; factors["流動性欠如"] = -30
+    atr_p = (atr_smoothed / curr_price) * 100
+    if atr_p < 0.5: score -= 10; factors["低ボラ"] = -10
+    atr_comment = "ボラティリティが危険水域です。" if atr_p >= 5.0 else ("値動きが荒くなっています。" if atr_p >= 3.0 else "通常レンジ内です。")
+    if is_squeeze: atr_comment += " ⚡スクイーズ発生中。"
+
+    return score, factors, strategy, buy_target, p_half, p_full, sl_ma, is_aoteng, sl_pct, rsi_val, atr_smoothed, atr_comment, momentum_str, rci_val
+
+def run_backtest_precise(df, market_cap):
+    try:
+        if len(df) < 80: return "データ不足", 0.0, 0, 0.0, 0.0, 0, 0
+        category = get_market_cap_category(market_cap); target_pct = get_target_pct_new(category, is_half=False) 
+        wins, losses, max_dd_pct = 0, 0, 0.0 
+        test_data = df.tail(75).copy(); n = len(test_data)
+        test_data['SMA5'] = test_data['Close'].rolling(5).mean(); test_data['SMA25'] = test_data['Close'].rolling(25).mean()
+        test_data['High_250d'] = test_data['High'].rolling(250, min_periods=1).max()
+        test_data['PrevClose'] = test_data['Close'].shift(1)
+        test_data['High_Low'] = test_data['High'] - test_data['Low']
+        test_data['High_PrevClose'] = abs(test_data['High'] - test_data['PrevClose'])
+        test_data['Low_PrevClose'] = abs(test_data['Low'] - test_data['PrevClose'])
+        test_data['TR'] = test_data[['High_Low', 'High_PrevClose', 'Low_PrevClose']].max(axis=1)
+        test_data['ATR'] = test_data['TR'].rolling(14).mean()
+        test_data['Vol_SMA5'] = test_data['Volume'].rolling(5).mean()
+        
+        i = 1 
+        while i < n - 10: 
+            prev_row = test_data.iloc[i - 1]; curr_row = test_data.iloc[i]
+            prev_low, prev_close, prev_sma5, prev_sma25 = prev_row.get('Low', 0), prev_row.get('Close', 0), prev_row.get('SMA5', 0), prev_row.get('SMA25', 0)
+            if pd.isna(prev_low) or pd.isna(prev_sma5) or pd.isna(prev_sma25) or prev_sma5 == 0 or prev_sma25 == 0: i += 1; continue
+            is_prev_bull_trend = prev_sma5 > prev_sma25; is_prev_ma5_touch = prev_low <= prev_sma5 * 1.005 
+            open_price, close_price, high_price = curr_row.get('Open', 0), curr_row.get('Close', 0), curr_row.get('High', 0)
+            is_gap_down = open_price < prev_close * 0.99; is_ma5_signal = False
+            if is_prev_bull_trend and is_prev_ma5_touch and not is_gap_down:
+                 if close_price > open_price or high_price >= prev_row.get('High', 0): is_ma5_signal = True
+            is_aoteng_signal = False
+            is_ath = curr_row.get('High', 0) >= curr_row.get('High_250d', 0) and curr_row.get('High_250d', 0) > 0
+            curr_vol_sma5 = curr_row.get('Vol_SMA5', 0)
+            if is_ath and curr_row.get('Volume', 0) >= curr_vol_sma5 * 1.5: is_aoteng_signal = True
+            if is_ma5_signal or is_aoteng_signal:
+                entry_price = prev_sma5 if is_ma5_signal and not is_aoteng_signal else close_price 
+                if entry_price == 0: i += 1; continue
+                if is_aoteng_signal: target_price = entry_price * 1.5; tsl_price = entry_price - (curr_row.get('ATR', 0) * 2.5)
+                else: target_price = entry_price * (1 + target_pct); tsl_price = entry_price * 0.97 
+                is_win, hold_days, trade_min_low = False, 0, entry_price 
+                for j in range(1, 11): 
+                    if i + j >= n: break
+                    future = test_data.iloc[i + j]
+                    future_high, future_low = future.get('High', 0), future.get('Low', 0) 
+                    hold_days = j
+                    if future_low is not None and not pd.isna(future_low): trade_min_low = min(trade_min_low, future_low)
+                    if future_high >= target_price and not is_aoteng_signal: is_win = True; break
+                    sl_level = tsl_price
+                    if future_low <= sl_level: break 
+                if is_aoteng_signal and hold_days == 10 and trade_min_low > sl_level: is_win = True
+                if is_win: wins += 1
+                else: losses += 1
+                if entry_price > 0 and trade_min_low < entry_price:
+                    max_dd_pct = min(max_dd_pct, ((trade_min_low / entry_price) - 1) * 100) 
+                i += max(1, hold_days) 
+            i += 1
+        total_trades = wins + losses; win_rate_pct = (wins / total_trades) * 100 if total_trades > 0 else 0.0
+        bt_str_new = f'{win_rate_pct:.0f}%' 
+        if total_trades == 0: return "機会なし", 0.0, 0, 0.0, target_pct, 0, 0 
+        return bt_str_new, win_rate_pct, total_trades, max_dd_pct, target_pct, wins, losses
+    except Exception as e: return f"計算エラー: {e}", 0.0, 0, 0.0, 0.0, 0, 0
+run_backtest = run_backtest_precise
 
 @st.cache_data(ttl=1) 
 def get_stock_data(ticker, current_run_count):
@@ -823,7 +810,7 @@ def get_stock_data(ticker, current_run_count):
     except Exception as e:
         st.session_state.error_messages.append(f"エラー (コード:{ticker}): {e}")
         return None
-
+    
 def batch_analyze_with_ai(data_list):
     """Gemini APIを使用して分析コメントを生成（アイさん人格版）"""
     model_name = st.session_state.selected_model_name
@@ -900,7 +887,7 @@ def batch_analyze_with_ai(data_list):
     - **【決算リスク警告（最優先）】**: `EARNINGS_DAYS:X` があり、Xが7以下の場合は、冒頭に「⚠️あとX日で決算発表です。持ち越しには十分ご注意ください。」と警告してください。
     - **流動性**: 致命的低流動性:警告(1000株未満)の銘柄は、冒頭で「平均出来高が1,000株未満と極めて低く、<b>流動性リスク</b>を伴います。」と警告してください。
     - **【ATRリスク】**: ATR_MSGがある場合、ボラティリティリスクとして必ずコメントに含めてください。
-    - **撤退基準（MA25/ATR併記）:** コメントの末尾で、**構造的崩壊ライン**の**MA25_SL（X円）**と、**ボラティリティ基準**の**ATR_SL（Y円）**を**両方とも**言言及し、「**MA25を終値で割るか、ATR_SLを割るかのどちらかをロスカット基準としてご検討ください**」という趣旨を明確に伝えてください。
+    - **撤退基準（MA25/ATR併記）:** コメントの末尾で、**構造的崩壊ライン**の**MA25_SL（X円）**と、**ボラティリティ基準**の**ATR_SL（Y円）**を**両方とも**言及し、「**MA25を終値で割るか、ATR_SLを割るかのどちらかをロスカット基準としてご検討ください**」という趣旨を明確に伝えてください。
     - **青天井領域:** ターゲット情報が「青天井」の場合、<b>「利益目標は固定目標ではなく、動的なATRトレーリング・ストップ（X円）に切り替わっています。」</b>という趣旨を含めてください。
 
 【銘柄データ】
@@ -925,7 +912,7 @@ ID:9984 | <b>ソフトバンクグループ</b>｜RCIが-80から反転し底打
         parts = text.split("END_OF_LIST", 1)
         comment_lines = parts[0].strip().split("\n")
         monologue = parts[1].strip()
-        monologue = monologue.replace('**', '').strip() 
+        monologue = re.sub(r'\*\*(.*?)\*\*', r'\1', monologue).replace('**', '').strip() 
         
         for line in comment_lines:
             line = line.strip()
@@ -934,7 +921,7 @@ ID:9984 | <b>ソフトバンクグループ</b>｜RCIが-80から反転し底打
                     c_code_part, c_com = line.split("|", 1)
                     c_code = c_code_part.replace("ID:", "").strip()
                     c_com_cleaned = c_com.strip()
-                    c_com_cleaned = c_com_cleaned.replace('**', '').strip() 
+                    c_com_cleaned = re.sub(r'\*\*(.*?)\*\*', r'\1', c_com_cleaned).replace('**', '').strip() 
                     CLEANUP_PATTERN_START = r'^(<b>.*?</b>)\s*[:：].*?' 
                     c_com_cleaned = re.sub(CLEANUP_PATTERN_START, r'\1', c_com_cleaned).strip()
                     c_com_cleaned = re.sub(r'^[\s\:\｜\-\・\*\,\.]*', '', c_com_cleaned).strip()
