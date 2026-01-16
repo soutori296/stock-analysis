@@ -40,7 +40,6 @@ status_color = "#d32f2f" if "進行中" in status_label else "#1976d2"
 # --- CSSスタイル ---
 st.markdown(f"""
 <style> 
-    /* 1. メイン画面レイアウト */
     .block-container {{ max-width: 100% !important; padding: 2rem 1.5rem !important; }}
     .status-badge {{ 
         background-color: {status_color}; 
@@ -51,8 +50,6 @@ st.markdown(f"""
         font-weight: bold; 
         vertical-align: middle;
     }}
-
-    /* 2. サイドバー全体の構造 */
     [data-testid="stSidebar"] {{ padding: 0px !important; }}
     [data-testid="stSidebarContent"] {{ padding: 0px !important; }}
     [data-testid="stSidebarUserContent"] {{
@@ -61,28 +58,15 @@ st.markdown(f"""
         width: 100% !important;
     }}
     [data-testid="stSidebar"] > div:first-child {{ width: 260px !important; max-width: 260px !important; }}
-
-    /* サイドバー文字色 */
     [data-testid="stSidebar"] label p {{ font-size: 11px !important; margin-bottom: 2px !important; font-weight: bold !important; color: inherit !important; }}
     .sidebar-header-style {{ font-size: 11px !important; font-weight: bold !important; margin: 5px 0 2px 0; display: block; color: inherit !important; }}
     [data-testid="stSidebar"] .stCheckbox label div[data-testid="stMarkdownContainer"] p {{ font-size: 12px !important; color: inherit !important; transform: translateY(1.5px); }}
-
-    /* ステータス表示 */
     .slim-status {{ 
         font-size: 11px !important; padding: 1px 8px !important; margin-bottom: 4px !important; 
         border-radius: 3px; border-left: 2px solid #ccc; background-color: rgba(128, 128, 128, 0.1) !important; 
         color: inherit !important; line-height: 1.2; font-weight: 500; 
     }}
     .status-ok {{ border-left-color: #10b981 !important; color: #10b981 !important; }}
-
-    /* サイドバー・パーツ配置調整 */
-    [data-testid="stSidebarUserContent"] .stSelectbox:first-of-type {{ margin-top: 5px !important; }}
-    [data-testid="stSidebar"] .stCheckbox {{ margin-top: 4px !important; }}
-    [data-testid="stSidebar"] div[data-testid="stHorizontalBlock"]:has(.stButton) [data-testid="column"]:nth-child(2) .stCheckbox {{ padding-top: 10px !important; }}
-    [data-testid="stSidebar"] div[data-testid="stHorizontalBlock"]:has(.stNumberInput) [data-testid="column"]:nth-child(2) .stCheckbox {{ padding-top: 36px !important; }}
-    .stWidget, .stButton, .stSelectbox, .stTextArea {{ width: 100% !important; margin: 0px !important; }}
-
-    /* 4. テーブル設定 */
     .ai-table {{ 
         width: 100%; border-collapse: collapse; min-width: 1100px; 
         font-family: "Meiryo", sans-serif; font-size: 13px !important; 
@@ -91,13 +75,9 @@ st.markdown(f"""
     .ai-table th {{ background-color: #e0e0e0 !important; color: black !important; border: 1px solid #999; padding: 4px 2px; text-align: center; font-weight: bold; }}
     .ai-table td {{ border: 1px solid #ccc; padding: 4px 2px; vertical-align: top; text-align: center; color: black !important; }}
     .td-left {{ text-align: left !important; padding-left: 8px !important; }}
-
-    /* 背景色 */
     .bg-aoteng {{ background-color: #E6F0FF !important; }} 
     .bg-low-liquidity {{ background-color: #FFE6E6 !important; }} 
     .bg-triage-high {{ background-color: #FFFFCC !important; }} 
-
-    /* 5. タイトル・その他 */
     .custom-title {{ font-size: 1.2rem !important; font-weight: bold; display: flex; align-items: center; gap: 15px; color: inherit !important; }}
     .custom-title img {{ height: 60px !important; margin-top: 15px;}}
     .big-font {{ font-size:14px !important; font-weight: bold; color: inherit !important; }}
@@ -106,8 +86,6 @@ st.markdown(f"""
     .factor-badge {{ display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; font-size: 11px; font-weight: bold; border-radius: 4px; border: 1.5px solid; cursor: default; }}
     .badge-plus {{ color: #004d00 !important; background-color: #ccffcc !important; border-color: #008000 !important; }}
     .badge-minus {{ color: #800000 !important; background-color: #ffcccc !important; border-color: #cc0000 !important; }}
-
-    /* レジェンドアコーディオン */
     details.legend-details summary {{
         cursor: pointer; padding: 8px; background-color: #f8fafc;
         border: 1px solid #e2e8f0; border-radius: 4px; font-weight: bold;
@@ -265,7 +243,7 @@ def fetch_with_retry(url, max_retry=3):
 
 @st.cache_data(ttl=1) 
 def get_stock_info(code):
-    """株探から個別情報を取得 (月名問題・出来高正規表現修正)"""
+    """株探から個別情報を取得 (月名問題・出来高正規表現・時価総額取得修正)"""
     url = f"https://kabutan.jp/stock/?code={code}"
     data = {"name": "不明", "per": "-", "pbr": "-", "price": None, "volume": 0.0, "cap": 0, "open": None, "high": None, "low": None, "close": None, "issued_shares": 0.0, "earnings_date": None, "earnings_status": ""}
     try:
@@ -282,16 +260,25 @@ def get_stock_info(code):
         m_vol = re.search(r'出来高</th>\s*<td[^>]*>(?:<span[^>]*>)?([\d,.]+)(?:</span>)?.*?株</td>', html)
         if m_vol: data["volume"] = safe_float_convert(m_vol.group(1))
         
-        m_cap = re.search(r'時価総額</th>\s*<td[^>]*>(.*?)</td>', html)
+        m_cap = re.search(r'時価総額.*?</th>\s*<td[^>]*>(.*?)</td>', html)
         if m_cap:
             cap_str = re.sub(r'<[^>]+>', '', m_cap.group(1)).strip().replace('\n', '').replace('\r', '') 
             val = 0
             if "兆" in cap_str:
                 parts = cap_str.split("兆")
-                trillion = safe_float_convert(parts[0]); billion = safe_float_convert(parts[1]) if len(parts) > 1 else 0
+                # 小数点を含む数値に対応するため safe_float_convert を使用
+                trillion = safe_float_convert(parts[0])
+                billion = 0
+                if len(parts) > 1 and "億" in parts[1]:
+                    # "億" の前の数値部分を抽出（小数点も含む正規表現）
+                    b_match = re.search(r'([\d,.]+)', parts[1])
+                    if b_match:
+                        billion = safe_float_convert(b_match.group(1))
                 val = trillion * 10000 + billion
             elif "億" in cap_str:
-                val = safe_float_convert(cap_str)
+                b_match = re.search(r'([\d,.]+)', cap_str)
+                if b_match:
+                    val = safe_float_convert(b_match.group(1))
             data["cap"] = val
 
         i3_match = re.search(r'<div id="stockinfo_i3">.*?<tbody>(.*?)</tbody>', html)
@@ -528,7 +515,7 @@ def evaluate_strategy_new(df, info, vol_ratio, high_250d, atr_val, curr_price, m
              strategy, buy_target = "💎底打反転", int(curr_price)
              p_half_candidate = int(np.floor(ma5 - 1)) if ma5 else 0; p_full_candidate = int(np.floor(ma25 - 1)) if ma25 else 0 
              p_half = p_half_candidate; p_full = p_full_candidate
-         elif (ma25 > 0 and curr_price < ma25 * 0.9):
+         elif (curr_price < ma25 * 0.9 if ma25 else False):
              strategy, buy_target = "🌊逆張り", int(curr_price)
              p_half_candidate = int(np.floor(ma5 - 1)) if ma5 else 0; p_full_candidate = int(np.floor(ma25 - 1)) if ma25 else 0 
              p_half = p_half_candidate; p_full = p_full_candidate
@@ -753,6 +740,7 @@ def get_stock_data(ticker, current_run_count):
         vol_weight = get_volume_weight(jst_now_local, info["cap"])
         v_ratio = info['volume'] / (avg_vol_5d * vol_weight) if vol_weight > 0 and avg_vol_5d > 0 else 1.0
         
+        # 新ロジック呼び出し
         raw_score, factors, strategy, buy_target, p_half, p_full, sl_ma, is_aoteng, sl_pct, rsi_val, atr_smoothed, atr_comment, momentum_str, rci_val = calculate_score_and_logic(df, info, v_ratio, status)
         
         current_score = max(0, min(100, raw_score))
@@ -1411,7 +1399,7 @@ if st.session_state.analyzed_data:
             elif row.get('is_aoteng'): bg_class = 'bg-aoteng'
             elif row.get('score', 0) >= 75: bg_class = 'bg-triage-high' 
             
-            if "bg-triage-high" in bg_class or "color:red" in str(row['score_disp']):
+            if "bg-triage-high" not in bg_class and "color:red" in str(row['score_disp']):
                  bg_class = 'bg-triage-high'
 
             row_cells = []
@@ -1500,4 +1488,4 @@ if st.session_state.analyzed_data:
         本アプリは研究・検証目的の内部ツールです。<br>
         特定の銘柄の売買を推奨するものではなく、実際の投資判断や売買に用いることを目的としていません。
     </div>
-    """, unsafe_allow_html=True)
+    """, unsafe_allow_html=True)    
