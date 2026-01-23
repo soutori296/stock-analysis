@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-import google.generativeai as genai
+from google import genai
 import datetime
 import time
 import requests
@@ -802,15 +802,15 @@ def get_stock_data(ticker, current_run_count):
 def batch_analyze_with_ai(data_list):
     """Gemini APIを使用して分析コメントを生成（アイさん人格版）"""
     model_name = st.session_state.selected_model_name
-    model = None
+    client = None  # 「model」から「client」に変更
     global api_key 
     if api_key:
         try:
-            genai.configure(api_key=api_key)
-            model = genai.GenerativeModel(model_name)
+            # 新しいライブラリでの初期化方法
+            client = genai.Client(api_key=api_key)
         except Exception: pass
     
-    if not model: return {}, f"⚠️ AIモデル ({model_name}) が設定されていません。APIキーを確認してください。"
+    if not client: return {}, f"⚠️ AIモデル ({model_name}) が設定されていません。APIキーを確認してください。"
     
     data_for_ai = ""
     for d in data_list:
@@ -889,7 +889,11 @@ ID:9984 | <b>ソフトバンクグループ</b>｜RCIが-80から反転し底打
 """
 
     try:
-        res = model.generate_content(prompt)
+        # 実行命令を新ライブラリの形式に変更
+        res = client.models.generate_content(
+            model=model_name,
+            contents=prompt
+        )
         text = res.text
         comments = {}; monologue = ""
         
