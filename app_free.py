@@ -722,35 +722,57 @@ def get_stock_data(ticker, current_run_count):
     info = get_stock_info(ticker) 
     if info.get("price") is not None and info["price"] < 100: return None
     try:
-        csv_url = f"https://stooq.com/q/d/l/?s={ticker}.JP&i=d"
+        # --- 修正箇所：パラメータ f=sdnji (Symbol, Date, Open, High, Low, Close, Volume) を明示 ---
+        csv_url = f"https://stooq.com/q/d/l/?s={ticker}.JP&f=sdnji&e=csv"
         res = fetch_with_retry(csv_url)
-        df = pd.read_csv(io.BytesIO(res.content), parse_dates=True, index_col=0).sort_index()
+        
+        # index_colに 'Date' を明示。カラム名を「先頭大文字」に統一して揺れを防ぎます
+        df = pd.read_csv(io.BytesIO(res.content), parse_dates=True, index_col='Date').sort_index()
+        df.columns = [c.capitalize() for c in df.columns]
+
         curr_price = info.get("price")
         has_live_data = info.get("open") is not None and curr_price is not None and info.get("high") is not None and info.get("low") is not None
+        
         if has_live_data:
             today_dt = pd.to_datetime(jst_now_local.strftime("%Y-%m-%d"))
             last_csv_dt = df.index[-1] if not df.empty else pd.to_datetime("2000-01-01")
-            new_row_vals = {'Open': info['open'], 'High': info['high'], 'Low': info['low'], 'Close': curr_price, 'Volume': info['volume'] if info['volume'] is not None else 0}
+            
+            # カラム名が正規化されているため、Open, High, Low, Close, Volume でアクセス可能
+            new_row_vals = {
+                'Open': info['open'], 
+                'High': info['high'], 
+                'Low': info['low'], 
+                'Close': curr_price, 
+                'Volume': info['volume'] if info['volume'] is not None else 0
+            }
             new_row = pd.Series(new_row_vals, name=today_dt)
-            if last_csv_dt.date() < today_dt.date(): df = pd.concat([df, new_row.to_frame().T])
-            elif last_csv_dt.date() == today_dt.date(): df.loc[df.index[-1]] = new_row
+            if last_csv_dt.date() < today_dt.date(): 
+                df = pd.concat([df, new_row.to_frame().T])
+            elif last_csv_dt.date() == today_dt.date(): 
+                df.loc[df.index[-1]] = new_row
 
-        df['Vol_SMA5'] = df['Volume'].rolling(5).mean()
-        avg_vol_5d = df['Vol_SMA5'].iloc[-1] if not pd.isna(df['Vol_SMA5'].iloc[-1]) else 0
+        # 移動平均と出来高レシオの計算
+        df['Vol_sma5'] = df['Volume'].rolling(5).mean()
+        avg_vol_5d = df['Vol_sma5'].iloc[-1] if not pd.isna(df['Vol_sma5'].iloc[-1]) else 0
         vol_weight = get_volume_weight(jst_now_local, info["cap"])
         v_ratio = info['volume'] / (avg_vol_5d * vol_weight) if vol_weight > 0 and avg_vol_5d > 0 else 1.0
         
-        # 新ロジック呼び出し
+        # 新ロジック呼び出し（カラム名が正規化されていることが前提）
         raw_score, factors, strategy, buy_target, p_half, p_full, sl_ma, is_aoteng, sl_pct, rsi_val, atr_smoothed, atr_comment, momentum_str, rci_val = calculate_score_and_logic(df, info, v_ratio, status)
         
         current_score = max(0, min(100, raw_score))
-        if ticker not in st.session_state.score_history: st.session_state.score_history[ticker] = {'pre_market_score': current_score}
+        if ticker not in st.session_state.score_history: 
+            st.session_state.score_history[ticker] = {'pre_market_score': current_score}
+        
         pre_score = st.session_state.score_history[ticker].get('pre_market_score', current_score)
-        score_diff = current_score - pre_score; st.session_state.score_history[ticker]['current_score'] = current_score
+        score_diff = current_score - pre_score
+        st.session_state.score_history[ticker]['current_score'] = current_score
+        
         current_atr_sl = round(curr_price - max(atr_smoothed * 1.5, curr_price * 0.01), 1)
-        df['SMA25'] = df['Close'].rolling(25).mean() 
-        current_ma25 = df['SMA25'].iloc[-1] if not pd.isna(df['SMA25'].iloc[-1]) else 0
+        df['Sma25'] = df['Close'].rolling(25).mean() 
+        current_ma25 = df['Sma25'].iloc[-1] if not pd.isna(df['Sma25'].iloc[-1]) else 0
         atr_pct_val = (atr_smoothed / curr_price * 100 if curr_price > 0 else 0)
+        
         risk_reward_calc = 0.0
         if buy_target > 0 and sl_ma > 0:
             risk_amt = buy_target - sl_ma
@@ -759,6 +781,7 @@ def get_stock_data(ticker, current_run_count):
                 avg_target = (p_half + p_full) / 2 if p_half > 0 else p_full
                 reward_amt = avg_target - buy_target
                 if risk_amt > 0 and reward_amt > 0: risk_reward_calc = reward_amt / risk_amt
+        
         bt_str, win_rate_pct, bt_cnt, max_dd_pct, bt_target_pct, bt_win_count, bt_loss_count = run_backtest(df, info["cap"])
         
         is_market_alert = get_25day_ratio() >= 125.0
@@ -806,7 +829,7 @@ def batch_analyze_with_ai(data_list):
     global api_key 
     if api_key:
         try:
-            # 新しいライブラリでの初期化方法
+            # 新仕様：クライアントオブジェクトを作成
             client = genai.Client(api_key=api_key)
         except Exception: pass
     
@@ -889,7 +912,7 @@ ID:9984 | <b>ソフトバンクグループ</b>｜RCIが-80から反転し底打
 """
 
     try:
-        # 実行命令を新ライブラリの形式に変更
+        # 新仕様：client.models.generate_content を使用
         res = client.models.generate_content(
             model=model_name,
             contents=prompt
