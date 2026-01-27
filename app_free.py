@@ -1531,9 +1531,11 @@ if st.session_state.analyzed_data:
         本アプリは研究・検証目的の内部ツールです。<br>
         特定の銘柄の売買を推奨するものではなく、実際の投資判断や売買に用いることを目的としていません。
     </div>
+    """, unsafe_allow_html=True)
 
 # --- stock_analyzer.py の一番下に追記 ---
 if st.session_state.error_messages:
     st.error("⚠️ 内部エラーが発生しています（隠れていたメッセージ）:")
     for msg in st.session_state.error_messages:
         st.write(msg)
+
