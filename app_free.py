@@ -80,6 +80,7 @@ def sync_timer_to_row2(added_seconds):
     try:
         from datetime import datetime
         import re
+        import streamlit as st
 
         creds = get_creds()
         # シートを開く
@@ -91,14 +92,12 @@ def sync_timer_to_row2(added_seconds):
         # 2. 日付の取得と形式統一
         raw_sheet_date = str(row_data[0]) if len(row_data) > 0 else ""
         sheet_date = raw_sheet_date.replace("-", "/").strip()
-
         today_str = datetime.now().strftime("%Y/%m/%d")
 
-        # 🔥 3. 【重要】数値を読み取る（空文字やエラーを防ぐ）
+        # 3. 数値を読み取る（安全な変換関数）
         def safe_int(val):
             if not val:
                 return 0
-            # 数字以外をすべて除去
             num_str = re.sub(r"[^0-9]", "", str(val))
             return int(num_str) if num_str else 0
 
@@ -110,13 +109,12 @@ def sync_timer_to_row2(added_seconds):
         if sheet_date != "" and sheet_date != today_str:
             print(f"🌅 日付変更を検知: {sheet_date} -> {today_str} (Todayをリセット)")
             current_today_total = 0
-            # ※ current_total（全累計）はリセットせず、そのまま引き継ぐ
 
         # 5. 今回の勉強時間を加算
         new_today_total = current_today_total + added_seconds
         new_total = current_total + added_seconds
 
-        # 🚀 6. A2:D2 の範囲を強制上書き（行は増やさない）
+        # 🚀 6. A2:D2 の範囲を強制上書き
         sh.update(
             range_name="A2:D2",
             values=[
@@ -129,15 +127,19 @@ def sync_timer_to_row2(added_seconds):
             ],
         )
 
+        # ✨ 7. 【最重要】アプリ内の表示用変数も最新に書き換える
+        # これにより、リロードしなくても画面の数字がパッと変わります
+        st.session_state.daily_seconds = new_today_total
+        st.session_state.total_seconds = new_total
+
         print(
             f"✅ 同期完了: Today={new_today_total}s, Total={new_total}s (+{added_seconds}s)"
         )
-        return new_total
+        return new_today_total
 
     except Exception as e:
         print(f"❌ Timer Error: {e}")
-        # エラー時は現在のセッションの合計を返す（暫定）
-        return 0
+        return st.session_state.get("daily_seconds", 0)
 
 
 # --- [2] 監督役：時間を測って、作業員に指示を出す担当 ---
@@ -1219,12 +1221,37 @@ def init_session():
         "is_saving": False,
         "delete_list": [],
     }
-    for k, v in defaults.items():
-        if k not in st.session_state:
-            st.session_state[k] = v
-    if "daily_seconds" not in st.session_state:
-        # 新しい関数名「_to_row2」を使い、0秒加算（＝読み取りだけ）を行う
-        st.session_state.daily_seconds = sync_timer_to_row2(0)
+    # --- init_session の一番下にある `if "daily_seconds" ...` の部分をこれに差し替え ---
+    if (
+        "daily_seconds" not in st.session_state
+        or "total_seconds" not in st.session_state
+    ):
+        try:
+            # 1. シートの2行目をまるごと読み込む
+            creds = get_creds()
+            sh = gspread.authorize(creds).open("study_stats_db").worksheet("timer")
+            row2 = sh.row_values(2)  # [日付, Today, Total, LastAdded] が入ってくる
+
+            # 2. Today(B列:インデックス1) と Total(C列:インデックス2) を変数に入れる
+            # 数字以外（カンマなど）があっても大丈夫なように int() で保護
+            import re
+
+            def safe_int(v):
+                s = re.sub(r"[^0-9]", "", str(v))
+                return int(s) if s else 0
+
+            st.session_state.daily_seconds = safe_int(row2[1]) if len(row2) > 1 else 0
+            st.session_state.total_seconds = safe_int(row2[2]) if len(row2) > 2 else 0
+
+            print(
+                f"✅ 起動時にシートから読込成功: Today={st.session_state.daily_seconds}, Total={st.session_state.total_seconds}"
+            )
+
+        except Exception as e:
+            # エラー時は0からスタート
+            st.session_state.daily_seconds = 0
+            st.session_state.total_seconds = 0
+            print(f"⚠️ 起動読込エラー: {e}")
 
 
 init_session()
