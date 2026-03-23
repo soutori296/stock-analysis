@@ -1,3121 +1,2723 @@
 import streamlit as st
-import base64  # noqa: F401  # 173行目等で使用するため維持
-import os
-import time
-import re
-import random
-import json
-import uuid  # 🌟 411行目で必要なため復活
-from datetime import datetime, timedelta, timezone
 import pandas as pd
-import gspread
-from google.oauth2.service_account import Credentials
-from streamlit_drawable_canvas import st_canvas
-import streamlit.components.v1 as components
+from google import genai
+import datetime
+import time
+import requests
+import io
+import re
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont
-import unicodedata
+import random
+import hashlib
+import os
+import base64
 
-# 🌟 アプリ起動時に一回だけバケツを用意する（これより下で = [] と書かないこと！）
-if "today_wrong_cards" not in st.session_state:
-    st.session_state.today_wrong_cards = []
+# --- アイコン設定（オリジナル画像） ---
+ICON_URL = "https://raw.githubusercontent.com/soutori296/stock-analysis/main/aisan.png"
+PAGE_TITLE = "教えて！AIさん 2"
 
-
-def get_creds():
-    try:
-        if "gcp_service_account" in st.secrets:
-            return Credentials.from_service_account_info(
-                st.secrets["gcp_service_account"],
-                scopes=[
-                    "https://www.googleapis.com/auth/spreadsheets",
-                    "https://www.googleapis.com/auth/drive",
-                ],
-            )
-    except Exception:
-        pass
-    return None
+# ==============================================================================
+# 【最優先】ページ設定 & CSS
+# ==============================================================================
+st.set_page_config(page_title=PAGE_TITLE, page_icon=ICON_URL, layout="wide")
 
 
-def queue_sound(file_path):
-    # ファイルが存在するかチェック
-    if os.path.exists(file_path):
-        with open(file_path, "rb") as f:
-            data = f.read()
-            # 音源をテキストデータ(Base64)に変換して予約
-            b64 = base64.b64encode(data).decode()
-            st.session_state["sound_queue_b64"] = b64
-    else:
-        print(f"警告: {file_path} が見つかりません")
+# --- 時間管理 (JST) ---
+def get_market_status():
+    jst_now = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=9)
+    current_time = jst_now.time()
+    if jst_now.weekday() >= 5:
+        return "休日(固定)", jst_now
+    if datetime.time(15, 50, 1) <= current_time or current_time < datetime.time(
+        9, 0, 1
+    ):
+        return "場前(固定)", jst_now
+    if datetime.time(9, 0, 1) <= current_time <= datetime.time(15, 50, 0):
+        return "場中(進行中)", jst_now
+    return "引け後(確定値)", jst_now
 
 
-def execute_queued_sound():
-    if "sound_queue_b64" in st.session_state and st.session_state["sound_queue_b64"]:
-        b64_data = st.session_state["sound_queue_b64"]
-        # 💡 HTMLに音源データを直接埋め込んで、強制的に再生させる
-        st.components.v1.html(
-            f"""
-            <audio autoplay style="display:none;">
-                <source src="data:audio/mp3;base64,{b64_data}" type="audio/mp3">
-            </audio>
-            <script>
-                // ブラウザの制限を回避するための予備命令
-                var audio = document.querySelector('audio');
-                audio.play().catch(e => console.log('再生失敗:', e));
-            </script>
-            """,
-            height=0,
-        )
-        # 鳴らした後は空にする
-        st.session_state["sound_queue_b64"] = None
+status_label, jst_now = get_market_status()
+status_color = "#d32f2f" if "進行中" in status_label else "#1976d2"
 
-
-def clean_text(text):
-    # 🌟 全角の「【」や「Ａ」や「　（スペース）」をすべて半角に変換する
-    # これを GitHub に入れておけば、誰が使ってもエラーが起きにくくなります
-    return unicodedata.normalize("NFKC", str(text))
-
-
-# --- [1] 作業員：実際にシートを書き換える担当 ---
-def sync_timer_to_row2(added_seconds):
-    """
-    スプレッドシートの2行目（A2:D2）を更新し、アプリ内の表示変数も最新にする。
-    インデックス: 0=Date(A), 1=Today(B), 2=Total(C), 3=LastAdded(D)
-    """
-    try:
-        from datetime import datetime
-        import re
-        import streamlit as st
-
-        # 1. Googleシートに接続
-        creds = get_creds()
-        sh = gspread.authorize(creds).open("study_stats_db").worksheet("timer")
-
-        # 2. 現在の2行目のデータを取得
-        row_data = sh.row_values(2)
-
-        # 3. 数値を安全に読み取る補助関数
-        def safe_int(val):
-            if not val:
-                return 0
-            num_str = re.sub(r"[^0-9]", "", str(val))
-            return int(num_str) if num_str else 0
-
-        # --- データの読み込み ---
-        # A列(日付): index 0
-        raw_sheet_date = str(row_data[0]) if len(row_data) > 0 else ""
-        sheet_date = raw_sheet_date.replace("-", "/").strip()
-
-        # B列(Today): index 1
-        current_today_total = safe_int(row_data[1]) if len(row_data) > 1 else 0
-
-        # C列(Total): index 2
-        current_total = safe_int(row_data[2]) if len(row_data) > 2 else 0
-
-        today_str = datetime.now().strftime("%Y/%m/%d")
-
-        # 4. 日付チェック：今日でない場合は「Today」だけ 0 にリセット
-        if sheet_date != "" and sheet_date != today_str:
-            print(f"🌅 日付変更を検知: {sheet_date} -> {today_str} (Todayをリセット)")
-            current_today_total = 0
-
-        # 5. 加算処理（今回の秒数をプラス）
-        new_today_total = current_today_total + added_seconds
-        new_total = current_total + added_seconds
-
-        # 🚀 6. Googleスプレッドシート A2:D2 を強制上書き
-        sh.update(
-            range_name="A2:D2",
-            values=[
-                [
-                    today_str,  # A: 日付
-                    int(new_today_total),  # B: 本日合計
-                    int(new_total),  # C: 全累計
-                    int(added_seconds),  # D: 今回加算分
-                ]
-            ],
-        )
-
-        # ✨ 7. 【重要】アプリ内の表示用変数（箱）を最新の数字に更新
-        # これにより、表示側の c1.metric や c2.metric が正しい数字を掴めます
-        st.session_state.daily_seconds = new_today_total
-        st.session_state.total_seconds = new_total
-
-        print(f"✅ 同期完了: 本日={new_today_total}s, 累計={new_total}s")
-
-        # 🔄 8. 画面を強制的に再描画（これで 0分 が ◯分 にパッと変わる）
-
-        # 戻り値として「本日分」を返しておく
-        return new_today_total
-
-    except Exception as e:
-        print(f"❌ Timer Error: {e}")
-        return st.session_state.get("daily_seconds", 0)
-
-
-# --- [2] 監督役：時間を測って、作業員に指示を出す担当 ---
-def run_auto_timer_logic():
-    import time
-
-    now = time.time()
-
-    # 初回起動時の初期化
-    if "last_action_time" not in st.session_state:
-        st.session_state.last_action_time = now
-        st.session_state.last_sync_time = now  # 🌟 追加：最後に書き込んだ時刻
-        st.session_state.unsynced_seconds = 0  # 🌟 追加：未同期の秒数
-        return
-
-    # 前回の操作からの経過時間を計算
-    duration = int(now - st.session_state.last_action_time)
-
-    # 放置判定（5分以上は何もしない）
-    if 5 <= duration < 300:
-        # 🌟 とりあえず「未同期分」としてアプリ内のメモに貯める
-        st.session_state.unsynced_seconds += duration
-
-        # 🌟 前回の「書き込み」から60秒以上経っているかチェック
-        time_since_sync = now - st.session_state.get("last_sync_time", 0)
-
-        if time_since_sync >= 60:
-            # 60秒経っていれば、溜まった分を一気に書き込む！
-            sync_timer_to_row2(st.session_state.unsynced_seconds)
-
-            # 書き込んだのでメモをリセット
-            st.session_state.unsynced_seconds = 0
-            st.session_state.last_sync_time = now
-            print("📡 Googleへまとめて送信しました。")
-        else:
-            print(
-                f"⏳ アプリ内で蓄積中... (現在: {st.session_state.unsynced_seconds}s)"
-            )
-
-    # 今回の操作時刻を記録
-    st.session_state.last_action_time = now
-
-
-run_auto_timer_logic()
-
-
-def match_study_filter(search_query, q_item):
-    # --- あなたが提示したコード（これでOK） ---
-    if not search_query:
-        return True
-    full_target_text = " ".join([str(v) for v in q_item.values()]).lower()
-    query = str(search_query).lower().strip()
-    if "," in query or "、" in query:
-        keywords = [k.strip() for k in re.split(r"[,、]", query) if k.strip()]
-        return any(k in full_target_text for k in keywords)
-    else:
-        keywords = [k.strip() for k in re.split(r"[\s　]", query) if k.strip()]
-        return all(k in full_target_text for k in keywords)
-
-
-def to_pretty_display(text):
-    """ボタン・ヒント用：LaTeXを記号・変数イタリック・エスケープ掃除込みで変換する"""
-    if not isinstance(text, str):
-        return text
-
-    # 1. $ を消去
-    t = text.replace("$", "")
-
-    # 2. 【新規追加】LaTeXのエスケープ記号（\% など）を普通の記号に戻す
-    # % や $ や _ などの前にある \ を取り除きます
-    escape_chars = ["%", "$", "_", "{", "}", "&", "#"]
-    for char in escape_chars:
-        t = t.replace(f"\\{char}", char)
-
-    # 3. 算数・数学の特殊記号（\times など）
-    replacements = {
-        "\\times": "×",
-        "\\div": "÷",
-        "\\pm": "±",
-        "\\leqq": "≦",
-        "\\geqq": "≧",
-        "\\le": "≦",
-        "\\ge": "≧",
-        "\\pi": "π",
-        "\\approx": "≒",
-        "\\therefore": "∴",
-        "\\because": "∵",
-        "\\triangle": "△",
-        "\\angle": "∠",
-        "\\infty": "∞",
-    }
-    for old, new in replacements.items():
-        t = t.replace(old, new)
-
-    # 3. \text{...} の中身だけを取り出す（化学式などはここに含まれる）
-    t = re.sub(r"\\text\{([^}]*)\}", r"\1", t)
-
-    # 4. 数学の変数を数式用イタリック文字に一括変換
-    # 教科書でよく使う文字を網羅（a-z）
-    var_map = {
-        "a": "𝑎",
-        "b": "𝑏",
-        "c": "𝑐",
-        "d": "𝑑",
-        "e": "𝑒",
-        "f": "𝑓",
-        "g": "𝑔",
-        "h": "ℎ",
-        "i": "𝑖",
-        "j": "𝑗",
-        "k": "𝑘",
-        "l": "𝑙",
-        "m": "𝑚",
-        "n": "𝑛",
-        "o": "𝑜",
-        "p": "𝑝",
-        "q": "𝑞",
-        "r": "𝑟",
-        "s": "𝑠",
-        "t": "𝑡",
-        "u": "𝑢",
-        "v": "𝑣",
-        "w": "𝑤",
-        "x": "𝑥",
-        "y": "𝑦",
-        "z": "𝑧",
-    }
-
-    # 独立したアルファベット1文字のみを変換（化学式の H や O、英語の don't などを避けるため）
-    for eng, math in var_map.items():
-        # 🌟 修正ポイント：前後にアルファベットだけでなく「'（アポストロフィ）」がある場合も除外する
-        pattern = rf"(^|[^a-zA-Z']){eng}([^a-zA-Z']|$)"
-        t = re.sub(pattern, rf"\1{math}\2", t)
-
-    # 5. 下付き・上付き文字の変換
-    sub_map = str.maketrans("0123456789", "₀₁₂₃₄₅₆₇₈₉")
-    t = re.sub(r"_\{?(\d+)\}?", lambda m: m.group(1).translate(sub_map), t)
-
-    sup_map = str.maketrans("0123456789", "⁰¹²³⁴⁵⁶⁷⁸⁹")
-    t = re.sub(r"\^\{?(\d+)\}?", lambda m: m.group(1).translate(sup_map), t)
-
-    # 6. 残った不要な中括弧を消去
-    t = t.replace("{", "").replace("}", "")
-
-    return t
-
-
-# --- 1. 履歴から直近3回分のIDを抜き出す命令 ---
-def get_recent_excluded_ids(category_name, h_list):
-    excluded = []
-    # 同じ教科の履歴を新しい順に最大3件チェック
-    cat_h = [h for h in h_list if str(h.get("教科", "")) == str(category_name)][:3]
-    for h in cat_h:
-        try:
-            import json
-
-            ids = json.loads(h.get("問題リスト(JSON)", "[]"))
-            excluded.extend(ids)
-        except Exception:
-            continue
-    return excluded
-
-
-# --- 2. 除外リストを使って「新鮮な30問」を作る命令 ---
-def create_filtered_questions(full_pool, excluded_ids, target_count=30):
-    import random
-
-    # 履歴にない「新鮮な問題」を抽出
-    fresh = [q for q in full_pool if q.get("id") not in excluded_ids]
-
-    # 【救済】新鮮な問題が足りない場合は、履歴にあるものを混ぜる
-    final_list = fresh
-    if len(final_list) < target_count:
-        needed = target_count - len(final_list)
-        older = [q for q in full_pool if q.get("id") in excluded_ids]
-        random.shuffle(older)
-        final_list.extend(older[:needed])
-
-    # シャッフルして指定数を返す
-    random.shuffle(final_list)
-    return final_list[:target_count]
-
-
-# =============================================================================
-# 1. 定数・グローバル設定
-# =============================================================================
-RANK_LABELS = {"A": "🟢 基本", "B": "🟡 発展", "C": "🔴 上級"}
-JST = timezone(timedelta(hours=+9), "JST")
-
-# =============================================================================
-# 2. 2026年仕様 CSS (PDF・5mロール紙・アクセシビリティ対応)
-# =============================================================================
-st.set_page_config(
-    page_title="2027 高校入試攻略：STRATEGY",
-    layout="wide",
-    initial_sidebar_state="expanded",
+# --- CSSスタイル ---
+st.markdown(
+    f"""
+<style> 
+    .block-container {{ max-width: 100% !important; padding: 2rem 1.5rem !important; }}
+    .status-badge {{ 
+        background-color: {status_color}; 
+        color: white; 
+        padding: 2px 8px; 
+        border-radius: 4px; 
+        font-size: 12px; 
+        font-weight: bold; 
+        vertical-align: middle;
+    }}
+    [data-testid="stSidebar"] {{ padding: 0px !important; }}
+    [data-testid="stSidebarContent"] {{ padding: 0px !important; }}
+    [data-testid="stSidebarUserContent"] {{
+        margin-top: -35px !important; 
+        padding: 10px 15px 1rem 15px !important; 
+        width: 100% !important;
+    }}
+    [data-testid="stSidebar"] > div:first-child {{ width: 260px !important; max-width: 260px !important; }}
+    [data-testid="stSidebar"] label p {{ font-size: 11px !important; margin-bottom: 2px !important; font-weight: bold !important; color: inherit !important; }}
+    .sidebar-header-style {{ font-size: 11px !important; font-weight: bold !important; margin: 5px 0 2px 0; display: block; color: inherit !important; }}
+    [data-testid="stSidebar"] .stCheckbox label div[data-testid="stMarkdownContainer"] p {{ font-size: 12px !important; color: inherit !important; transform: translateY(1.5px); }}
+    .slim-status {{ 
+        font-size: 11px !important; padding: 1px 8px !important; margin-bottom: 4px !important; 
+        border-radius: 3px; border-left: 2px solid #ccc; background-color: rgba(128, 128, 128, 0.1) !important; 
+        color: inherit !important; line-height: 1.2; font-weight: 500; 
+    }}
+    .status-ok {{ border-left-color: #10b981 !important; color: #10b981 !important; }}
+    .ai-table {{ 
+        width: 100%; border-collapse: collapse; min-width: 1100px; 
+        font-family: "Meiryo", sans-serif; font-size: 13px !important; 
+        background-color: white !important; color: black !important; 
+    }}
+    .ai-table th {{ background-color: #e0e0e0 !important; color: black !important; border: 1px solid #999; padding: 4px 2px; text-align: center; font-weight: bold; }}
+    .ai-table td {{ border: 1px solid #ccc; padding: 4px 2px; vertical-align: top; text-align: center; color: black !important; }}
+    .td-left {{ text-align: left !important; padding-left: 8px !important; }}
+    .bg-aoteng {{ background-color: #E6F0FF !important; }} 
+    .bg-low-liquidity {{ background-color: #FFE6E6 !important; }} 
+    .bg-triage-high {{ background-color: #FFFFCC !important; }} 
+    .custom-title {{ font-size: 1.2rem !important; font-weight: bold; display: flex; align-items: center; gap: 15px; color: inherit !important; }}
+    .custom-title img {{ height: 60px !important; margin-top: 15px;}}
+    .big-font {{ font-size:14px !important; font-weight: bold; color: inherit !important; }}
+    .update-badge {{ font-size: 10px; font-weight: bold; color: #ff6347; display: inline-block; vertical-align: middle; line-height: 1.0; margin-left: 5px; }}
+    .badge-container {{ margin-top: 4px; display: flex; flex-wrap: wrap; gap: 3px; justify-content: flex-start; }}
+    
+    /* --- バッジ配色：最新ルール統合版 --- */
+    .factor-badge {{ 
+        display: inline-flex; align-items: center; justify-content: center; 
+        width: 20px; height: 20px; font-size: 11px; font-weight: bold; 
+        border-radius: 4px; border: 1.5px solid; cursor: default; 
+    }}
+    /* 【最優先：大注目】垂直立ち上げ（蛍光グリーン＋発光） */
+    .badge-jump {{ 
+        background-color: #ccff00 !important; 
+        color: #000000 !important; 
+        border-color: #a2cc00 !important; 
+        box-shadow: 0 0 5px #ccff00; 
+    }}
+    /* 【ポジティブ：緑系】新高値、強気転換、週足など */
+    .badge-plus {{ 
+        color: #004d00 !important; 
+        background-color: #ccffcc !important; 
+        border-color: #008000 !important; 
+    }}
+    /* 【中立・待機：黄色系】押し目R/R比、戦略系バッジ */
+    .badge-oshime {{ 
+        background-color: #fff9c4 !important; 
+        color: #f57f17 !important; 
+        border-color: #fbc02d !important; 
+    }}
+    /* 【リスク：赤系】過熱、出来高不足、DCなど */
+    .badge-minus {{ 
+        color: #800000 !important; 
+        background-color: #ffcccc !important; 
+        border-color: #cc0000 !important; 
+    }}
+    
+    details.legend-details summary {{
+        cursor: pointer; padding: 8px; background-color: #f8fafc;
+        border: 1px solid #e2e8f0; border-radius: 4px; font-weight: bold;
+        color: #475569; font-size: 13px; list-style: none; display: flex; align-items: center; gap: 8px;
+    }}
+    details.legend-details summary::after {{ content: "▼"; font-size: 10px; margin-left: auto; transition: transform 0.2s; }}
+    details.legend-details[open] summary::after {{ transform: rotate(180deg); }}
+    details.legend-details .legend-content {{
+        padding: 10px; border: 1px solid #e2e8f0; border-top: none; background-color: #ffffff;
+        display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px;
+    }}
+    .legend-item {{ display: flex; align-items: center; gap: 6px; font-size: 11px; color: #334155; }}
+</style>
+""",
+    unsafe_allow_html=True,
 )
 
+# --- 環境変数 & 認証 ---
+IS_LOCAL_SKIP_AUTH = os.environ.get("SKIP_AUTH", "false").lower() == "true"
 
-def inject_muscular_styles():
+
+def hash_password(password):
+    return hashlib.sha256(password.encode("utf-8")).hexdigest()
+
+
+SECRET_HASH = ""
+try:
+    if "security" in st.secrets and "secret_password_hash" in st.secrets["security"]:
+        SECRET_HASH = st.secrets["security"]["secret_password_hash"]
+    else:
+        raise ValueError("No secrets found")
+except Exception:
+    SECRET_HASH = hash_password("default_password_for_local_test")
+
+MANUAL_URL = "https://soutori296.stars.ne.jp/SoutoriWebShop/ai2_manual.html"
+
+# --- セッションステート初期化 ---
+state_keys = [
+    "analyzed_data",
+    "ai_monologue",
+    "error_messages",
+    "clear_confirmed",
+    "tickers_input_value",
+    "analysis_run_count",
+    "is_first_session_run",
+    "analysis_index",
+    "current_input_hash",
+    "sort_option_key",
+    "selected_model_name",
+    "score_history",
+    "ui_filter_min_score",
+    "ui_filter_min_liquid_man",
+    "ui_filter_score_on",
+    "ui_filter_liquid_on",
+    "ui_filter_max_rsi",
+    "ui_filter_rsi_on",
+    "is_running_continuous",
+    "wait_start_time",
+    "run_continuously_checkbox",
+    "gemini_api_key_input",
+    "authenticated",
+    "trigger_copy_filtered_data",
+]
+for k in state_keys:
+    if k not in st.session_state:
+        if k == "authenticated":
+            st.session_state[k] = IS_LOCAL_SKIP_AUTH
+        elif k == "ui_filter_min_score":
+            st.session_state[k] = 75
+        elif k == "ui_filter_min_liquid_man":
+            st.session_state[k] = 1.0
+        elif k == "ui_filter_max_rsi":
+            st.session_state[k] = 70
+        elif k == "sort_option_key":
+            st.session_state[k] = "スコア順 (高い順)"
+        elif k == "selected_model_name":
+            st.session_state[k] = "gemma-3-12b-it"
+        elif k in ["analyzed_data", "error_messages"]:
+            st.session_state[k] = []
+        elif k == "score_history":
+            st.session_state[k] = {}
+        else:
+            st.session_state[k] = (
+                False
+                if "on" in k or "confirmed" in k or "is_" in k or "checkbox" in k
+                else ""
+            )
+
+MAX_TICKERS = 10
+
+# --- タイトル表示 ---
+st.markdown(
+    f"""
+<div class="custom-title">
+    <img src="{ICON_URL}" alt="AI Icon"> {PAGE_TITLE}
+</div>
+""",
+    unsafe_allow_html=True,
+)
+
+st.markdown(
+    f"""
+<p class="big-font">
+    あなたの提示した銘柄についてアイが分析を行い、<b>判断の参考となる見解</b>を提示します。<br>
+    <span class="status-badge">{status_label}</span>
+</p>
+""",
+    unsafe_allow_html=True,
+)
+
+# --- バッジ凡例 ---
+st.markdown(
     """
-    Ruff F541対策としてraw stringを使用。
-    2026年以降のブラウザおよび印刷環境に最適化。
-    レモン色ボタン（lemon-box）の設定を追加。
-    """
+<section style="margin-bottom: 15px;">
+    <details class="legend-details">
+        <summary>
+            <svg style="width:16px;height:16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+            アイコン・バッジ全リスト（クリックで開閉）
+        </summary>
+        <div class="legend-content">
+            <div class="legend-item"><span class="factor-badge badge-plus" style="background-color: #ffeb3b !important; color: #b71c1c !important; border-color: #f57f17 !important;">飛</span> <span>垂直立ち上げ (+10)</span></div>
+            <div class="legend-item"><span class="factor-badge badge-plus">転</span> <span>強気転換 (+5)</span></div>
+            <div class="legend-item"><span class="factor-badge badge-plus">底</span> <span>RCI反転底打 (+5)</span></div>
+            <div class="legend-item"><span class="factor-badge badge-plus">新</span> <span>新高値ブレイク (+15)</span></div>
+            <div class="legend-item"><span class="factor-badge badge-plus">逆</span> <span>RSIダイバージェンス (+15)</span></div>
+            <div class="legend-item"><span class="factor-badge badge-plus">機</span> <span>RCI好転 (+10)</span></div>
+            <div class="legend-item"><span class="factor-badge badge-plus">戦</span> <span>戦略優位性 (+15)</span></div>
+            <div class="legend-item"><span class="factor-badge badge-plus">充</span> <span>スクイーズ (+10)</span></div>
+            <div class="legend-item"><span class="factor-badge badge-plus">青</span> <span>青天井モード (+15)</span></div>
+            <div class="legend-item"><span class="factor-badge badge-plus">Ｒ</span> <span>高リスクリワード (+20)</span></div>
+            <div class="legend-item"><span class="factor-badge badge-plus">週</span> <span>週足上昇トレンド (+5)</span></div>
+            <div class="legend-item"><span class="factor-badge badge-plus">堅</span> <span>大型堅調 (+10)</span></div>
+            <div class="legend-item"><span class="factor-badge badge-plus">安</span> <span>低含損率 (+5)</span></div>
+            <div class="legend-item"><span class="factor-badge badge-plus">復</span> <span>早期回復 (+5)</span></div>
+            <div class="legend-item"><span class="factor-badge badge-plus">Ｇ</span> <span>ゴールデンクロス (+5)</span></div>
+            <div class="legend-item"><span class="factor-badge badge-plus">出</span> <span>出来高急増 (+10)</span></div>
+            <div class="legend-item"><span class="factor-badge badge-plus">勢</span> <span>直近勢い (+5)</span></div>
+            <div class="legend-item"><span class="factor-badge badge-plus">適</span> <span>RSI適正 (+5)</span></div>
+            <div class="legend-item"><span class="factor-badge badge-minus">週</span> <span>週足下落トレンド (-20)</span></div>
+            <div class="legend-item"><span class="factor-badge badge-minus">損</span> <span>低リスクリワード (-25)</span></div>
+            <div class="legend-item"><span class="factor-badge badge-minus">落</span> <span>高含損リスク (-15)</span></div>
+            <div class="legend-item"><span class="factor-badge badge-minus">遅</span> <span>回復遅延 (-10)</span></div>
+            <div class="legend-item"><span class="factor-badge badge-minus">Ｄ</span> <span>デッドクロス (-10)</span></div>
+            <div class="legend-item"><span class="factor-badge badge-minus">市</span> <span>市場過熱 (-10)</span></div>
+            <div class="legend-item"><span class="factor-badge badge-minus">板</span> <span>流動性懸念 (-30)</span></div>
+            <div class="legend-item"><span class="factor-badge badge-minus">凪</span> <span>低ボラ (-10)</span></div>
+            <div class="legend-item"><span class="factor-badge badge-minus">熱</span> <span>RSIペナルティ (警告)</span></div>
+        </div>
+    </details>
+</section>
+""",
+    unsafe_allow_html=True,
+)
+
+with st.expander("📘 取扱説明書 (データ仕様・判定基準)"):
     st.markdown(
-        r"""
-        <style>
-        /* --- 既存のスタイル --- */
-        [data-testid="stSidebar"] { 
-            min-width: 300px !important; 
-            max-width: 300px !important; 
-        }
-        [data-testid="stSidebar"] [data-testid="stMetricLabel"] {
-            font-size: 0.85rem !important;
-            font-weight: bold !important;
-        }
-        [data-testid="stSidebar"] [data-testid="stMetricValue"] {
-            font-size: 1.1rem !important;
-        }
-        div[data-testid="stHorizontalBlock"] > div:nth-child(1) [data-testid="stMetricValue"] {
-            padding-left: 8px !important;
-        }
-        div[data-testid="stHorizontalBlock"] > div:nth-child(2) [data-testid="stMetricLabel"],
-        div[data-testid="stHorizontalBlock"] > div:nth-child(2) [data-testid="stMetricValue"] {
-            text-align: right !important;
-            justify-content: flex-end !important;
-            padding-right: 18px !important;
-        }
-        [data-testid="stHorizontalBlock"] {
-            margin-bottom: -10px !important; 
-        }
-
-        /* 🌟 【追加：レモン色ボタン設定】 🌟 */
-        .lemon-box div.stButton > button {
-            background-color: #FFF9C4 !important; /* 薄いレモン色 */
-            color: #827717 !important;           /* 濃いオリーブ色 */
-            border: 2px solid #FBC02D !important; /* レモン色の枠線 */
-            border-radius: 10px !important;
-            font-weight: bold !important;
-            height: auto !important;
-            padding: 10px !important;
-        }
-        .lemon-box div.stButton > button:hover {
-            background-color: #FFF176 !important; /* ホバーで少し明るく */
-            border-color: #FBC02D !important;
-            color: #827717 !important;
-        }
-
-        /* --- 印刷設定 --- */
-        @media print {
-            @page { size: 210mm 4000mm; margin: 15mm; }
-            section[data-testid="stSidebar"], header, .stButton, 
-            div[data-testid="stToolbar"], [data-testid="collapsedControl"], footer { 
-                display: none !important; 
-            }
-            .main .block-container, div[data-testid="stMainBlockContainer"], .stMain { 
-                display: block !important;
-                max-width: 100% !important; 
-                width: 100% !important; 
-                padding: 0 !important; 
-                margin: 0 !important;
-            }
-            .answer-box { 
-                border: 2px solid #000 !important; 
-                height: 240px; 
-                width: 100%; 
-                margin-bottom: 30px;
-                background: #fff !important;
-                -webkit-print-color-adjust: exact;
-            }
-        }
-        </style>
-        """,
+        f"""
+    <p>
+        詳細な分析ロジック、スコア配点、時価総額別の目標リターンについては、<br>
+        以下の外部マニュアルリンクをご参照ください。<br>
+        <b><a href="{MANUAL_URL}" target="_blank">🔗 詳細ロジックマニュアルを開く</a></b>
+    </p>
+    """,
         unsafe_allow_html=True,
     )
 
 
-inject_muscular_styles()
-
-# =============================================================================
-# 3. ユーティリティ関数 (認証・時間・音声)
-# =============================================================================
-
-
-def format_time(total_seconds):
-    h = total_seconds // 3600
-    m = (total_seconds % 3600) // 60
-    if h >= 100:
-        return f"{h}時間"
-    elif h > 0:
-        return f"{h}時間{m}分"
-    else:
-        return f"{m}分"
+# --- コールバック関数 ---
+def clear_all_data_confirm():
+    st.session_state.clear_confirmed = True
+    st.session_state.ui_filter_score_on = False
+    st.session_state.ui_filter_liquid_on = False
+    st.session_state.ui_filter_rsi_on = False
 
 
-def assign_missing_ids():
-    """
-    O列(15列目)が空の行に、一括でUUIDを付与する（API制限回避版）
-    """
-    try:
-        creds = get_creds()
-        client = gspread.authorize(creds)
-        sh = client.open("study_stats_db").worksheet("questions")
-
-        # 全データを取得
-        records = sh.get_all_values()
-        if not records:
-            return
-
-        # 1. 既存の全IDを取得してダブりチェック用セットを作成
-        existing_ids = {row[14] for row in records if len(row) >= 15 and row[14]}
-
-        # 更新用リストを準備
-        cells_to_update = []
-        updated_count = 0
-
-        with st.spinner("一括更新データを準備中..."):
-            for i, row in enumerate(records[1:], start=2):  # 2行目から
-                current_id = row[14] if len(row) >= 15 else ""
-
-                if not current_id or str(current_id).strip() == "":
-                    # 重複しないIDを生成
-                    new_uuid = str(uuid.uuid4())
-                    while new_uuid in existing_ids:
-                        new_uuid = str(uuid.uuid4())
-
-                    # 💡 書き込み予約（セルオブジェクトを作成）
-                    from gspread.cell import Cell
-
-                    cells_to_update.append(Cell(row=i, col=15, value=new_uuid))
-                    existing_ids.add(new_uuid)
-                    updated_count += 1
-
-        # 2. 💡 まとめて一括書き込み（ここがAPI節約のポイント）
-        if cells_to_update:
-            with st.spinner(f"{updated_count}件をスプレッドシートに一括保存中..."):
-                sh.update_cells(cells_to_update)
-            st.success(f"✅ {updated_count}件の問題に新しいIDを付与しました。")
-        else:
-            st.info("ℹ️ すべての問題にIDが設定済みです。")
-
-    except Exception as e:
-        st.error(f"ID付与エラー: {e}")
+def reanalyze_all_data_logic():
+    all_tickers = [d["code"] for d in st.session_state.analyzed_data]
+    st.session_state.tickers_input_value = "\n".join(all_tickers)
+    st.session_state.analysis_index = 0
+    st.session_state.ui_filter_score_on = False
+    st.session_state.ui_filter_liquid_on = False
 
 
-def archive_and_delete_question(q_data):
-    """
-    指定された問題を 'deleted_questions' シートへ移動し、元から削除する
-    """
-    try:
-        creds = get_creds()
-        client = gspread.authorize(creds)
-        ss = client.open("study_stats_db")
-        main_sh = ss.worksheet("questions")
+def toggle_continuous_run():
+    if not st.session_state.get("run_continuously_checkbox_key", False):
+        st.session_state.is_running_continuous = False
+        st.session_state.wait_start_time = None
 
-        target_id = q_data.get("id")
-        if not target_id:
-            st.error(
-                "この問題にはIDがないため削除できません。管理者にID付与を依頼してください。"
-            )
-            return
 
-        # 1. 元シートからIDを探して行番号を特定
-        id_col = main_sh.col_values(15)
+def fetch_with_retry(url, max_retry=3):
+    """403 Forbidden回避のためのヘッダー強化"""
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+        "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
+        "Referer": "https://kabutan.jp/",
+    }
+    for attempt in range(max_retry):
         try:
-            row_idx = id_col.index(str(target_id)) + 1
-        except ValueError:
-            st.error("スプレッドシート上で対象のIDが見つかりませんでした。")
-            return
-
-        # 2. 削除用シートへ移動
-        try:
-            del_sh = ss.worksheet("deleted_questions")
-        except Exception:
-            del_sh = ss.add_worksheet(title="deleted_questions", rows="100", cols="20")
-            del_sh.append_row(list(q_data.keys()) + ["deleted_at"])
-
-        archive_row = list(q_data.values()) + [
-            datetime.now(timezone(timedelta(hours=9))).isoformat()
-        ]
-        del_sh.append_row(archive_row)
-
-        # 3. 物理削除
-        main_sh.delete_rows(row_idx)
-        st.toast("問題をアーカイブへ移動しました。")
-        time.sleep(1)
-        st.rerun()
-    except Exception as e:
-        st.error(f"削除失敗: {e}")
-
-
-# -----------------------------------------------------------------------------
-# 🛠️ データベース保守用：特定IDの問題を削除＆退避する関数
-# -----------------------------------------------------------------------------
-def delete_question_by_id(target_id):
-    """
-    指定されたIDの問題を questions シートから削除し、deleted_questions シートへ移動
-    """
-    try:
-        # スプレッドシートへの接続
-        gc = gspread.authorize(get_creds())
-        doc = gc.open("study_stats_db")  # ←ここ、実際のシート名と合っているか確認！
-        sh_q = doc.worksheet("questions")
-
-        # 退避用シート（deleted_questions）を開く。なければ作成。
-        try:
-            sh_del = doc.worksheet("deleted_questions")
-        except Exception:
-            sh_del = doc.add_worksheet(title="deleted_questions", rows="100", cols="20")
-            # 1行目にヘッダーを入れる
-            sh_del.append_row(sh_q.row_values(1))
-
-        # 1. シートの全データを取得（API節約のため一括取得）
-        all_rows = sh_q.get_all_values()
-        id_column_idx = 14  # O列は0から数えて14番目
-
-        found_row_idx = -1
-        row_content = []
-
-        for i, row in enumerate(all_rows):
-            # 1行目（ヘッダー）は飛ばす
-            if i == 0:
+            time.sleep(random.uniform(1.0, 2.5))
+            res = requests.get(url, headers=headers, timeout=15)
+            if res.status_code == 403:
+                time.sleep(5)
                 continue
-
-            # IDが一致するか確認
-            if len(row) > id_column_idx and str(row[id_column_idx]) == str(target_id):
-                found_row_idx = i + 1  # Googleシートは1行目から始まるので+1
-                row_content = row
-                break
-
-        if found_row_idx > 1:
-            # 2. 退避用シートにデータを追加
-            sh_del.append_row(row_content)
-            # 3. 元のシートからその行を削除
-            sh_q.delete_rows(found_row_idx)
-            return True
-        else:
-            return False
-
-    except Exception as e:
-        st.error(f"削除エラー発生: {e}")
-        return False
+            res.raise_for_status()
+            return res
+        except Exception:
+            if attempt == max_retry - 1:
+                raise
+            time.sleep(2 + attempt * 2)
+    raise Exception("データ取得リトライ失敗")
 
 
-def update_question_fields_batch(target_id, new_data):
-    """
-    O列(15列目)のIDをキーにして、A列からG列までを一括で書き換える関数
-    """
-    try:
-        creds = get_creds()
-        client = gspread.authorize(creds)
-        sh = client.open("study_stats_db").worksheet("questions")
-
-        # IDが並んでいる15列目を取得
-        ids = sh.col_values(15)
-        if str(target_id) not in ids:
-            return False
-
-        row_idx = ids.index(str(target_id)) + 1
-
-        # 書き換える値のリスト作成 (A〜Gの計7つ)
-        update_values = [
-            new_data.get("category", ""),
-            new_data.get("sub_cat", ""),
-            new_data.get("rank", ""),
-            new_data.get("q", ""),
-            new_data.get("a", ""),
-            new_data.get("h", ""),
-            new_data.get("p_dummy", ""),
-        ]
-
-        # 🌟 修正ポイント:
-        # update_valuesが7個なら、範囲も「AからG」にする必要があります。
-        # もしHまで広げるなら、update_valuesに8個目のデータを入れる必要があります。
-        cell_range = f"A{row_idx}:G{row_idx}"
-        sh.update(range_name=cell_range, values=[update_values])
-        return True
-    except Exception as e:
-        print(f"Error: {e}")
-        return False
-
-
-# single_fieldもインデントを修正
-def update_question_single_field(q_id, field_name, new_value):
-    col_map = {
-        "category": "A",
-        "sub_cat": "B",
-        "rank": "C",
-        "q": "D",
-        "a": "E",
-        "h": "F",
-        "p_dummy": "G",
+@st.cache_data(ttl=1)
+def get_stock_info(code):
+    """株探から個別情報を取得 (月名問題・出来高正規表現・時価総額取得修正)"""
+    url = f"https://kabutan.jp/stock/?code={code}"
+    data = {
+        "name": "不明",
+        "per": "-",
+        "pbr": "-",
+        "price": None,
+        "volume": 0.0,
+        "cap": 0,
+        "open": None,
+        "high": None,
+        "low": None,
+        "close": None,
+        "issued_shares": 0.0,
+        "earnings_date": None,
+        "earnings_status": "",
     }
     try:
-        creds = get_creds()
-        client = gspread.authorize(creds)
-        sh = client.open("study_stats_db").worksheet("questions")
-        id_col = sh.col_values(15)
+        res = fetch_with_retry(url)
+        res.encoding = res.apparent_encoding
+        html = res.text.replace("\n", "").replace("\r", "")
 
-        if str(q_id) not in id_col:
-            return False
+        m_name = re.search(r"<title>(.*?)【", html)
+        if m_name:
+            data["name"] = (
+                re.sub(r"[\(\（].*?[\)\）]", "", m_name.group(1).strip())
+                .replace("<br>", " ")
+                .strip()
+            )
+        m_price = re.search(r"(?:現在値|終値)</th>\s*<td[^>]*>([\d,.]+)</td>", html)
+        if m_price:
+            data["price"] = safe_float_convert(m_price.group(1))
 
-        row_idx = id_col.index(str(q_id)) + 1
-        sh.update(range_name=f"{col_map[field_name]}{row_idx}", values=[[new_value]])
-        return True
-    except Exception:
-        return False
-
-
-# =============================================================================
-# 4. 解析・比較エンジン
-# =============================================================================
-
-
-def compare_answers(user_ans, correct_ans):
-    if not user_ans or not correct_ans:
-        return False
-
-    def normalize(text):
-        return re.sub(
-            r"[\s\u3000\t\n\r\xa0\$\{\}\\\.,\?\!。？！\'\"、，]", "", str(text).lower()
+        # 出来高の正規表現をより柔軟に (spanタグ等に対応)
+        m_vol = re.search(
+            r"出来高</th>\s*<td[^>]*>(?:<span[^>]*>)?([\d,.]+)(?:</span>)?.*?株</td>",
+            html,
         )
+        if m_vol:
+            data["volume"] = safe_float_convert(m_vol.group(1))
 
-    return normalize(user_ans) == normalize(correct_ans)
+        m_cap = re.search(r"時価総額.*?</th>\s*<td[^>]*>(.*?)</td>", html)
+        if m_cap:
+            cap_str = (
+                re.sub(r"<[^>]+>", "", m_cap.group(1))
+                .strip()
+                .replace("\n", "")
+                .replace("\r", "")
+            )
+            val = 0
+            if "兆" in cap_str:
+                parts = cap_str.split("兆")
+                # 小数点を含む数値に対応するため safe_float_convert を使用
+                trillion = safe_float_convert(parts[0])
+                billion = 0
+                if len(parts) > 1 and "億" in parts[1]:
+                    # "億" の前の数値部分を抽出（小数点も含む正規表現）
+                    b_match = re.search(r"([\d,.]+)", parts[1])
+                    if b_match:
+                        billion = safe_float_convert(b_match.group(1))
+                val = trillion * 10000 + billion
+            elif "億" in cap_str:
+                b_match = re.search(r"([\d,.]+)", cap_str)
+                if b_match:
+                    val = safe_float_convert(b_match.group(1))
+            data["cap"] = val
 
+        i3_match = re.search(r'<div id="stockinfo_i3">.*?<tbody>(.*?)</tbody>', html)
+        if i3_match:
+            tds = re.findall(r"<td.*?>(.*?)</td>", i3_match.group(1))
 
-def parse_order_question(text, category):
-    raw = str(text).strip()
-    en, jp, choices = raw, "", []
-    try:
-        if "数学" in str(category):
-            return raw, "", []
-        if any(x in str(category) for x in ["英語", "漢字", "国語"]):
-            m = re.search(r"[^\x00-\x7F]+", raw)
+            def clean_tag_and_br(s):
+                return re.sub(r"<[^>]+>", "", s).replace("<br>", "").strip()
+
+            if len(tds) >= 2:
+                data["per"] = clean_tag_and_br(tds[0])
+                data["pbr"] = clean_tag_and_br(tds[1])
+
+        # 月名(12月等)に依存しないように \d+月 に修正
+        ohlc_table_match = re.search(
+            r"<(?:h2|div)[^>]*>\s*\d+月\d+日.*?<table[^>]*>(.*?)</table>",
+            html,
+            re.DOTALL,
+        )
+        ohlc_content = ohlc_table_match.group(1) if ohlc_table_match else html
+        ohlc_map = {"始値": "open", "高値": "high", "安値": "low", "終値": "close"}
+        for key, val_key in ohlc_map.items():
+            m = re.search(
+                rf"<th[^>]*>{key}</th>\s*<td[^>]*>([\d,.]+)</td>", ohlc_content
+            )
             if m:
-                idx = m.start()
-                if idx > 0:
-                    en, jp = raw[:idx].strip(), raw[idx:].strip()
-                else:
-                    m2 = re.search(r"([。？！])", raw)
-                    if m2:
-                        sp = m2.end()
-                        jp, en = raw[:sp].strip(), raw[sp:].strip()
+                data[val_key] = safe_float_convert(m.group(1))
+
+        m_issued = re.search(r"発行済株式数.*?<td>([\d,.]+).*?株</td>", html)
+        if m_issued:
+            data["issued_shares"] = safe_float_convert(m_issued.group(1))
+        m_earn_plan = re.search(r"決算発表予定日.*?(\d{4})/(\d{1,2})/(\d{1,2})", html)
+        if m_earn_plan:
+            data["earnings_date"] = datetime.datetime(
+                int(m_earn_plan.group(1)),
+                int(m_earn_plan.group(2)),
+                int(m_earn_plan.group(3)),
+            )
+            data["earnings_status"] = "upcoming"
         else:
-            en = raw
-        m_choices = re.findall(r"[\(（]([^)]*?[/／][^)]*?)[\)）]", en)
-        for mc in m_choices:
-            choices.extend([w.strip() for w in re.split(r"[/／]", mc) if w.strip()])
-    except Exception:
-        pass
-    return en, jp, choices
+            m_earn_done = re.search(r"決算.*?(\d{4})/(\d{1,2})/(\d{1,2}).*?発表", html)
+            if m_earn_done:
+                data["earnings_date"] = datetime.datetime(
+                    int(m_earn_done.group(1)),
+                    int(m_earn_done.group(2)),
+                    int(m_earn_done.group(3)),
+                )
+                data["earnings_status"] = "done"
+        return data
+    except Exception as e:
+        st.session_state.error_messages.append(f"データ取得エラー ({code}): {e}")
+        return data
 
 
-def get_skip_indices(text):
-    indices = set()
-    if not text:
-        return []
+@st.cache_data(ttl=300, show_spinner="市場25日騰落レシオを取得中...")
+def get_25day_ratio():
+    url = "https://nikkeiyosoku.com/up_down_ratio/"
     try:
-        patterns = re.findall(r"(\d+-\d+|\d+)", str(text))
-        for p in patterns:
-            if "-" in p:
-                s, e = map(int, p.split("-"))
-                indices.update(range(max(1, s), min(101, e + 1)))
-            else:
-                indices.add(int(p))
+        res = fetch_with_retry(url)
+        res.encoding = res.apparent_encoding
+        m_ratio = re.search(
+            r'<p class="stock-txt">([0-9\.]+)', res.text.replace("\n", "")
+        )
+        return float(m_ratio.group(1).strip()) if m_ratio else 100.0
     except Exception:
-        pass
-    return sorted(list(indices))
+        return 100.0
 
 
-# =============================================================================
-# 5. 漢字判定エンジン (300x300 固定仕様)
-# =============================================================================
+market_25d_ratio = get_25day_ratio()
 
 
-def get_kanji_score(canvas_result, char, correct_strokes):
-    """
-    230サイズで判定を行います。
-    補助線なし、位置補正なしのストイックな記憶判定ロジックです。
-    """
-    if canvas_result is None or canvas_result.json_data is None:
-        return 0, "まずは一画書いてみよう！"
-
-    # 1. 画数チェック (±2画)
-    user_strokes = len(canvas_result.json_data["objects"])
+def get_kabutan_recent_history(code):
+    """株探の時系列テーブル(th/td混在型)からデータを確実に抽出する"""
+    url = f"https://kabutan.jp/stock/kabuka?code={code}&ashi=day"
     try:
-        if correct_strokes and str(correct_strokes).strip().isdigit():
-            target_s = int(float(correct_strokes))
-            if abs(user_strokes - target_s) > 2:
-                return -1, f"画数が違います（現在 {user_strokes} 画）。"
-    except Exception:
-        pass
+        res = fetch_with_retry(url)
+        res.encoding = res.apparent_encoding
+        try:
+            from bs4 import BeautifulSoup
+        except ImportError:
+            return pd.DataFrame()
 
-    # 2. マスク準備 (230x230サイズ)
-    size = 230
-    user_mask_raw = canvas_result.image_data[:, :, 3] > 0
-    if user_mask_raw.sum() == 0:
-        return 0, "形をイメージしてから書いてみよう。"
+        soup = BeautifulSoup(res.text, "html.parser")
+        # ユーザー提示のクラス名 'stock_kabuka_dwm' でテーブルを特定
+        table = soup.find("table", {"class": "stock_kabuka_dwm"})
+        if not table:
+            return pd.DataFrame()
 
-    # 230x230としてそのまま判定（位置のズレを許容しない）
-    user_mask = np.array(Image.fromarray(user_mask_raw).resize((size, size)))
+        rows = (
+            table.find("tbody").find_all("tr")
+            if table.find("tbody")
+            else table.find_all("tr")
+        )
+        history_data = []
 
-    # 3. お手本描画
-    target_img = Image.new("L", (size, size), 0)
-    font = None
-    # 230サイズに合わせてフォントサイズを 165 程度に調整
-    fps = [
-        os.path.join("fonts", "ipaexg.ttf"),
-        "/usr/share/fonts/truetype/fonts-japanese-gothic.ttf",
-        r"C:\Windows\Fonts\msgothic.ttc",
-    ]
-    for fp in fps:
-        if os.path.exists(fp):
-            try:
-                font = ImageFont.truetype(fp, 165)
-                break
-            except Exception:
+        for row in rows:
+            # 日付は <th>、数値は <td> に分かれている構造に対応
+            date_cell = row.find("th")
+            cols = row.find_all("td")
+
+            if not date_cell or len(cols) < 7:
                 continue
-    if not font:
-        font = ImageFont.load_default()
-    draw = ImageDraw.Draw(target_img)
-    draw.text((size // 2, size // 2), char, font=font, fill=255, anchor="mm")
-    target_mask = np.array(target_img) > 0
 
-    # 4. 一致度計算 (F-Score)
-    overlap = np.logical_and(target_mask, user_mask).sum()
-    recall = overlap / target_mask.sum() if target_mask.sum() > 0 else 0
-    precision = overlap / user_mask.sum() if user_mask.sum() > 0 else 0
-    f_score = (
-        (2 * recall * precision) / (recall + precision)
-        if (recall + precision) > 0
-        else 0
-    )
+            d_str = date_cell.get_text(strip=True)
+            if "/" not in d_str:
+                continue
 
-    # 5. スコア決定（階段式 34/66/100）
-    if f_score > 0.65:
-        return 100, "バッチリ！完璧に思い出せましたね💮"
-    elif f_score > 0.35:
-        return 66, "だいたい合っています！一度クリアして書き直してみよう。"
-    elif f_score > 0.15:
-        return 34, "場所は捉えられています！次は形（パーツ）を思い出して。"
+            try:
+                # 26/02/27 -> 2026-02-27 形式に変換
+                parts = d_str.split("/")
+                year = "20" + parts[0] if len(parts[0]) == 2 else parts[0]
+                date_val = pd.to_datetime(f"{year}-{parts[1]}-{parts[2]}")
 
-    return 0, "位置がずれているかもしれません。お手本をよく見て思い出そう。"
+                # 数値変換 (カンマ、空文字、ハイフンを除去)
+                def p(s):
+                    v = s.get_text(strip=True).replace(",", "").replace("－", "0")
+                    return float(v) if v and v != "0" else 0.0
 
-
-# =============================================================================
-# 6. 高速データベース一括保存 (自己ベスト保持 ＆ 習熟度更新 復元版)
-# =============================================================================
-
-
-def batch_save_to_db(custom_mode=None, custom_qs=None):
-    if st.session_state.get("parent_unlock_key") == "7777":
-        st.toast("👨‍🏫 ペアレントモード：保存をスキップしました", icon="🚫")
-        return True
-
-    try:
-        creds = get_creds()
-        if not creds:
-            return False
-        gc = gspread.authorize(creds)
-        ss = gc.open("study_stats_db")
-        sh_hist = ss.worksheet("history")
-        today_ts = datetime.now(JST).strftime("%Y/%m/%d %H:%M:%S")
-
-        tid = st.session_state.get("active_mission_id")
-        curr_idx = st.session_state.get("index", 0)
-        mode = custom_mode if custom_mode else st.session_state.mode
-        qs = custom_qs if custom_qs else st.session_state.questions
-
-        # A. 履歴 (history) シートの更新
-        if not custom_qs and tid:
-            ids = sh_hist.col_values(7)
-            if tid in ids:
-                rn = ids.index(tid) + 1
-                is_done = curr_idx >= len(qs)
-
-                # 今回のスコアを計算
-                att = st.session_state.index + (
-                    1 if st.session_state.get("show_result") else 0
-                )
-                cor = min(st.session_state.correct_count, att)
-                new_score_val = round((cor / att) * 100, 1) if att > 0 else 0
-
-                # 🌟【復元】既存のスコア（自己ベスト）を取得
-                current_row = sh_hist.row_values(rn)
-                current_score_str = current_row[2] if len(current_row) > 2 else ""
-                try:
-                    current_score_val = float(
-                        re.findall(r"(\d+\.?\d*)", current_score_str)[0]
-                    )
-                except Exception:
-                    current_score_val = -1.0
-
-                cheat = (
-                    " ⚠️早解き" if st.session_state.get("is_cheating_flagged") else ""
-                )
-
-                # 🌟【復元】自己ベスト更新判定
-                if new_score_val >= current_score_val:
-                    save_sc = f"{new_score_val}点 ({att}問中){cheat}"
-                    msg = (
-                        "🏅 自己ベスト更新！記録を保存しました"
-                        if is_done
-                        else f"進捗 {curr_idx} を保存しました"
-                    )
-                    icon = "🎊" if is_done else "✅"
-                else:
-                    save_sc = current_score_str  # 最高点を維持
-                    msg = (
-                        "ミッション完了！（最高点は維持されました）"
-                        if is_done
-                        else f"進捗 {curr_idx} を保存しました"
-                    )
-                    icon = "🏁" if is_done else "✅"
-
-                # バッチ処理で高速保存
-                sh_hist.batch_update(
+                # 取得順: 始値(0), 高値(1), 安値(2), 終値(3), 売買高(6)
+                history_data.append(
                     [
-                        {"range": f"A{rn}", "values": [[today_ts]]},
-                        {"range": f"C{rn}", "values": [[save_sc]]},
-                        {"range": f"I{rn}", "values": [[0 if is_done else curr_idx]]},
+                        date_val,
+                        p(cols[0]),
+                        p(cols[1]),
+                        p(cols[2]),
+                        p(cols[3]),
+                        p(cols[6]),
                     ]
                 )
-                st.toast(msg, icon=icon)
+            except Exception:
+                continue
 
-        # B. 新規ミッション作成
-        elif custom_qs:
-            uid = f"id_{uuid.uuid4().hex[:8]}"
-            sh_hist.append_row(
-                [
-                    today_ts,
-                    mode,
-                    "未実施",
-                    json.dumps([q["q"] for q in qs], ensure_ascii=False),
-                    "",
-                    0,
-                    uid,
-                    "",
-                    0,
-                ]
-            )
-            st.toast("新規ミッションをDBに刻みました", icon="🚀")
-
-        # C. タイマー同期
-        if st.session_state.get("unsynced_seconds", 0) > 0:
-            # 🌟 関数名を新しい「2行目上書き専用」のものに変更
-            sync_timer_to_row2(st.session_state.unsynced_seconds)
-            st.session_state.unsynced_seconds = 0
-
-        # D. 習熟度（Mastery）シートの更新（🌟新規追加＆一括更新の完全対応）
-        if st.session_state.session_results:
-            try:
-                sh_m = ss.worksheet("mastery")
-                m_recs = sh_m.get_all_records()
-
-                # 既存データのマッピング {問題文: {"row": 行番号, "s": スコア}}
-                m_dict = {
-                    str(r.get("q", "")): {"row": i + 2, "s": r.get("score", 0)}
-                    for i, r in enumerate(m_recs)
-                    if r.get("q")
-                }
-
-                m_updates = []  # 既存更新用バッチ
-                new_rows = []  # 新規追加用
-                processed_qs = set()  # 重複防止用
-
-                for res in st.session_state.session_results:
-                    q_txt = str(res["q"]).strip()
-                    cat_name = res["cat"]
-                    is_correct = res["correct"]
-
-                    if q_txt in processed_qs:
-                        continue
-                    processed_qs.add(q_txt)
-
-                    # 🌟 新規：今回の結果をアイコン化
-                    res_mark = "⭕️" if is_correct else "❌"
-
-                    if q_txt in m_dict:
-                        # 既存問題の更新ロジック
-                        row_m = m_dict[q_txt]["row"]
-                        old_s = (
-                            int(m_dict[q_txt]["s"])
-                            if str(m_dict[q_txt]["s"]).isdigit()
-                            else 0
-                        )
-                        # 漢字以外は間違えたらマイナス1のペナルティ
-                        penalty = 0 if "漢字" in str(cat_name) else -1
-                        ns = min(5, max(0, old_s + (1 if is_correct else penalty)))
-
-                        m_updates.append({"range": f"C{row_m}", "values": [[ns]]})
-                        m_updates.append({"range": f"E{row_m}", "values": [[today_ts]]})
-                        m_updates.append(
-                            {"range": f"H{row_m}", "values": [[res_mark]]}
-                        )  # 🌟 H列に結果を上書き
-                    else:
-                        # 新規問題の追加ロジック (A:カテゴリ, B:問題, C:スコア, D:最終正解日, E:最終実施日, F:空, G:空, H:最新結果)
-                        ns = 1 if is_correct else 0
-                        last_correct = today_ts if is_correct else ""
-                        new_rows.append(
-                            [
-                                cat_name,
-                                q_txt,
-                                ns,
-                                last_correct,
-                                today_ts,
-                                "",
-                                "",
-                                res_mark,
-                            ]
-                        )
-
-                # API制限を回避する一括処理
-
-                # API制限を回避する一括処理
-                if m_updates:
-                    sh_m.batch_update(m_updates)
-                if new_rows:
-                    sh_m.append_rows(new_rows)  # 未登録問題は一括でAppend
-
-                # 処理完了後にリセット
-                st.session_state.session_results = []
-            except Exception as e:
-                st.warning(f"習熟度の更新で警告: {e}")
-
-        st.cache_data.clear()
-        return True
-    except Exception:
-        return False
-
-
-# =============================================================================
-# 7. データベース読み込み & 統計解析エンジン (load_db)
-# =============================================================================
-
-
-def get_cooldown_questions(history, cooldown=3):
-    """直近n回分の履歴から問題テキストを抽出する"""
-    recent_texts = set()
-    # 履歴の最後から指定回数分をループ
-    for record in history[-cooldown:]:
-        q_list_str = record.get("問題リスト(JSON)", "[]")
-        try:
-            # 保存されている問題リストを読み込む
-            q_list = json.loads(q_list_str)
-            for q_item in q_list:
-                # 辞書形式なら 'q' キー、文字列ならそのまま追加
-                if isinstance(q_item, dict):
-                    recent_texts.add(q_item.get("q"))
-                else:
-                    recent_texts.add(q_item)
-        except Exception:
-            continue
-    return recent_texts
-
-
-# 🌟 この関数を load_db の「外側（上）」に置いてください
-def normalize_q(text):
-    if not isinstance(text, str):
-        return text
-    return re.sub(r"[\s　、。！？!?,.()（）/／★]", "", text)
-
-
-@st.cache_data(ttl=600)
-def load_db():
-    """
-    スプレッドシートから全問題をロードし、統計情報を動的に生成します。
-    """
-    try:
-        creds = get_creds()
-        if not creds:
-            return {}, {"cat_stats": [], "overall_avg": 0, "history": [], "reports": []}
-
-        gc = gspread.authorize(creds)
-        ss = gc.open("study_stats_db")
-
-        # --- 1. 全問題（questions）の取得と名寄せ ---
-        q_sheet = ss.worksheet("questions")
-        q_rows = q_sheet.get_all_records()
-
-        # 🌟 pandasを使用して物理的に重複を排除し、正解を一対一に固定する
-        import pandas as pd
-
-        df_raw = pd.DataFrame(q_rows)
-
-        if not df_raw.empty and "q" in df_raw.columns:
-            df_raw["q_comparison"] = df_raw["q"].apply(normalize_q)
-
-            # 🌟 修正：work_name（N列）が入っている行を一番上に、入っていない行を下に並べる
-            # これにより、重複した時は必ず「プレスタ」と書かれた行が残ります
-            df_raw["has_work"] = df_raw.get("work_name", "").astype(str).str.len() > 0
-            df_raw = df_raw.sort_values(by="has_work", ascending=False)
-
-            # 重複排除
-            df_raw = df_raw.drop_duplicates(subset=["q_comparison"], keep="first")
-            q_rows = df_raw.to_dict("records")
-
-        df_raw = pd.DataFrame(q_rows)
-
-        # 🌟 先に「列名」を特定する（ここを一番上に持ってくる）
-        q_headers = q_sheet.row_values(1)
-        work_col_name = (
-            "work_name"
-            if "work_name" in q_headers
-            else (q_headers[13] if len(q_headers) >= 14 else "work_name")
+        df_new = pd.DataFrame(
+            history_data, columns=["Date", "Open", "High", "Low", "Close", "Volume"]
         )
-        id_col_name = q_headers[14] if len(q_headers) >= 15 else "id"
+        return df_new.set_index("Date").sort_index()
+    except Exception:
+        return pd.DataFrame()
 
-        # 🌟 その後に重複排除を行う
-        if not df_raw.empty and "q" in df_raw.columns:
-            df_raw["q_comparison"] = df_raw["q"].apply(normalize_q)
 
-            # 特定した work_col_name を使って並べ替える
-            if work_col_name in df_raw.columns:
-                # ワーク名が入っている行を優先的に上に持ってくる
-                df_raw = df_raw.assign(
-                    has_work=df_raw[work_col_name].astype(str).str.len() > 0
-                )
-                df_raw = df_raw.sort_values(
-                    by=["has_work", work_col_name], ascending=False
-                )
+# --- テクニカル指標ロジック (RCI/Divergence) ---
+def calculate_rci(series, period=9):
+    rci_values = []
+    n = period
+    date_ranks = np.arange(n, 0, -1)
+    for i in range(len(series)):
+        if i < n - 1:
+            rci_values.append(None)
+            continue
+        window = series.iloc[i - n + 1 : i + 1]
+        price_ranks = window.rank(method="first", ascending=False).values
+        d = price_ranks - date_ranks
+        d2_sum = np.sum(d**2)
+        rci = (1 - (6 * d2_sum) / (n**3 - n)) * 100
+        rci_values.append(rci)
+    return pd.Series(rci_values, index=series.index)
 
-            # 重複排除：上の行（ワーク名がある方）を残す
-            df_raw = df_raw.drop_duplicates(subset=["q_comparison"], keep="first")
-            q_rows = df_raw.to_dict("records")
 
-        org_questions = {}
-        cat_total_counts = {}
+def check_bullish_divergence(df):
+    if len(df) < 30:
+        return False
+    recent_slice = df.iloc[-8:]
+    if recent_slice.empty:
+        return False
+    min_price_idx_recent = recent_slice["Low"].idxmin()
+    min_price_recent = recent_slice.loc[min_price_idx_recent, "Low"]
+    rsi_recent = df.loc[min_price_idx_recent, "RSI"]
+    past_slice = df.iloc[-40:-8]
+    if past_slice.empty:
+        return False
+    min_price_idx_past = past_slice["Low"].idxmin()
+    min_price_past = past_slice.loc[min_price_idx_past, "Low"]
+    rsi_past = df.loc[min_price_idx_past, "RSI"]
+    return (
+        min_price_recent < min_price_past * 0.99
+        and rsi_recent > rsi_past + 5
+        and rsi_past < 40
+    )
 
-        for r in q_rows:
-            # 🌟 1. 各列の値をそのまま取得する（一番シンプルな形）
-            q_val = str(r.get("q", "")).strip()
-            a_val = str(r.get("a", "")).strip()
-            w_name = str(r.get("work_name", "")).strip()
-            cat_val = str(r.get("category", "共通")).strip()
-            sub_cat = str(r.get("sub_category", "")).strip()
-            rank_val = str(r.get("rank", "B")).upper().strip()
 
-            # 名前で取れなかった場合の物理列バックアップ
-            v = list(r.values())
-            if not q_val and len(v) >= 3:
-                q_val = str(v[2]).strip()
-            if not a_val and len(v) >= 4:
-                a_val = str(v[3]).strip()
-            if not w_name and len(v) >= 14:
-                w_name = str(v[13]).strip()
+# --- 出来高調整ウェイト ---
+WEIGHT_MODELS = {
+    "large": {
+        (9 * 60): 0.00,
+        (9 * 60 + 30): 0.25,
+        (10 * 60): 0.30,
+        (11 * 60 + 30): 0.50,
+        (12 * 60 + 30): 0.525,
+        (13 * 60): 0.60,
+        (15 * 60): 0.70,
+        (15 * 60 + 25): 0.85,
+        (15 * 60 + 30): 1.00,
+    },
+    "mid": {
+        (9 * 60): 0.00,
+        (9 * 60 + 30): 0.30,
+        (10 * 60): 0.35,
+        (11 * 60 + 30): 0.55,
+        (12 * 60 + 30): 0.575,
+        (13 * 60): 0.675,
+        (15 * 60): 0.75,
+        (15 * 60 + 25): 0.90,
+        (15 * 60 + 30): 1.00,
+    },
+    "small": {
+        (9 * 60): 0.00,
+        (9 * 60 + 30): 0.40,
+        (10 * 60): 0.45,
+        (11 * 60 + 30): 0.65,
+        (12 * 60 + 30): 0.675,
+        (13 * 60): 0.75,
+        (15 * 60): 0.88,
+        (15 * 60 + 25): 0.95,
+        (15 * 60 + 30): 1.00,
+    },
+}
 
-            # 🌟 2. question_data 辞書の作成（入れ替えなし）
-            question_data = {
-                "id": str(r.get(id_col_name, "")).strip(),
-                "category": cat_val,
-                "sub_category": sub_cat,
-                "q": q_val,  # 👈 スプレッドシートに書いた通りに表示されます
-                "a": a_val,
-                "h": str(r.get("h", "")).strip(),
-                "rank": rank_val,
-                "unit": str(r.get("unit", "")).strip(),
-                "work_name": w_name,
-            }
 
-            # 🌟 4. ダミー選択肢の処理 (a_val を使用)
-            raw_dummy = str(
-                r.get("p_dummy") if r.get("p_dummy") else r.get("dummy", "")
+def get_volume_weight(current_dt, market_cap):
+    status, _ = get_market_status()
+    if "休日" in status or "引け後" in status or current_dt.hour < 9:
+        return 1.0
+    current_minutes = current_dt.hour * 60 + current_dt.minute
+    if current_minutes > (15 * 60):
+        return 1.0
+    if current_minutes < (9 * 60):
+        return 0.01
+    if market_cap >= 5000:
+        weights = WEIGHT_MODELS["large"]
+    elif market_cap >= 500:
+        weights = WEIGHT_MODELS["mid"]
+    else:
+        weights = WEIGHT_MODELS["small"]
+    last_weight = 0.0
+    last_minutes = 9 * 60
+    for end_minutes, weight in weights.items():
+        if current_minutes <= end_minutes:
+            if end_minutes == last_minutes:
+                return weight
+            progress = (current_minutes - last_minutes) / (end_minutes - last_minutes)
+            return max(0.01, last_weight + progress * (weight - last_weight))
+        last_weight = weight
+        last_minutes = end_minutes
+    return 1.0
+
+
+def format_volume(volume):
+    if volume < 10000:
+        return f"{volume:,.0f}株"
+    else:
+        return f"{round(volume / 10000):,.0f}万株"
+
+
+def get_market_cap_category(market_cap):
+    if market_cap >= 10000:
+        return "超大型"
+    elif market_cap >= 3000:
+        return "大型"
+    elif market_cap >= 500:
+        return "中型"
+    elif market_cap >= 100:
+        return "小型"
+    else:
+        return "超小型"
+
+
+def get_target_pct_new(category, is_half):
+    if is_half:
+        if category == "超大型":
+            return 0.015
+        elif category == "大型":
+            return 0.020
+        elif category == "中型":
+            return 0.025
+        elif category == "小型":
+            return 0.030
+        else:
+            return 0.040
+    else:
+        if category == "超大型":
+            return 0.025
+        elif category == "大型":
+            return 0.035
+        elif category == "中型":
+            return 0.040
+        elif category == "小型":
+            return 0.050
+        else:
+            return 0.070
+
+
+def fmt_market_cap(val):
+    if not val or val == 0:
+        return "-"
+    try:
+        val_int = int(round(val))
+        if val_int >= 10000:
+            cho = val_int // 10000
+            oku = val_int % 10000
+            if oku == 0:
+                return f"{cho}兆円"
+            else:
+                return f"{cho}兆{oku}億円"
+        else:
+            return f"{val_int}億円"
+    except Exception:
+        return "-"
+
+
+def safe_float_convert(s):
+    try:
+        if isinstance(s, (int, float)):
+            return float(s)
+        return float(s.replace(",", ""))
+    except ValueError:
+        return 0.0
+
+
+def clean_html_tags(text):
+    if pd.isna(text) or not isinstance(text, str):
+        return text
+    return re.sub(r"<[^>]+>", "", text).strip()
+
+
+def remove_emojis_and_special_chars(text):
+    emoji_pattern = re.compile(
+        "[\U0001f600-\U0001f64f\U0001f300-\U0001f5ff\U0001f680-\U0001f6ff\U0001f700-\U0001f77f\U0001f780-\U0001f7ff\U0001f800-\U0001f8ff\U0001f900-\U0001f9ff\U0001fa00-\U0001fa6f\U0001fa70-\U0001faff\U00002702-\U000027b0\U000024c2-\U0001f251]+",
+        flags=re.UNICODE,
+    )
+    if pd.isna(text) or not isinstance(text, str):
+        return text
+    return emoji_pattern.sub(r"", text)
+
+
+def create_signals_pro_bull(df, info, vol_ratio_in):
+    last = df.iloc[-1]
+    prev = df.iloc[-2] if len(df) >= 2 else last
+    category = get_market_cap_category(info.get("cap", 0))
+    ma5 = last.get("SMA5", 0)
+    close = last.get("Close", 0)
+    open_price = last.get("Open", 0)
+    high = last.get("High", 0)
+    low = last.get("Low", 0)
+    prev_close = prev.get("Close", 0)
+    rsi = last.get("RSI", 50)
+    vol_ratio = vol_ratio_in
+    vol_sma3 = df["Volume"].rolling(3).mean().iloc[-1] if len(df) >= 3 else 0
+    vol_sma5 = df["Volume"].rolling(5).mean().iloc[-1] if len(df) >= 5 else 0
+    if (
+        ma5 == 0
+        or close == 0
+        or open_price == 0
+        or high == 0
+        or low == 0
+        or prev_close == 0
+    ):
+        return {
+            "strategy": "様子見",
+            "buy": 0,
+            "p_half": 0,
+            "p_full": 0,
+            "sl_ma": 0,
+            "signal_success": False,
+        }
+    if close < ma5 or (close < prev_close and vol_ratio >= 1.5):
+        return {
+            "strategy": "様子見",
+            "buy": 0,
+            "p_half": 0,
+            "p_full": 0,
+            "sl_ma": 0,
+            "signal_success": False,
+        }
+    is_gap_up = open_price > prev_close * 1.01
+    if (
+        is_gap_up
+        or high >= ma5 * 1.01
+        or close > ma5 * 1.01
+        or close < prev_close * 0.995
+    ):
+        return {
+            "strategy": "様子見",
+            "buy": 0,
+            "p_half": 0,
+            "p_full": 0,
+            "sl_ma": 0,
+            "signal_success": False,
+        }
+    is_touching_or_close = abs((close - ma5) / ma5) <= 0.005
+    is_reversal_shape = False
+    is_positive_candle = close > open_price
+    body = abs(close - open_price)
+    if (
+        is_positive_candle
+        or (body > 0 and (min(close, open_price) - low) / body >= 0.3)
+        or (body == 0 and (min(close, open_price) - low) > 0)
+    ):
+        is_reversal_shape = True
+    required_vol_ratio = (
+        1.7 if category in ["小型", "超小型"] else (1.5 if category == "中型" else 1.3)
+    )
+    is_volume_spike = vol_ratio >= required_vol_ratio
+    is_volume_quality_ok = (vol_sma5 > 0) and (vol_sma3 >= vol_sma5 * 1.05)
+    if not is_volume_quality_ok:
+        return {
+            "strategy": "様子見",
+            "buy": 0,
+            "p_half": 0,
+            "p_full": 0,
+            "sl_ma": 0,
+            "signal_success": False,
+        }
+    is_momentum_ok = (30 <= rsi <= 60) and ((close / ma5 - 1) * 100) <= 0.5
+    is_entry_signal = (
+        is_touching_or_close
+        and is_reversal_shape
+        and is_volume_spike
+        and is_momentum_ok
+    )
+    if not is_entry_signal:
+        return {
+            "strategy": "様子見",
+            "signal_success": False,
+            "buy": 0,
+            "p_half": 0,
+            "p_full": 0,
+            "sl_ma": 0,
+        }
+    entry_price = close
+    stop_price = entry_price * (1 - 0.03)
+    half_pct = get_target_pct_new(category, is_half=True)
+    full_pct = get_target_pct_new(category, is_half=False)
+    p_half = int(np.floor(entry_price * (1 + half_pct)))
+    p_full = int(np.floor(entry_price * (1 + full_pct)))
+    return {
+        "strategy": "🚀順ロジ",
+        "buy": int(np.floor(entry_price)),
+        "p_half": p_half,
+        "p_full": p_full,
+        "sl_ma": int(np.floor(stop_price)),
+        "signal_success": True,
+    }
+
+
+def create_signals_pro_bear(df, info, vol_ratio_in):
+    last = df.iloc[-1]
+    prev = df.iloc[-2] if len(df) >= 2 else last
+    open_price = last.get("Open", 0)
+    close = last.get("Close", 0)
+    high = last.get("High", 0)
+    low = last.get("Low", 0)
+    rsi = last.get("RSI", 50)
+    ma5 = last.get("SMA5", 0)
+    ma25 = last.get("SMA25", 0)
+    vol_ratio = vol_ratio_in
+    prev_close = prev.get("Close", 0)
+    vol_sma3 = df["Volume"].rolling(3).mean().iloc[-1] if len(df) >= 3 else 0
+    vol_sma5 = df["Volume"].rolling(5).mean().iloc[-1] if len(df) >= 5 else 0
+    if ma5 == 0 or ma25 == 0 or close == 0 or open_price == 0 or high == 0 or low == 0:
+        return {
+            "strategy": "様子見",
+            "buy": 0,
+            "p_half": 0,
+            "p_full": 0,
+            "sl_ma": 0,
+            "signal_success": False,
+        }
+    is_gap_down = open_price < prev_close * 0.99
+    if is_gap_down:
+        return {
+            "strategy": "様子見",
+            "signal_success": False,
+            "buy": 0,
+            "p_half": 0,
+            "p_full": 0,
+            "sl_ma": 0,
+        }
+    is_low_rsi = rsi <= 30
+    is_large_gap = close < ma25 * 0.9
+    if not is_low_rsi and not is_large_gap:
+        return {
+            "strategy": "様子見",
+            "signal_success": False,
+            "buy": 0,
+            "p_half": 0,
+            "p_full": 0,
+            "sl_ma": 0,
+        }
+    is_reversal_shape = False
+    body = abs(close - open_price)
+    if close > open_price or (
+        body > 0 and (min(close, open_price) - low) / body >= 0.3
+    ):
+        is_reversal_shape = True
+    if not is_reversal_shape:
+        return {
+            "strategy": "様子見",
+            "signal_success": False,
+            "buy": 0,
+            "p_half": 0,
+            "p_full": 0,
+            "sl_ma": 0,
+        }
+    is_volume_spike = vol_ratio >= 1.3
+    is_volume_quality_ok = (vol_sma5 > 0) and (vol_sma3 >= vol_sma5 * 1.05)
+    if not is_volume_spike or not is_volume_quality_ok:
+        return {
+            "strategy": "様子見",
+            "signal_success": False,
+            "buy": 0,
+            "p_half": 0,
+            "p_full": 0,
+            "sl_ma": 0,
+        }
+    if close >= ma5:
+        return {
+            "strategy": "様子見",
+            "signal_success": False,
+            "buy": 0,
+            "p_half": 0,
+            "p_full": 0,
+            "sl_ma": 0,
+        }
+    entry_price = close
+    stop_price = entry_price * (1 - 0.03)
+    p_half = int(np.floor(ma5 - 1)) if ma5 else 0
+    p_full = int(np.floor(ma25 - 1)) if ma25 else 0
+    return {
+        "strategy": "🚀逆ロジ",
+        "buy": int(np.floor(entry_price)),
+        "p_half": p_half,
+        "p_full": p_full,
+        "sl_ma": int(np.floor(stop_price)),
+        "signal_success": True,
+    }
+
+
+def evaluate_strategy_new(
+    df,
+    info,
+    vol_ratio,
+    high_250d,
+    atr_val,
+    curr_price,
+    ma5,
+    ma25,
+    ma75,
+    prev_ma5,
+    rsi_val,
+    atr_sl_price,
+    is_div,
+    is_rci_rev,
+):
+    signals_bull = create_signals_pro_bull(df, info, vol_ratio)
+    signals_bear = create_signals_pro_bear(df, info, vol_ratio)
+    strategy, buy_target, p_half, p_full, sl_ma, is_aoteng = (
+        "様子見",
+        int(ma5) if ma5 > 0 else 0,
+        0,
+        0,
+        atr_sl_price,
+        False,
+    )
+
+    if signals_bull["signal_success"] and signals_bull["strategy"] == "🚀順ロジ":
+        signals = signals_bull
+        strategy, buy_target, p_half, p_full, sl_ma, is_aoteng = (
+            signals["strategy"],
+            signals["buy"],
+            signals["p_half"],
+            signals["p_full"],
+            signals["sl_ma"],
+            False,
+        )
+    elif signals_bear["signal_success"] and signals_bear["strategy"] == "🚀逆ロジ":
+        signals = signals_bear
+        strategy, buy_target, p_half, p_full, sl_ma, is_aoteng = (
+            signals["strategy"],
+            signals["buy"],
+            signals["p_half"],
+            signals["p_full"],
+            signals["sl_ma"],
+            False,
+        )
+    else:
+        sl_ma = atr_sl_price
+        # 順張り判定
+        if ma5 > ma25 > ma75 and curr_price > ma75:
+            strategy, buy_target = "🔥順張り", int(ma5)
+            category_str = get_market_cap_category(info["cap"])
+            half_pct = get_target_pct_new(category_str, is_half=True)
+            full_pct = get_target_pct_new(category_str, is_half=False)
+            p_half_candidate = int(np.floor(buy_target * (1 + half_pct)))
+            p_full_candidate = int(np.floor(buy_target * (1 + full_pct)))
+            is_ath = high_250d > 0 and curr_price > high_250d
+            is_rsi_ok = rsi_val < 80
+            is_volume_ok = vol_ratio >= 1.5
+            if is_ath and is_rsi_ok and is_volume_ok:
+                is_aoteng = True
+                max_high_today = df["High"].iloc[-1]
+                atr_trailing_price = max(0, max_high_today - (atr_val * 2.5))
+                p_full = int(np.floor(atr_trailing_price))
+                p_half = 0
+                sl_ma = p_full
+            else:
+                p_half = p_half_candidate
+                p_full = p_full_candidate
+
+        # 逆張り(底打ち)判定強化
+        elif (rsi_val <= 30) or (is_div) or (is_rci_rev and rsi_val <= 45):
+            strategy, buy_target = "💎底打反転", int(curr_price)
+            p_half_candidate = int(np.floor(ma5 - 1)) if ma5 else 0
+            p_full_candidate = int(np.floor(ma25 - 1)) if ma25 else 0
+            p_half = p_half_candidate
+            p_full = p_full_candidate
+        elif curr_price < ma25 * 0.9 if ma25 else False:
+            strategy, buy_target = "🌊逆張り", int(curr_price)
+            p_half_candidate = int(np.floor(ma5 - 1)) if ma5 else 0
+            p_full_candidate = int(np.floor(ma25 - 1)) if ma25 else 0
+            p_half = p_half_candidate
+            p_full = p_full_candidate
+
+    sl_pct = ((curr_price / sl_ma) - 1) * 100 if curr_price > 0 and sl_ma > 0 else 0.0
+    return strategy, buy_target, p_half, p_full, sl_ma, is_aoteng, sl_pct
+
+
+def calculate_score_and_logic(df, info, vol_ratio, status, market_ratio=100.0):
+    if len(df) < 80:
+        return 50, {}, "様子見", 0, 0, 0, 0, False, 0, 50, 0, "通常レンジ", "0%", 0, 0
+
+    df = df.copy()
+    df["SMA5"] = df["Close"].rolling(5).mean()
+    df["SMA25"] = df["Close"].rolling(25).mean()
+    df["SMA75"] = df["Close"].rolling(75).mean()
+    df["Vol_SMA5"] = df["Volume"].rolling(5).mean()
+
+    # 指標計算
+    delta = df["Close"].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(14).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
+    df["RSI"] = 100 - (100 / (1 + (gain / loss)))
+    df["RCI9"] = calculate_rci(df["Close"], period=9)
+
+    last = df.iloc[-1]
+    prev = df.iloc[-2]
+    curr_price = round(float(last["Close"]), 1)
+    ma5, ma25, ma75 = last["SMA5"], last["SMA25"], last["SMA75"]
+    rsi_val = last["RSI"]
+    rci_val = last.get("RCI9", 0)
+    prev_rci = prev.get("RCI9", 0)
+    atr_smoothed = df["Close"].rolling(14).std().iloc[-1]
+    vol_sma5_val = last["Vol_SMA5"]
+
+    # モメンタム
+    recent = df["Close"].diff().tail(5)
+    up_days = int((recent > 0).sum())
+    momentum_str = f"{(up_days / 5) * 100:.0f}%"
+
+    # --- 1. 鉄の掟 (Gatekeeper) 強制除外判定 ---
+    is_trend_dead = curr_price < ma75
+    is_supply_dead = (curr_price < prev["Close"]) and (vol_ratio >= 1.5)
+    is_short_trend_dead = curr_price < ma5 * 0.98  # 終値で2%以上の明確な割り込み
+    is_illiquid = vol_sma5_val < 1000
+
+    if is_trend_dead or is_supply_dead or is_short_trend_dead or is_illiquid:
+        reasons = []
+        if is_trend_dead:
+            reasons.append("長期トレンド崩壊")
+        if is_supply_dead:
+            reasons.append("需給悪化")
+        if is_short_trend_dead:
+            reasons.append("短期トレンド喪失")
+        if is_illiquid:
+            reasons.append("流動性欠如")
+
+        return (
+            0,
+            {"鉄の掟（除外）": -50},
+            f"⛔対象外",
+            0,
+            0,
+            0,
+            0,
+            False,
+            0,
+            rsi_val,
+            atr_smoothed,
+            " | ".join(reasons),
+            momentum_str,
+            rci_val,
+            0,
+        )
+
+    # --- 2. ダイバージェンス & RCI好転 & 青天井(完全独立判定) ---
+    is_divergence = check_bullish_divergence(df)
+    is_rci_reversal = (prev_rci < -80 and rci_val > prev_rci and rci_val > -80) or (
+        prev_rci < -70 and rci_val > prev_rci + 10
+    )
+
+    high_250d = df["High"].iloc[:-1].tail(250).max()
+    is_ath = high_250d > 0 and curr_price > high_250d
+    is_aoteng = is_ath and rsi_val < 80 and vol_ratio >= 1.5
+
+    # --- 3. フラグ判定 ---
+    try:
+        df_w = df.resample("W-FRI").agg({"Close": "last"})
+        if len(df_w) >= 13:
+            ma13_w = df_w["Close"].rolling(13).mean().iloc[-1]
+            is_weekly_up = df_w["Close"].iloc[-1] >= ma13_w
+    except Exception:
+        is_weekly_up = True
+
+    if len(df) >= 120:
+        bb_mid = df["Close"].rolling(20).mean()
+        bb_width = (4 * df["Close"].rolling(20).std()) / bb_mid
+        is_squeeze = bb_width.iloc[-1] <= bb_width.rolling(120).min().iloc[-1] * 1.1
+    else:
+        is_squeeze = False
+
+    lookback_75_high = df["High"].iloc[:-1].tail(75).max()
+    is_breakout = curr_price > lookback_75_high
+
+    # 急落判定
+    dd_75 = df.tail(75).copy()
+    max_1d_drop = dd_75["Close"].pct_change(1).min()
+    max_3d_drop = dd_75["Close"].pct_change(3).min()
+    is_large = info.get("cap", 0) >= 3000
+    is_plunge = (is_large and (max_1d_drop <= -0.04 or max_3d_drop <= -0.08)) or (
+        not is_large and (max_1d_drop <= -0.07 or max_3d_drop <= -0.12)
+    )
+
+    # --- 4. 戦略評価呼び出し ---
+    strategy, buy_target, p_half, p_full, sl_ma, _, sl_pct = evaluate_strategy_new(
+        df,
+        info,
+        vol_ratio,
+        high_250d,
+        atr_smoothed,
+        curr_price,
+        ma5,
+        ma25,
+        ma75,
+        ma5,
+        rsi_val,
+        curr_price * 0.95,
+        is_divergence,
+        is_rci_reversal,
+    )
+
+    oshime_price = 0
+    if is_breakout:
+        strategy = "🚀ブレイク"
+        oshime_price = round(max(lookback_75_high, ma5), 1)
+
+        buy_target = curr_price
+        cat = get_market_cap_category(info.get("cap", 0))
+        atr_sl_calc = round(curr_price - max(atr_smoothed * 1.5, curr_price * 0.01), 1)
+
+        if is_aoteng:
+            max_high_today = df["High"].iloc[-1]
+            atr_trailing = max(0, max_high_today - (atr_smoothed * 2.5))
+            sl_ma = round(atr_trailing, 1)
+            p_full = sl_ma
+            p_half = 0
+        else:
+            p_half = round(buy_target * (1 + get_target_pct_new(cat, True)), 1)
+            p_full = round(buy_target * (1 + get_target_pct_new(cat, False)), 1)
+            sl_ma = round(max(atr_sl_calc, buy_target * 0.97), 1)
+
+        sl_pct = ((curr_price / sl_ma) - 1) * 100 if sl_ma > 0 else 0.0
+
+    # --- 5. スコアリング ---
+    score = 50
+    factors = {"基礎点": 50}
+    trend_sum = 0
+
+    if is_weekly_up:
+        factors["週足上昇"] = 5
+        trend_sum += 5
+    else:
+        score -= 20
+        factors["週足下落"] = -20
+
+    if is_breakout:
+        factors["新高値ブレイク"] = 15
+        trend_sum += 15
+
+    if is_squeeze:
+        factors["スクイーズ"] = 10
+        trend_sum += 10
+
+    if "🚀" in strategy:
+        factors["戦略優位性"] = 15
+        trend_sum += 15
+
+    if is_divergence:
+        factors["RSIダイバー"] = 15
+        trend_sum += 15
+
+    if is_rci_reversal:
+        factors["RCI好転"] = 10
+        trend_sum += 10
+
+    if is_aoteng:
+        factors["青天井"] = 15
+        trend_sum += 15
+
+    # 上限キャップの完全撤廃
+    score += trend_sum
+
+    if market_ratio >= 125.0:
+        score -= 10
+        factors["市場過熱"] = -10
+
+    if is_breakout and oshime_price > 0 and not is_aoteng:
+        base_rr_price = (
+            curr_price if (curr_price / oshime_price) < 1.015 else oshime_price
+        )
+        risk = base_rr_price - sl_ma
+        reward = ((p_half + p_full) / 2) - base_rr_price
+        if risk > 0 and reward / risk >= 2.0:
+            factors["高R/R比"] = 20
+            score += 20
+        elif risk > 0 and reward / risk < 0.8:
+            factors["低R/R比"] = -25
+            score -= 25
+
+    dd_75["Peak"] = dd_75["Close"].cummax()
+    dd_abs = abs(((dd_75["Close"] / dd_75["Peak"]) - 1).min() * 100)
+
+    if dd_abs < 1.0:
+        factors["低含損率"] = 5
+        score += 5
+    elif dd_abs > 15.0 or is_plunge:
+        factors["高含損リスク"] = -15
+        score -= 15
+
+    if 55 <= rsi_val <= 65:
+        score += 5
+        factors["RSI適正"] = 5
+
+    cat = get_market_cap_category(info.get("cap", 0))
+    rsi_penalty_threshold = 75
+    if cat in ["超大型", "大型"]:
+        rsi_penalty_threshold = 80
+    elif cat in ["小型", "超小型"]:
+        rsi_penalty_threshold = 70
+
+    if rsi_val >= rsi_penalty_threshold and not is_aoteng:
+        score -= 15
+        factors["RSIペナルティ"] = -15
+
+    if vol_ratio > 1.5:
+        score += 10
+        factors["出来高急増"] = 10
+
+    if up_days >= 4:
+        score += 5
+        factors["直近勢い"] = 5
+
+    return (
+        score,
+        factors,
+        strategy,
+        buy_target,
+        p_half,
+        p_full,
+        sl_ma,
+        is_aoteng,
+        sl_pct,
+        rsi_val,
+        atr_smoothed,
+        "通常レンジ",
+        momentum_str,
+        rci_val,
+        oshime_price,
+    )
+
+
+def run_backtest_precise(df, market_cap):
+    try:
+        if len(df) < 80:
+            return "データ不足", 0.0, 0, 0.0, 0.0, 0, 0
+        category = get_market_cap_category(market_cap)
+        target_pct = get_target_pct_new(category, is_half=False)
+        wins, losses, max_dd_pct = 0, 0, 0.0
+        test_data = df.tail(75).copy()
+        n = len(test_data)
+        test_data["SMA5"] = test_data["Close"].rolling(5).mean()
+        test_data["SMA25"] = test_data["Close"].rolling(25).mean()
+        test_data["High_250d"] = test_data["High"].rolling(250, min_periods=1).max()
+        test_data["PrevClose"] = test_data["Close"].shift(1)
+        test_data["High_Low"] = test_data["High"] - test_data["Low"]
+        test_data["High_PrevClose"] = abs(test_data["High"] - test_data["PrevClose"])
+        test_data["Low_PrevClose"] = abs(test_data["Low"] - test_data["PrevClose"])
+        test_data["TR"] = test_data[
+            ["High_Low", "High_PrevClose", "Low_PrevClose"]
+        ].max(axis=1)
+        test_data["ATR"] = test_data["TR"].rolling(14).mean()
+        test_data["Vol_SMA5"] = test_data["Volume"].rolling(5).mean()
+
+        i = 1
+        while i < n - 10:
+            prev_row = test_data.iloc[i - 1]
+            curr_row = test_data.iloc[i]
+            prev_low, prev_close, prev_sma5, prev_sma25 = (
+                prev_row.get("Low", 0),
+                prev_row.get("Close", 0),
+                prev_row.get("SMA5", 0),
+                prev_row.get("SMA25", 0),
             )
-            clean_dummies = [
-                d.strip()
-                for d in re.split(r"[,、]", raw_dummy)
-                if d.strip() and d.strip() != a_val  # a_text ではなく a_val を参照
-            ]
-            question_data["dummy"] = ", ".join(clean_dummies)
+            if (
+                pd.isna(prev_low)
+                or pd.isna(prev_sma5)
+                or pd.isna(prev_sma25)
+                or prev_sma5 == 0
+                or prev_sma25 == 0
+            ):
+                i += 1
+                continue
+            is_prev_bull_trend = prev_sma5 > prev_sma25
+            is_prev_ma5_touch = prev_low <= prev_sma5 * 1.005
+            open_price, close_price, high_price = (
+                curr_row.get("Open", 0),
+                curr_row.get("Close", 0),
+                curr_row.get("High", 0),
+            )
+            is_gap_down = open_price < prev_close * 0.99
+            is_ma5_signal = False
+            if is_prev_bull_trend and is_prev_ma5_touch and not is_gap_down:
+                if close_price > open_price or high_price >= prev_row.get("High", 0):
+                    is_ma5_signal = True
+            is_aoteng_signal = False
+            is_ath = (
+                curr_row.get("High", 0) >= curr_row.get("High_250d", 0)
+                and curr_row.get("High_250d", 0) > 0
+            )
+            curr_vol_sma5 = curr_row.get("Vol_SMA5", 0)
+            if is_ath and curr_row.get("Volume", 0) >= curr_vol_sma5 * 1.5:
+                is_aoteng_signal = True
+            if is_ma5_signal or is_aoteng_signal:
+                entry_price = (
+                    prev_sma5 if is_ma5_signal and not is_aoteng_signal else close_price
+                )
+                if entry_price == 0:
+                    i += 1
+                    continue
+                if is_aoteng_signal:
+                    target_price = entry_price * 1.5
+                    tsl_price = entry_price - (curr_row.get("ATR", 0) * 2.5)
+                else:
+                    target_price = entry_price * (1 + target_pct)
+                    tsl_price = entry_price * 0.97
+                is_win, hold_days, trade_min_low = False, 0, entry_price
+                for j in range(1, 11):
+                    if i + j >= n:
+                        break
+                    future = test_data.iloc[i + j]
+                    future_high, future_low = (
+                        future.get("High", 0),
+                        future.get("Low", 0),
+                    )
+                    hold_days = j
+                    if future_low is not None and not pd.isna(future_low):
+                        trade_min_low = min(trade_min_low, future_low)
+                    if future_high >= target_price and not is_aoteng_signal:
+                        is_win = True
+                        break
+                    sl_level = tsl_price
+                    if future_low <= sl_level:
+                        break
+                if is_aoteng_signal and hold_days == 10 and trade_min_low > sl_level:
+                    is_win = True
+                if is_win:
+                    wins += 1
+                else:
+                    losses += 1
+                if entry_price > 0 and trade_min_low < entry_price:
+                    max_dd_pct = min(
+                        max_dd_pct, ((trade_min_low / entry_price) - 1) * 100
+                    )
+                i += max(1, hold_days)
+            i += 1
+        total_trades = wins + losses
+        win_rate_pct = (wins / total_trades) * 100 if total_trades > 0 else 0.0
+        bt_str_new = f"{win_rate_pct:.0f}%"
+        if total_trades == 0:
+            return "機会なし", 0.0, 0, 0.0, target_pct, 0, 0
+        return (
+            bt_str_new,
+            win_rate_pct,
+            total_trades,
+            max_dd_pct,
+            target_pct,
+            wins,
+            losses,
+        )
+    except Exception as e:
+        return f"計算エラー: {e}", 0.0, 0, 0.0, 0.0, 0, 0
 
-            # 🌟 5. strokes の処理
-            for i in range(1, 11):
-                col = f"strokes{i}"
-                if col in r:
-                    question_data[col] = r[col]
 
-            # 🌟 6. 格納処理 (cat_val を使用)
-            org_questions.setdefault(cat_val, []).append(question_data)
-            cat_total_counts[cat_val] = cat_total_counts.get(cat_val, 0) + 1
+run_backtest = run_backtest_precise
 
-        # --- 2. 習熟度（mastery）に基づく統計計算 ---
-        conquered_sets = {}
-        mastery_map = {}
-        m_rows = []
+
+@st.cache_data(ttl=1)
+def get_stock_data(ticker, current_run_count):
+    status, jst_now_local = get_market_status()
+    ticker = str(ticker).strip().upper()
+    info = get_stock_info(ticker)
+    if info.get("price") is None:
+        return None
+
+    try:
+        csv_url = f"https://stooq.com/q/d/l/?s={ticker}.JP&f=sdnji&e=csv"
+        res = fetch_with_retry(csv_url)
+        df = pd.read_csv(
+            io.BytesIO(res.content), parse_dates=True, index_col="Date"
+        ).sort_index()
+        df.columns = [c.capitalize() for c in df.columns]
+
+        last_csv_date = df.index[-1]
+        today_date = pd.to_datetime(jst_now_local.date())
+
+        if (today_date - last_csv_date).days > 1:
+            k_df = get_kabutan_recent_history(ticker)
+            if not k_df.empty:
+                df = pd.concat([df[~df.index.isin(k_df.index)], k_df]).sort_index()
+                last_csv_date = df.index[-1]
+
+        curr_price = info.get("price")
+        if info.get("open") is not None and curr_price is not None:
+            new_row_vals = {
+                "Open": info["open"],
+                "High": info["high"],
+                "Low": info["low"],
+                "Close": curr_price,
+                "Volume": info["volume"] if info["volume"] is not None else 0,
+            }
+            if last_csv_date.date() < today_date.date():
+                df = pd.concat(
+                    [df, pd.Series(new_row_vals, name=today_date).to_frame().T]
+                )
+            elif last_csv_date.date() == today_date.date():
+                for col, val in new_row_vals.items():
+                    df.loc[df.index[-1], col] = val
+
+        df["Vol_sma5"] = df["Volume"].rolling(5).mean()
+        avg_vol_5d = (
+            df["Vol_sma5"].iloc[-1] if not pd.isna(df["Vol_sma5"].iloc[-1]) else 0
+        )
+        vol_weight = get_volume_weight(jst_now_local, info["cap"])
+        v_ratio = (
+            info["volume"] / (avg_vol_5d * vol_weight)
+            if vol_weight > 0 and avg_vol_5d > 0
+            else 1.0
+        )
+        df["Sma25"] = df["Close"].rolling(25).mean()
+        current_ma25 = df["Sma25"].iloc[-1] if not pd.isna(df["Sma25"].iloc[-1]) else 0
+
+        # 前日スコアの算出
+        prev_raw_score, prev_rci_val = 50, 0
+        if len(df) > 2:
+            df_prev = df.iloc[:-1].copy()
+            df_prev["Vol_sma5"] = df_prev["Volume"].rolling(5).mean()
+            p_v_avg = (
+                df_prev["Vol_sma5"].iloc[-1]
+                if not pd.isna(df_prev["Vol_sma5"].iloc[-1])
+                else 0
+            )
+            p_v_ratio = (df_prev["Volume"].iloc[-1] / p_v_avg) if p_v_avg > 0 else 1.0
+            (p_score, _, _, _, _, _, _, _, _, _, _, _, _, p_rci, _) = (
+                calculate_score_and_logic(
+                    df_prev, info, p_v_ratio, "引け後(確定値)", market_25d_ratio
+                )
+            )
+            prev_raw_score, prev_rci_val = p_score, p_rci
+
+        # 当日スコアの算出
+        (
+            raw_score,
+            factors,
+            strategy,
+            buy_target,
+            p_half,
+            p_full,
+            sl_ma,
+            is_aoteng,
+            sl_pct,
+            rsi_val,
+            atr_smoothed,
+            atr_comment,
+            momentum_str,
+            rci_val,
+            oshime_price,
+        ) = calculate_score_and_logic(df, info, v_ratio, status, market_25d_ratio)
+
+        # 垂直立ち上げ等のデルタボーナス加点
+        delta = raw_score - prev_raw_score
+        bonus = 0
+        if delta >= 40 and v_ratio > 1.4:
+            bonus += 10
+            factors["垂直立ち上げ"] = 10
+        if prev_raw_score < 50 and raw_score >= 75:
+            bonus += 5
+            factors["強気転換"] = 5
+        if prev_rci_val <= -70 and delta >= 10:
+            bonus += 5
+            factors["RCI反転底打"] = 5
+
+        current_score = max(0, min(100, raw_score + bonus))
+        score_diff = current_score - prev_raw_score
+
+        # バックテスト実行
+        (
+            bt_str,
+            win_rate_pct,
+            bt_cnt,
+            max_dd_pct,
+            bt_target_pct,
+            bt_win_count,
+            bt_loss_count,
+        ) = run_backtest(df, info["cap"])
+
+        # 表示用R/R比の計算：押し目がある場合は押し目基準で算出
+        risk_reward_calc = 0.0
+        base_for_rr = (
+            oshime_price if (oshime_price > 0 and "🚀" in strategy) else buy_target
+        )
+        if base_for_rr > 0 and sl_ma > 0:
+            risk_amt = base_for_rr - sl_ma
+            if is_aoteng:
+                risk_reward_calc = 50.0
+            else:
+                reward_amt = (
+                    (p_half + p_full) / 2 if p_half > 0 else p_full
+                ) - base_for_rr
+                if risk_amt > 0 and reward_amt > 0:
+                    risk_reward_calc = reward_amt / risk_amt
+
+        return {
+            "code": ticker,
+            "name": info["name"],
+            "price": curr_price,
+            "cap_val": info["cap"],
+            "cap_disp": fmt_market_cap(info["cap"]),
+            "per": info["per"],
+            "pbr": info["pbr"],
+            "rsi": rsi_val,
+            "rsi_disp": f"{rsi_val:.1f}",
+            "rci": rci_val,
+            "vol_ratio": v_ratio,
+            "strategy": strategy,
+            "score": current_score,
+            "score_diff": score_diff,
+            "buy": buy_target,
+            "oshime_price": oshime_price,
+            "p_half": p_half,
+            "p_full": p_full,
+            "backtest": bt_str,
+            "backtest_raw": bt_str,
+            "max_dd_pct": max_dd_pct,
+            "sl_pct": sl_pct,
+            "sl_ma": sl_ma,
+            "ma25": current_ma25,
+            "atr_sl_price": round(
+                curr_price - max(atr_smoothed * 1.5, curr_price * 0.01), 1
+            ),
+            "avg_volume_5d": avg_vol_5d,
+            "is_low_liquidity": avg_vol_5d < 1000,
+            "is_aoteng": is_aoteng,
+            "win_rate_pct": win_rate_pct,
+            "bt_win_count": bt_win_count,
+            "bt_loss_count": bt_loss_count,
+            "bt_target_pct": bt_target_pct,
+            "score_factors": factors,
+            "atr_smoothed": atr_smoothed,
+            "atr_comment": atr_comment,
+            "momentum": momentum_str,
+            "risk_reward": risk_reward_calc,
+            "atr_pct": (atr_smoothed / curr_price * 100 if curr_price > 0 else 0),
+            "earnings_day_count": info.get("earnings_day_count"),
+            "earnings_disp_str": info.get("earnings_disp_str"),
+            "is_earnings_soon": info.get("is_earnings_soon", False),
+        }
+    except Exception as e:
+        st.session_state.error_messages.append(f"エラー (コード:{ticker}): {e}")
+        return None
+
+
+def batch_analyze_with_ai(data_list):
+    """Gemini APIを使用して分析コメントを生成（アイさん人格版）"""
+    model_name = st.session_state.selected_model_name
+    client = None  # 「model」から「client」に変更
+    global api_key
+    if api_key:
         try:
-            m_sheet = ss.worksheet("mastery")
-            m_rows = m_sheet.get_all_records()
-            for m in m_rows:
-                score = int(m.get("score", 0))
-                q_text = str(m.get("q", "")).strip()
-                cat_m = str(m.get("category", "共通")).strip()
-
-                mastery_map[q_text] = score
-
-                if score >= 1 and q_text:
-                    conquered_sets.setdefault(cat_m, set()).add(q_text)
+            # 新仕様：クライアントオブジェクトを作成
+            client = genai.Client(api_key=api_key)
         except Exception:
             pass
 
-        # --- 進捗テーブルの作成 ---
-        st_list = []
-        total_opened_count = 0
-        for cat in cat_total_counts.keys():
-            total_in_db = cat_total_counts[cat]
-            done = len(conquered_sets.get(cat, set()))
-            rate = round((done / total_in_db) * 100, 1) if total_in_db > 0 else 0.0
-            st_list.append(
-                {
-                    "カテゴリ": cat,
-                    "開拓状況": f"{done} / {total_in_db}",
-                    "🚩 開拓率": rate,
-                }
-            )
-            total_opened_count += done
-
-        st_list.sort(key=lambda x: x["🚩 開拓率"])
-        all_total = sum(cat_total_counts.values())
-        overall_avg = (
-            round((total_opened_count / all_total) * 100, 1) if all_total > 0 else 0
+    if not client:
+        return (
+            {},
+            f"⚠️ AIモデル ({model_name}) が設定されていません。APIキーを確認してください。",
         )
 
-        # --- 3. 履歴と報告の取得 ---
-        titles = [w.title for w in ss.worksheets()]
-        history = (
-            ss.worksheet("history").get_all_records() if "history" in titles else []
-        )
-        reports = (
-            ss.worksheet("reports").get_all_records() if "reports" in titles else []
-        )
+    data_for_ai = ""
+    for d in data_list:
+        price = d["price"] if d["price"] is not None else 0
+        rr_val = d.get("risk_reward", 0.0)
 
-        return org_questions, {
-            "cat_stats": st_list,
-            "overall_avg": overall_avg,
-            "history": history,
-            "reports": reports,
-            "mastery": m_rows,
-        }
-
-    except Exception as e:
-        st.error(f"DB同期エラー: {e}")
-        return {}, {"cat_stats": [], "overall_avg": 0, "history": [], "reports": []}
-
-
-# 🌟 この代入行が、サイドバーやメインパネルの UI コードより「上」にあることを確認してください
-all_q, db = load_db()
-
-# =============================================================================
-# 8. セッション初期化 & タイマー管理
-# =============================================================================
-
-
-def init_session():
-    """
-    アプリの状態管理変数を一括初期化。
-    二重読み込みと無限ループを防止するガード機能付き。
-    """
-    # 🛡️ 1. 【超重要】すでに初期化が済んでいる場合は、何もせずに終了する
-    if st.session_state.get("is_timer_loaded", False):
-        return
-
-    # 2. 初期値の定義
-    defaults = {
-        "questions": [],
-        "index": 0,
-        "mode": None,
-        "show_help_persistence": False,
-        "show_options": False,
-        "show_result": False,
-        "last_is_correct": False,
-        "correct_count": 0,
-        "current_opts": [],
-        "sound_enabled": True,
-        "play_this": None,
-        "last_action_time": time.time(),
-        "unsynced_seconds": 0,
-        "print_data": None,
-        "print_type": None,
-        "active_mission_id": None,
-        "session_results": [],
-        "question_start_time": time.time(),
-        "consecutive_speeding": 0,
-        "is_cheating_flagged": False,
-        "is_saving": False,
-        "delete_list": [],
-        "daily_seconds": 0,
-        "total_seconds": 0,
-    }
-
-    # 3. defaults を session_state に登録
-    for k, v in defaults.items():
-        if k not in st.session_state:
-            st.session_state[k] = v
-
-    # 4. スプレッドシートから最新の学習時間を読み込む（アプリ起動時の1回のみ）
-    try:
-        import re
-
-        creds = get_creds()
-        sh = gspread.authorize(creds).open("study_stats_db").worksheet("timer")
-        row2 = sh.row_values(2)  # A=0:Date, B=1:Today, C=2:Total
-
-        def safe_int(v):
-            if not v:
-                return 0
-            s = re.sub(r"[^0-9]", "", str(v))
-            return int(s) if s else 0
-
-        # 正しいインデックス（B=1, C=2）で上書き
-        st.session_state.daily_seconds = safe_int(row2[1]) if len(row2) > 1 else 0
-        st.session_state.total_seconds = safe_int(row2[2]) if len(row2) > 2 else 0
-
-        # 🚩 読み込み完了フラグを立てる（これがループを止めます）
-        st.session_state.is_timer_loaded = True
-
-        print(
-            f"✅ 起動読込成功: Today={st.session_state.daily_seconds}, Total={st.session_state.total_seconds}"
-        )
-
-    except Exception as e:
-        print(f"⚠️ 起動読込エラー: {e}")
-        # エラー時も「読み込み済み」にしてループを止める
-        st.session_state.is_timer_loaded = True
-
-
-# --- 呼び出し部分 ---
-init_session()
-
-# タイマー：リアルタイム加算（240秒以内の活動を記録）
-now_ts = time.time()
-elapsed_t = now_ts - st.session_state.last_action_time
-st.session_state.last_action_time = now_ts
-
-# --- 活動判定（ローカル）：240秒（4分）以上の放置は加算しない ---
-if 0 < elapsed_t < 240:
-    st.session_state.unsynced_seconds += int(elapsed_t)
-    st.session_state.daily_seconds += int(elapsed_t)
-    if "total_seconds" in st.session_state:
-        st.session_state.total_seconds += int(elapsed_t)
-
-# --- 同期頻度（通信）：未保存が900秒（15分）溜まったらスプレッドシートへ ---
-if st.session_state.unsynced_seconds >= 900:
-    with st.sidebar:
-        with st.spinner("⏳ 学習記録を自動保存中..."):
-            # 🌟 関数名を新しい「_to_row2」付きに変更！
-            st.session_state.daily_seconds = sync_timer_to_row2(
-                st.session_state.unsynced_seconds
-            )
-            st.session_state.unsynced_seconds = 0
-
-# =============================================================================
-# 9. サイドバー UI 実装 (2026年 筋肉質版)
-# =============================================================================
-
-with st.sidebar:
-    # 💡 ペアレントモード判定
-    p_key = st.session_state.get("parent_unlock_key", "")
-    is_parent = p_key == "7777"
-    if is_parent:
-        st.error("🚨 ペアレントモード：記録停止中")
-    else:
-        st.success("📖 学習モード：記録中")
-
-    # 📊 STATUSパネル（修正版）
-    with st.container(border=True):
-        st.markdown(
-            "<h3 style='margin:0; text-align:center;'>📊 STATUS</h3>",
-            unsafe_allow_html=True,
-        )
-        c1, c2 = st.columns(2, gap="small")
-
-        # 🌟 直接秒数を60で割って「分」を表示する（確実な方法）
-        total_min = st.session_state.get("total_seconds", 0) // 60
-        today_min = st.session_state.daily_seconds // 60
-
-        c1.metric("🕰️ 全累計", f"{total_min} 分")
-        c2.metric("⌚ 本日分", f"{today_min} 分")
-
-        c3, c4 = st.columns(2, gap="small")
-        c3.metric("🚩 開拓率", f"{db.get('overall_avg', 0.0)}%")
-
-        # 総解答数（開拓済み問題の総和）
-        total_ans = sum(
-            [int(s["開拓状況"].split(" / ")[0]) for s in db.get("cat_stats", [])] or [0]
-        )
-        c4.metric("📝 解答数", f"{total_ans}問")
-
-    # 📈 カテゴリ別進捗テーブル
-    st.write("**📈 カテゴリ別進捗**")
-    if db.get("cat_stats"):
-        st.dataframe(
-            db["cat_stats"],
-            width="stretch",
-            height=250,
-            hide_index=True,
-            column_config={
-                "🚩 開拓率": st.column_config.NumberColumn(
-                    "🚩 開拓率",
-                    format="%.1f%%",
-                )
-            },
-        )
-
-    # 🛠️ 操作パネル
-    with st.container(border=True):
-        st.markdown(
-            "<p style='margin:0; font-weight:bold; text-align:center;'>🛠️ 操作パネル</p>",
-            unsafe_allow_html=True,
-        )
-
-        is_active = st.session_state.mode is not None
-
-        # --- 同期・保存 ---
-        op1, op2 = st.columns(2, gap="small")
-        if op1.button("🔄 同期", width="stretch"):
-            st.cache_data.clear()
-            st.rerun()
-        if op2.button("💾 保存", width="stretch", disabled=not is_active or is_parent):
-            batch_save_to_db()
-
-        # --- ホーム戻り・中断 ---
-        nav1, nav2 = st.columns(2, gap="small")
-        if st.session_state.get("print_data"):
-            if nav1.button("🏠 終了", width="stretch"):
-                st.session_state.print_data = None
-                st.rerun()
+        if d.get("is_aoteng"):
+            rr_disp = "青天"
+        elif rr_val >= 0.1:
+            rr_disp = f"{rr_val:.1f}"
         else:
-            if nav1.button("🏠 終了", width="stretch", disabled=not is_active):
-                # 🌟 ミス記録を守りつつ、クイズ画面だけを片付ける
-                st.session_state.questions = []  # 出題リストを空に
-                st.session_state.index = 0  # 問題番号をリセット
-                st.session_state.active_q_id = None  # 選択中の問題を解除
-                st.session_state.show_result = False  # 判定画面を閉じる
-
-                # 最後にモードを解除してホームに戻る
-                st.session_state.mode = None
-                st.rerun()
-
-        if nav2.button(
-            "🏳️ 中断",
-            width="stretch",
-            type="primary",
-            disabled=not is_active or st.session_state.is_saving,
-        ):
-            with st.status("中断データを保存しています...", expanded=False):
-                st.session_state.is_saving = True
-                batch_save_to_db()
-                st.session_state.mode = None
-                st.session_state.is_saving = False
-                st.rerun()
-
-        # --- 設定・報告 ---
-        set1, set2 = st.columns([1.2, 1], gap="small")
-        st.session_state.sound_enabled = set1.toggle(
-            "🔊 音声", value=st.session_state.sound_enabled
-        )
-        if set2.button("🚨 報告", width="stretch", disabled=not is_active):
-            st.session_state["show_rpt_expander"] = not st.session_state.get(
-                "show_rpt_expander", False
-            )
-
-    # 🚨 不備報告・削除フォーム
-    if st.session_state.get("show_rpt_expander", False) and is_active:
-        cur_idx = st.session_state.index
-        if cur_idx < len(st.session_state.questions):
-            q_now = st.session_state.questions[cur_idx]
-            with st.container(border=True):
-                st.markdown("**🚨 問題の不備を報告・削除**")
-                rpt_msg = st.text_input("誤植・内容の不備など", key=f"rpt_in_{cur_idx}")
-
-                # ボタンを横並びに配置
-                c_rpt_send, c_rpt_del = st.columns(2, gap="small")
-
-                if c_rpt_send.button("送信する", type="primary", width="stretch"):
-                    try:
-                        gc_rpt = gspread.authorize(get_creds())
-                        sh_rpt = gc_rpt.open("study_stats_db").worksheet("reports")
-                        sh_rpt.append_row(
-                            [
-                                datetime.now(JST).strftime("%Y/%m/%d %H:%M"),
-                                q_now.get("orig_cat", "不明"),
-                                q_now.get("q", "不明"),
-                                q_now.get("a", "不明"),
-                                rpt_msg if rpt_msg else "(コメントなし)",
-                            ]
-                        )
-                        st.cache_data.clear()
-                        st.toast("報告を受理しました！", icon="✅")
-                        st.session_state["show_rpt_expander"] = False
-                        st.rerun()
-                    except Exception as e:
-                        st.toast(f"送信エラー: {e}", icon="⚠️")
-
-                # 🗑️ 削除ボタン（archive_and_delete_questionを呼び出し）
-                if c_rpt_del.button(
-                    "🗑️ 削除",
-                    type="secondary",
-                    width="stretch",
-                    help="問題をアーカイブへ移動して完全に削除します",
-                ):
-                    archive_and_delete_question(q_now)
-
-    # ロック解除キー (Ruff & アクセシビリティ対応)
-    st.markdown(
-        """<style>input[aria-label="🗝️ 解除キー"] {-webkit-text-security: disc !important;}</style>""",
-        unsafe_allow_html=True,
-    )
-    st.text_input(
-        "🗝️ 解除キー",
-        placeholder="password...",
-        key="parent_unlock_key",
-        label_visibility="collapsed",
-    )
-
-# =============================================================================
-# 10. メイン画面：PDF出力・印刷モード (2026年仕様)
-# =============================================================================
-
-if st.session_state.get("print_data"):
-    pd_dat = st.session_state.print_data
-    pt_type = st.session_state.print_type
-
-    now_fn = datetime.now(JST).strftime("%Y%m%d_%H%M%S")
-    type_label = "問題シート" if pt_type == "q" else "解答マスター"
-    file_title = f"{type_label}_{pd_dat['mode']}_{now_fn}_{pd_dat['id']}"
-
-    components.html(
-        f"""
-        <script>
-        window.parent.document.title = "{file_title}";
-        function triggerPrint() {{ window.parent.focus(); window.parent.print(); }}
-        setTimeout(triggerPrint, 1500);
-        </script>
-        """,
-        height=0,
-    )
-
-    st.markdown(
-        f"### {'📖 問題シート' if pt_type == 'q' else '🔑 正解マスター'}: {pd_dat['mode']}"
-    )
-    st.caption(
-        f"実施日: {datetime.now(JST).strftime('%Y/%m/%d %H:%M:%S')} | ID: {pd_dat['id']}"
-    )
-    st.divider()
-
-    for i, q_p in enumerate(pd_dat["qs"]):
-        with st.container():
-            st.markdown(f"#### Mission {i + 1}")
-            st.markdown(q_p.get("q", "問題データなし"))
-            if pt_type == "q":
-                st.markdown('<div class="answer-box"></div>', unsafe_allow_html=True)
-            else:
-                st.success(f"【正解】 {q_p.get('a', '未設定')}")
-                st.divider()
-    st.stop()
-
-# =============================================================================
-# 11. メイン画面：ホーム（未攻略優先生成・履歴管理機能・メモ復元）
-# =============================================================================
-
-if not st.session_state.mode:
-    st.session_state.consecutive_speeding = 0
-    st.session_state.is_cheating_flagged = False
-    st.title("📖 2027 高校入試攻略：STRATEGY")
-
-    # =========================================================================
-    # 🌟 [Block 2] データ管理・監査システム (ペアレントモード限定)
-    # =========================================================================
-    if st.session_state.get("parent_unlock_key") == "7777":
-        st.subheader("🛠️ データ管理・監査システム")
-
-        with st.expander("🛠️ データベース保守 ＆ 監査ツール", expanded=False):
-            # --- 1. ID一括管理セクション (新設) ---
-            st.markdown("#### 🆔 問題ID一括管理")
-            st.caption(
-                "スプレッドシートのO列(15列目)をスキャンし、IDがない問題にのみUUIDを付与します。"
-            )
-            if st.button(
-                "🆔 未採番行にIDを一括付与", type="primary", use_container_width=True
-            ):
-                assign_missing_ids()  # API制限回避版の一括書き込み関数
-            st.divider()
-
-            # --- 2. 同期・監査セクション ---
-            col_ad1, col_ad2 = st.columns(2)
-
-            with col_ad1:
-                st.markdown("**🔄 Mastery全同期（最終診断版）**")
-                if st.button(
-                    "全同期を実行する", use_container_width=True, type="primary"
-                ):
-                    try:
-                        gc_ad = gspread.authorize(get_creds())
-                        sh_m_ad = gc_ad.open("study_stats_db").worksheet("mastery")
-                        m_all = sh_m_ad.get_all_values()
-                        m_headers = m_all[0]
-                        m_q_idx = m_headers.index("q")
-
-                        mastery_map = {
-                            r[m_q_idx].strip(): r for r in m_all[1:] if len(r) > m_q_idx
-                        }
-
-                        sh_q_current = gc_ad.open("study_stats_db").worksheet(
-                            "questions"
-                        )
-                        q_all = sh_q_current.get_all_values()
-                        q_headers = q_all[0]
-
-                        q_q_idx = q_headers.index("q") if "q" in q_headers else 1
-                        q_a_idx = q_headers.index("a") if "a" in q_headers else 5
-                        q_cat_idx, q_unit_idx = 0, 1
-
-                        new_mastery_list = []
-                        for q_row in q_all[1:]:
-                            if len(q_row) <= max(q_q_idx, q_a_idx):
-                                continue
-                            q_text, q_ans, q_cat = (
-                                q_row[q_q_idx].strip(),
-                                q_row[q_a_idx].strip(),
-                                q_row[q_cat_idx].strip(),
-                            )
-                            q_unit = (
-                                q_row[q_unit_idx].strip()
-                                if len(q_row) > q_unit_idx
-                                else ""
-                            )
-
-                            if q_text in mastery_map:
-                                row = mastery_map[q_text]
-                                while len(row) < 7:
-                                    row.append("")
-                                row[5], row[6], row[0] = q_ans, q_unit, q_cat
-                                new_mastery_list.append(row)
-                            else:
-                                new_mastery_list.append(
-                                    [q_cat, q_text, "0", "0", "", q_ans, q_unit]
-                                )
-
-                        # --- 一括書き込み実行部分 ---
-                        if new_mastery_list:
-                            try:
-                                # 1. クリア処理（広範囲）
-                                last_row_old = len(m_all) + 200
-                                sh_m_ad.batch_clear([f"A2:Z{last_row_old}"])
-
-                                # 2. 列数自動判定
-                                num_cols = len(new_mastery_list[0])
-                                col_letter = (
-                                    chr(64 + num_cols) if num_cols <= 26 else "Z"
-                                )
-
-                                # 3. 一括アップデート
-                                target_range = (
-                                    f"A2:{col_letter}{len(new_mastery_list) + 1}"
-                                )
-                                sh_m_ad.update(
-                                    range_name=target_range,
-                                    values=new_mastery_list,
-                                    value_input_option="USER_ENTERED",
-                                )
-                                st.success(
-                                    f"✨ 同期成功！ {len(new_mastery_list)} 件を更新しました。"
-                                )
-                            except Exception as sub_e:
-                                st.error(f"書き込みエラー: {sub_e}")
-
-                    except Exception as e:
-                        st.error(f"同期準備エラー: {e}")
-
-            with col_ad2:
-                st.markdown("**🔎 データ監査（英語・超精密）**")
-                if st.button(
-                    "超精密・整合性監査を実行", use_container_width=True, type="primary"
-                ):
-                    error_details = []
-                    for cat_name, q_list in all_q.items():
-                        if "英語" in cat_name:
-                            for q_ad in q_list:
-                                q_txt, ans_txt = (
-                                    str(q_ad.get("q", "")),
-                                    str(q_ad.get("a", "")),
-                                )
-                                m = re.search(r"[\(（](.*?)[\)）]", q_txt)
-                                if m and re.search(r"[/／]", m.group(1)):
-                                    opts = [
-                                        w.strip().lower().rstrip("?!.,")
-                                        for w in re.split(r"[/／]", m.group(1))
-                                        if w.strip()
-                                    ]
-                                    temp_ans, ans_words_found = (
-                                        ans_txt.lower().rstrip("?!.,"),
-                                        [],
-                                    )
-                                    sorted_opts = sorted(opts, key=len, reverse=True)
-                                    test_ans = temp_ans
-                                    for opt in sorted_opts:
-                                        if opt in test_ans:
-                                            ans_words_found.append(opt)
-                                            test_ans = test_ans.replace(opt, "", 1)
-                                    missing = [
-                                        o
-                                        for o in opts
-                                        if opts.count(o) > ans_words_found.count(o)
-                                    ]
-                                    if missing:
-                                        error_details.append(
-                                            f"❌ {q_txt[:25]}... \n ➡ 【不足: {set(missing)}】"
-                                        )
-
-                    if error_details:
-                        st.error(f"{len(error_details)}件の不備を発見しました。")
-                        for i, err in enumerate(error_details):
-                            st.code(f"No.{i} | {err}")
-                    else:
-                        st.success("すべての整合性が確認されました！")
-
-            st.divider()
-
-            # --- 3. バックアップ ＆ 削除データ抽出 ---
-            st.markdown("#### 💾 データエクスポート")
-            c_ex1, c_ex2 = st.columns(2)
-
-            with c_ex1:
-                st.markdown("**📝 学習履歴**")
-                df_hist = pd.DataFrame(db.get("history", []))
-                if not df_hist.empty:
-                    csv_hist = df_hist.to_csv(index=False).encode("utf-8-sig")
-                    st.download_button(
-                        "📥 History (履歴) CSV",
-                        data=csv_hist,
-                        file_name=f"history_backup_{datetime.now(JST).strftime('%Y%m%d')}.csv",
-                        mime="text/csv",
-                        use_container_width=True,
-                    )
-                else:
-                    st.button("履歴データなし", disabled=True, use_container_width=True)
-
-            with c_ex2:
-                st.markdown("**📊 削除ログ**")
-                if st.button("📈 削除データのExcel準備", use_container_width=True):
-                    try:
-                        gc = gspread.authorize(get_creds())
-                        try:
-                            del_sh = gc.open("study_stats_db").worksheet(
-                                "deleted_questions"
-                            )
-                            del_df = pd.DataFrame(del_sh.get_all_records())
-                        except Exception:
-                            del_df = pd.DataFrame()
-
-                        if not del_df.empty:
-                            import io
-
-                            output = io.BytesIO()
-                            with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-                                del_df.to_excel(
-                                    writer, index=False, sheet_name="Deleted_Log"
-                                )
-                            st.download_button(
-                                "📥 Excelをダウンロード",
-                                data=output.getvalue(),
-                                file_name=f"deleted_log_{datetime.now(JST).strftime('%Y%m%d')}.xlsx",
-                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                use_container_width=True,
-                            )
-                        else:
-                            st.warning("アーカイブされた削除データはありません。")
-                    except Exception as e:
-                        st.error(f"抽出失敗: {e}")
-
-    if db.get("reports") and st.session_state.get("parent_unlock_key") == "7777":
-        st.subheader("⚠️ 未処理の不備報告")
-        for r_idx, rep in enumerate(db["reports"]):
-            if not rep:
-                continue
-            cat_n = rep.get("教科") if isinstance(rep, dict) else rep[1]
-            q_t = rep.get("問題") if isinstance(rep, dict) else rep[2]
-            a_t = rep.get("正解") if isinstance(rep, dict) else rep[3]
-            reason = rep.get("報告理由") if isinstance(rep, dict) else rep[4]
-
-            with st.expander(f"報告: {cat_n}（{reason}）", expanded=False):
-                nq = st.text_area("問題を修正", q_t, key=f"rpt_ed_q_{r_idx}")
-                na = st.text_input("正解を修正", a_t, key=f"rpt_ed_a_{r_idx}")
-                c_up, c_del = st.columns(2)
-                if c_up.button(
-                    "✅ 修正反映", key=f"up_b_{r_idx}", type="primary", width="stretch"
-                ):
-                    st.toast("スプレッドシートを更新しました")
-                    st.rerun()
-                if c_del.button("🗑️ 報告削除", key=f"del_rpt_{r_idx}", width="stretch"):
-                    st.toast("リストから削除しました")
-                    st.rerun()
-
-    # =============================================================================
-    # 🌟 本日の振り返り ＆ ワースト10 ＆ グラフUI
-    # =============================================================================
-    today_str = datetime.now(JST).strftime("%Y/%m/%d")
-    today_history = [
-        h
-        for h in db.get("history", [])
-        if str(h.get("日付", "")).startswith(today_str)
-        and str(h.get("削除フラグ", "")) != "1"
-    ]
-    today_mission_count = len(today_history)
-
-    # 💡 答えを検索する便利関数
-    def get_ans_for_q(target_q):
-        for cat_list in all_q.values():
-            for item in cat_list:
-                if str(item.get("q", "")).strip() == target_q:
-                    return str(item.get("a", ""))
-        return "❓"
-
-    # 💡 Masteryデータの解析
-    today_corrects = []
-    today_mistakes = []
-    all_mastery_stats = []
-    score_dist = {0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
-
-    for m in db.get("mastery", []):
-        vals = list(m.values())
-        q_txt = str(m.get("q", ""))
-        score_val = str(m.get("score", "0"))
-        score = int(score_val) if score_val.isdigit() else 0
-
-        s_idx = min(score, 5)
-        score_dist[s_idx] += 1
-        all_mastery_stats.append({"q": q_txt, "score": score})
-
-        if any(today_str in str(v) for v in vals):
-            if "❌" in vals:
-                today_mistakes.append(q_txt)
-            elif "⭕️" in vals:
-                today_corrects.append(q_txt)
-
-    # -------------------------------------------------------------------------
-    # 💡 UI表示（ここから折りたたみ ＆ 未着手除外を適用）
-    # -------------------------------------------------------------------------
-    # 🌟 1. デフォルトで閉じる(expanded=False)設定
-    with st.expander(
-        f"📊 学習ステータス (本日 {today_mission_count} セット完了)", expanded=False
-    ):
-        tab1, tab2, tab3 = st.tabs(
-            ["📅 本日の振り返り", "📉 苦手ワースト10", "📈 習熟度グラフ"]
-        )
-
-        with tab1:
-            if today_corrects or today_mistakes:
-                c_cor, c_mis = st.columns(2)
-                with c_cor:
-                    with st.expander(
-                        f"⭕️ 正解した問題 ({len(today_corrects)}問)", expanded=True
-                    ):
-                        for tq in today_corrects:
-                            ans = get_ans_for_q(tq)
-                            st.markdown(f"- {tq}  \n  **[答: {ans}]**")
-                with c_mis:
-                    with st.expander(
-                        f"❌ 間違えた問題 ({len(today_mistakes)}問)", expanded=True
-                    ):
-                        for tq in today_mistakes:
-                            ans = get_ans_for_q(tq)
-                            st.markdown(f"- {tq}  \n  **[答: {ans}]**")
-            else:
-                st.info("本日のプレイ記録はまだありません。")
-
-        with tab2:
-            # 🌟 2. ワースト10の抽出（スコア順に並べ替え）
-            all_mastery_stats.sort(key=lambda x: x["score"])
-
-            # 🌟 3. 【最終修正版】
-            # 条件①：last_date が空白ではない（＝一度は解いたことがある）
-            # 条件②：正解したことがない（＝全敗中、または一度も正解フラグが立っていない）
-            # 条件③：卒業(5)していない
-            worst_10 = [
-                w
-                for w in all_mastery_stats
-                if w.get("last_date", "") != ""
-                and w.get("correct_count", 0) == 0
-                and w["score"] < 5
-            ][:10]
-
-            if worst_10:
-                st.markdown(
-                    "⚠️ **一度は挑戦したけれど、まだ正解できていない苦手問題です。**"
-                )
-                for i, w in enumerate(worst_10):
-                    w_ans = get_ans_for_q(w["q"])
-                    st.markdown(
-                        f"**{i + 1}位** (Lv.{w['score']}): {w['q']}  \n👉 **正解: {w_ans}**"
-                    )
-                    st.markdown("---")
-            else:
-                st.success("現在、復習が必要な苦手問題はありません。素晴らしい！")
-
-        with tab3:
-            st.markdown("現在のすべての問題の習熟度分布です。")
-            import pandas as pd
-
-            df_graph = pd.DataFrame(
-                {
-                    "習熟度レベル": [
-                        "Lv.0 🥚",
-                        "Lv.1 🔵",
-                        "Lv.2 🔵",
-                        "Lv.3 🟢",
-                        "Lv.4 🟢",
-                        "Lv.5 🔴",
-                    ],
-                    "問題数": [score_dist[i] for i in range(6)],
-                }
-            )
-            st.bar_chart(df_graph.set_index("習熟度レベル"))
-
-    st.divider()
-
-    available_cats = sorted(list(all_q.keys()))
-    col_gen1, col_gen2 = st.columns(2)
-
-    with col_gen1:
-        with st.expander("🚀 通常ミッション生成", expanded=(not db.get("history"))):
-            # 表示用の綺麗な教科名リスト
-            raw_cats = list(all_q.keys())
-            display_cats = sorted(
-                list(set([re.sub(r"^_?[1-3]年", "", k) for k in raw_cats]))
-            )
-
-            subj = st.selectbox("カテゴリ", ["すべて"] + display_cats, key="m_gen_subj")
-
-            # 🌟 追加：ワーク名によるカスタム抽出（N列検索）
-            search_work = st.text_input(
-                "🔍 ワーク名で抽出",
-                value="",
-                placeholder="例: プレスタ",
-                key="m_gen_work",
-                help="ワーク名で問題を絞り込みます。入力がある場合、学年・難易度設定より優先されます。",
-            )
-
-            year = st.radio(
-                "対象学年",
-                ["総合", "1年", "2年", "3年"],
-                horizontal=True,
-                key="m_gen_year",
-            )
-            diff = st.radio(
-                "難易度",
-                ["🌟 総合", "🟢 A", "🟡 B", "🔴 C"],
-                horizontal=True,
-                key="m_gen_diff",
-            )
-            fmt = st.radio(
-                "形式",
-                ["🌟 すべて", "🧩 並べ替え特化"],
-                horizontal=True,
-                key="m_gen_fmt",
-            )
-
-            # --- ミッション生成ボタン (通常のミッション) ---
-            if st.button(
-                "ミッションを起動する", use_container_width=True, type="primary"
-            ):
-                st.session_state.show_help_persistence = False
-                st.session_state["attempted_indices"] = set()
-                st.session_state.index = 0
-                st.session_state.correct_count = 0
-
-                # --- 1. 除外リストの作成 ---
-                graduated = set()
-                recent_q_texts = set()
-                try:
-                    gc_tmp = gspread.authorize(get_creds())
-                    m_recs = (
-                        gc_tmp.open("study_stats_db")
-                        .worksheet("mastery")
-                        .get_all_records()
-                    )
-                    graduated = {
-                        str(m.get("q")).strip()
-                        for m in m_recs
-                        if int(m.get("score", 0)) >= 5
-                    }
-                    recent_q_texts = get_cooldown_questions(
-                        db.get("history", []), cooldown=3
-                    )
-                except Exception as e:
-                    st.warning(f"除外リストの作成エラー: {e}")
-
-                # --- 2. 抽選プールの準備 ---
-                pool_A, pool_B, pool_C = [], [], []
-                prefix = "_" if "漢字" in subj else ""
-
-                # サイドバーの検索窓(search_work)に文字があるか判定
-                is_searching = bool(search_work.strip())
-
-                for k, ql in all_q.items():
-                    # 検索語がない時だけ、従来の教科・学年フィルタを適用
-                    if not is_searching:
-                        if subj != "すべて":
-                            target_pattern = (
-                                f"{prefix}{year}{subj}" if year != "総合" else subj
-                            )
-                            if target_pattern not in k:
-                                continue
-                        if year != "総合" and year not in k:
-                            continue
-
-                    for q_item in ql:
-                        # 🌟 検索語がある場合は A-F+N列で判定
-                        if is_searching:
-                            if not match_study_filter(search_work, q_item):
-                                continue
-
-                        # --- 共通の除外・形式フィルタ ---
-                        q_text = str(q_item.get("q", "")).strip()
-                        q_rank = str(q_item.get("rank", "B")).upper()
-
-                        # 通常時は難易度制限を守る
-                        if not is_searching:
-                            if diff != "🌟 総合" and q_rank not in diff:
-                                continue
-
-                        if fmt == "🧩 並べ替え特化":
-                            if not re.search(r"[\(（].*?[/／].*?[\)）]", q_text):
-                                continue
-
-                        if q_text in graduated or q_text in recent_q_texts:
-                            continue
-
-                        # プール振り分け
-                        if q_rank == "A":
-                            pool_A.append(q_item)
-                        elif q_rank == "C":
-                            pool_C.append(q_item)
-                        else:
-                            pool_B.append(q_item)
-
-                # --- 3. 抽出処理 ---
-                if is_searching:
-                    # 検索時は比率を無視して全件から最大30問
-                    selection = pool_A + pool_B + pool_C
-                else:
-                    target_A, target_B, target_C = 15, 12, 3
-                    # ミス復習ロジック (省略せず維持)
-                    mistake_pool = []
-                    if st.session_state.get(
-                        "today_mission_count", 0
-                    ) >= 2 and st.session_state.get("today_mistakes"):
-                        for p in [pool_A, pool_B, pool_C]:
-                            for qi in p[:]:
-                                if (
-                                    str(qi.get("q", "")).strip()
-                                    in st.session_state.today_mistakes
-                                ):
-                                    mistake_pool.append(qi)
-                                    p.remove(qi)
-
-                    sel_A = random.sample(pool_A, min(len(pool_A), target_A))
-                    sel_B = random.sample(pool_B, min(len(pool_B), target_B))
-                    sel_C = random.sample(pool_C, min(len(pool_C), target_C))
-                    selection = sel_A + sel_B + sel_C
-                    if mistake_pool:
-                        inject = random.sample(mistake_pool, min(len(mistake_pool), 5))
-                        selection = inject + selection[: (30 - len(inject))]
-
-                random.shuffle(selection)
-                final_selection = selection if is_searching else selection[:30]
-
-                if final_selection:
-                    mode_name = (
-                        f"抽出:{search_work}"
-                        if is_searching
-                        else (subj if year == "総合" else f"{prefix}{year}{subj}")
-                    )
-                    batch_save_to_db(custom_mode=mode_name, custom_qs=final_selection)
-                    st.rerun()
-                else:
-                    st.error("条件に合う問題が見つかりませんでした。")
-
-    with col_gen2:
-        with st.expander("🔥 弱点克服・特訓"):
-            st.markdown("未習得の問題から優先的に出題します。")
-            w_subj = st.selectbox(
-                "特訓教科", ["すべて"] + available_cats, key="w_subj_sel"
-            )
-
-            # --- [1] 特訓ボタン（タブ名 mastery 対応版） ---
-            if st.button(
-                "特訓を開始！",
-                use_container_width=True,
-                key="start_tokkun",
-                type="primary",
-            ):
-                try:
-                    # スプレッドシートから全問題を読み込む
-                    creds = get_creds()
-                    # 🌟 ここを mastery に修正しました
-                    sh_master = (
-                        gspread.authorize(creds)
-                        .open("study_stats_db")
-                        .worksheet("mastery")
-                    )
-                    all_data = sh_master.get_all_records()
-
-                    # 1. 選択された教科で絞り込み
-                    if w_subj != "すべて":
-                        filtered = [d for d in all_data if d.get("category") == w_subj]
-                    else:
-                        filtered = all_data
-
-                    # 2. 「未習得」のものだけを抽出（status列が"習得"ではないもの）
-                    # 🌟 status列の値を文字列として判定
-                    tokkun_questions = [
-                        d for d in filtered if str(d.get("status")) != "習得"
-                    ]
-
-                    if not tokkun_questions:
-                        st.warning(f"✨ {w_subj} の未習得問題はありません！完璧です！")
-                    else:
-                        # セッション状態を初期化して特訓開始
-                        import random
-
-                        random.shuffle(tokkun_questions)
-                        st.session_state.questions = tokkun_questions
-                        st.session_state.index = 0
-                        st.session_state.correct_count = 0
-                        st.session_state["attempted_indices"] = set()
-                        st.session_state.show_result = False
-                        st.session_state.active_q_id = None
-                        st.session_state.mode = "normal"
-                        st.rerun()
-
-                except Exception as e:
-                    st.error(f"⚠️ 特訓の起動に失敗しました: {e}")
-
-            # --- [2] 🌟 本日の締め・おさらい ---
-            st.markdown("---")
-            wrongs = st.session_state.get("today_wrong_cards", [])
-
-            if wrongs:
-                st.info(f"今日の間違いが {len(wrongs)} 問あります。")
-                if st.button(
-                    f"🚩 本日の締め・おさらい ({len(wrongs)}問)",
-                    use_container_width=True,
-                    key="start_osarai",
-                    type="primary",
-                ):
-                    st.session_state.questions = list(wrongs)
-                    st.session_state.index = 0
-                    st.session_state.correct_count = 0
-                    st.session_state["attempted_indices"] = set()
-                    st.session_state.show_result = False
-                    st.session_state.active_q_id = None
-                    st.session_state.mode = "normal"
-                    st.session_state.today_wrong_cards = []
-                    st.rerun()
-            else:
-                st.success("✨ 今日はまだ間違いがありません。")
-
-    # --- 🔍 自由検索・カスタムミッション (新共通関数版) ---
-    with st.expander("🔍 検索カスタム抽出ミッション", expanded=False):
-        search_raw = st.text_input(
-            "キーワード検索",
-            placeholder="例: 「2年 プレスタ 古文」(AND) / 「漢字, 語句」(OR)",
-            key="custom_search_input",
-        )
-
-        if search_raw:
-            graduated = set()
-            recent_q_texts = set()
-            try:
-                gc_tmp = gspread.authorize(get_creds())
-                m_recs = (
-                    gc_tmp.open("study_stats_db").worksheet("mastery").get_all_records()
-                )
-                graduated = {
-                    str(m.get("q")).strip()
-                    for m in m_recs
-                    if int(m.get("score", 0)) >= 5
-                }
-                recent_q_texts = get_cooldown_questions(
-                    db.get("history", []), cooldown=3
-                )
-            except Exception:
-                pass
-
-            found_pool = []
-            for cat_name, q_list in all_q.items():
-                for q_item in q_list:
-                    if match_study_filter(search_raw, q_item):
-                        clean_q = str(q_item.get("q", "")).strip()
-
-                        # 🌟 修正：検索時は卒業済み(graduated)を無視して全件出す
-                        # if clean_q in graduated or clean_q in recent_q_texts:
-                        #     continue
-
-                        found_pool.append(q_item)
-
-            hit_count = len(found_pool)
-            if hit_count > 0:
-                num_to_draw = min(hit_count, 30)
-                st.metric("ヒット件数", f"{hit_count} 件")
-                st.info(
-                    f"💡 {hit_count}件の中から、ランダムに **{num_to_draw}問** を選んで出題します。"
-                )
-
-                if st.button(
-                    f"{num_to_draw}問でミッションを開始！",
-                    type="primary",
-                    use_container_width=True,
-                    key="start_and_or_mission",
-                ):
-                    st.session_state["attempted_indices"] = set()
-                    st.session_state.index = 0
-                    st.session_state.correct_count = 0
-                    st.session_state.show_help_persistence = False
-                    selection = random.sample(found_pool, num_to_draw)
-                    random.shuffle(selection)
-                    batch_save_to_db(
-                        custom_mode=f"検索:{search_raw[:10]}", custom_qs=selection
-                    )
-                    st.rerun()
-            else:
-                st.warning("一致する問題（未習得かつ最近出ていないもの）がありません。")
-        else:
-            st.write("キーワードを入れてください（スペースで絞り込み、カンマで追加）")
-
-    # =============================================================================
-    # 11. メイン画面：MISSION LOG（一括非表示 ＆ 2026年最新UI仕様）
-    # =============================================================================
-    st.subheader("📅 MISSION LOG")
-
-    # 🌟 1. 選択中がある時だけ出現する「一括非表示バー」
-    if st.session_state.get("delete_list"):
-        with st.container(border=True):
-            c_msg, c_btn = st.columns([3, 1])
-            c_msg.info(
-                f"ℹ️ {len(st.session_state.delete_list)}件を選択中。画面から非表示にします（記憶は保持されます）。"
-            )
-
-            if c_btn.button("🙈 選択中を一括非表示", type="primary", width="stretch"):
-                try:
-                    gc = gspread.authorize(get_creds())
-                    sh_h = gc.open("study_stats_db").worksheet("history")
-                    all_ids = [
-                        str(val).strip() for val in sh_h.col_values(7)
-                    ]  # G列(ID)
-
-                    rows_to_hide = [
-                        all_ids.index(str(tid).strip()) + 1
-                        for tid in st.session_state.delete_list
-                        if str(tid).strip() in all_ids
-                    ]
-
-                    if rows_to_hide:
-                        for r_idx in rows_to_hide:
-                            sh_h.update_cell(r_idx, 10, "1")  # J列(削除フラグ)を1に
-
-                        st.session_state.delete_list = []
-                        st.cache_data.clear()
-                        st.toast("画面から除外しました", icon="🧹")
-                        st.rerun()
-                except Exception as e:
-                    st.error(f"非表示エラー: {e}")
-
-    # 🌟 2. 履歴データの読み込みとグループ分け
-    h_list = db.get("history", [])
-    if h_list:
-        now_d = datetime.now(JST).date()
-        start_w = now_d - timedelta(days=now_d.weekday())
-        gps = {"📌 今週": [], "📌 先週": [], "📌 アーカイブ": []}
-
-        for h in h_list[::-1]:
-            # 🚩 削除フラグ(J列/10番目)が "1" なら表示対象から外す
-            if str(h.get("削除フラグ", "")) == "1":
-                continue
-
-            try:
-                dt_str = str(h.get("日付", "")).split()[0]
-                dt = datetime.strptime(dt_str, "%Y/%m/%d").date()
-                if dt >= start_w:
-                    gps["📌 今週"].append(h)
-                elif dt >= start_w - timedelta(days=7):
-                    gps["📌 先週"].append(h)
-                else:
-                    gps["📌 アーカイブ"].append(h)
-            except Exception:
-                gps["📌 アーカイブ"].append(h)
-
-        flat_pool = [q for q_sub in all_q.values() for q in q_sub]
-
-        # 🌟 3. 各カテゴリの展開表示
-        for lbl, items in gps.items():
-            if not items:
-                continue
-
-            with st.expander(f"{lbl} ({len(items)}件)", expanded=(lbl == "📌 今週")):
-                for h in items:
-                    tid = h.get("ID")
-
-                    # --- 🎨 得点に基づいたカラー・メッセージ判定 ---
-                    score_raw = h.get("得点")
-                    # 🌟 判定：得点がない、空、または「未実施」という文字が含まれる場合
-                    is_new = (
-                        score_raw is None
-                        or score_raw == ""
-                        or "未実施" in str(score_raw)
-                    )
-
-                    try:
-                        if not is_new:
-                            # 数値だけを取り出す（例: "85.2点" -> 85.2）
-                            score_num = float(str(score_raw).split("点")[0])
-                        else:
-                            score_num = 0
-                    except Exception:
-                        score_num = 0
-
-                    # 🌟 崩れない標準の枠（コンテナ）
-                    with st.container(border=True):
-                        # 👑 状態に応じて「一番上の帯」の色とアイコンを完全分離
-                        if is_new:
-                            # ✨ 作った直後：青色（Info）で「未実施」を表現
-                            st.info(
-                                "🆕 NEW MISSION：未実施の新しい課題です。挑戦しよう！"
-                            )
-
-                        elif score_num == 100:
-                            # 🥇 1位：濃い緑
-                            st.success(f"🥇【極】 完璧な満点！ 1位合格 🎖️ ({score_raw})")
-
-                        elif score_num >= 90:
-                            # 🥈 2位：薄い緑
-                            st.success(
-                                f"🥈【秀】 素晴らしい！ あと一歩で満点 🏆 ({score_raw})"
-                            )
-
-                        elif score_num >= 80:
-                            # 🥉 3位：黄色（合格）
-                            st.warning(
-                                f"🥉【優】 合格！ 記述テストの資格あり 🎉 ({score_raw})"
-                            )
-
-                        else:
-                            # 80点未満：灰色
-                            st.write(f"📝 実施済み ({score_raw})")
-
-                        # --- 上段：情報とメインボタン（ここから中身） ---
-                        # 🛠️ 6列設定 [チェック, 情報, 特訓, 余白, 題, 答]
-                        c_sel, c_info, c_go, c_sp, c_pq, c_pa = st.columns(
-                            [0.4, 3.1, 1.2, 0.1, 0.8, 0.8]
-                        )
-
-                        # 1. チェックボックス
-                        is_checked = c_sel.checkbox(
-                            "選択", key=f"sel_{tid}", label_visibility="collapsed"
-                        )
-                        if is_checked and tid not in st.session_state.delete_list:
-                            st.session_state.delete_list.append(tid)
-                            st.rerun()
-                        elif not is_checked and tid in st.session_state.delete_list:
-                            st.session_state.delete_list.remove(tid)
-                            st.rerun()
-
-                        # 2. 情報表示
-                        # 🌟 重複した単語を確実に1つにまとめる処理
-                        raw_subject = str(h.get("教科", ""))
-
-                        # ① まず不要な「検索」や「：」「:」を消去
-                        # ※ ここで「temp_text」という名前で定義します
-                        temp_text = (
-                            raw_subject.replace("検索：", "")
-                            .replace("検索:", "")
-                            .replace("検索", "")
-                            .replace("：", "")
-                            .replace(":", "")
-                        )
-
-                        # ② 全角スペースを半角に統一して分割
-                        words = temp_text.replace("　", " ").split()
-
-                        # ③ 重複を除去（順番を維持したまま1つにする）
-                        unique_words = []
-                        for w in words:
-                            if w not in unique_words:
-                                unique_words.append(w)
-
-                        clean_subject = " ".join(unique_words).strip()
-
-                        c_info.markdown(
-                            f"<small style='color:#888;'>{h.get('日付')} | `{tid}`</small><br>"
-                            f"<strong style='font-size:18px;'>{clean_subject}</strong>",
-                            unsafe_allow_html=True,
-                        )
-
-                        # 3. ▶️ スタート
-                        if c_go.button(
-                            "▶️ スタート",
-                            key=f"go_{tid}",
-                            type="primary",
-                            use_container_width=True,
-                        ):
-                            st.session_state.show_help_persistence = False
-                            keys_to_reset = [
-                                "questions",
-                                "index",
-                                "correct_count",
-                                "show_result",
-                                "user_answers",
-                                "session_results",
-                                "show_options",
-                                "attempted_indices",
-                                "active_q_id",
-                                "current_opts",  # 🌟 これらを必ず入れる
-                            ]
-                            for k in keys_to_reset:
-                                if k in st.session_state:
-                                    del st.session_state[k]
-
-                            # 🌟 明示的に空のセットで初期化
-                            st.session_state.attempted_indices = set()
-                            st.session_state.show_options = False
-                            st.session_state.correct_cache = []
-                            st.session_state.index = 0
-                            st.session_state.correct_count = 0
-
-                            skip_indices = get_skip_indices(str(h.get("除外", "")))
-                            q_json = json.loads(h.get("問題リスト(JSON)", "[]"))
-                            base_qs = [
-                                next((q for q in flat_pool if q["q"] == t), None)
-                                for t in q_json
-                            ]
-                            st.session_state.questions = [
-                                q
-                                for i, q in enumerate(base_qs[:30])
-                                if q and (i + 1) not in skip_indices
-                            ]
-                            st.session_state.index = int(h.get("進捗", 0))
-                            st.session_state.active_mission_id = tid
-                            st.session_state.mode = "training"
-                            st.rerun()
-
-                        # 4. 📄 題 / 🔑 答
-                        with c_sp:
-                            st.write("")  # スペース用
-
-                        if c_pq.button(
-                            "📄 題", key=f"pq_{tid}", use_container_width=True
-                        ):
-                            q_json = json.loads(h.get("問題リスト(JSON)", "[]"))
-                            target_qs = [
-                                next((q for q in flat_pool if q["q"] == t), None)
-                                for t in q_json
-                            ]
-                            st.session_state.print_type = "q"
-                            st.session_state.print_data = {
-                                "mode": h.get("教科"),
-                                "id": tid,
-                                "qs": [q for q in target_qs if q],
-                            }
-                            st.rerun()
-
-                        if c_pa.button(
-                            "🔑 答", key=f"pa_{tid}", use_container_width=True
-                        ):
-                            if st.session_state.get("parent_unlock_key") == "7777":
-                                q_json = json.loads(h.get("問題リスト(JSON)", "[]"))
-                                target_qs = [
-                                    next((q for q in flat_pool if q["q"] == t), None)
-                                    for t in q_json
-                                ]
-                                st.session_state.print_type = "a"
-                                st.session_state.print_data = {
-                                    "mode": h.get("教科"),
-                                    "id": tid,
-                                    "qs": [q for q in target_qs if q],
-                                }
-                                st.rerun()
-                            else:
-                                st.toast("キーが必要です", icon="🔒")
-
-                        # --- 下段：メモ・除外・保存 ---
-                        st.write("")
-                        c_m1, c_m2, c_m3 = st.columns([3, 2, 1])
-                        memo_val = c_m1.text_input(
-                            "📝 メモ",
-                            value=str(h.get("メモ", "")),
-                            key=f"memo_{tid}",
-                            label_visibility="collapsed",
-                            placeholder="メモを入力...",
-                        )
-                        skip_val = c_m2.text_input(
-                            "✂️ 除外",
-                            value=str(h.get("除外", "")),
-                            key=f"skip_{tid}",
-                            label_visibility="collapsed",
-                            placeholder="除外番号...",
-                        )
-                        if c_m3.button("💾", key=f"sv_{tid}", use_container_width=True):
-                            try:
-                                gc = gspread.authorize(get_creds())
-                                sh_h = gc.open("study_stats_db").worksheet("history")
-                                ids = sh_h.col_values(7)
-                                if tid in ids:
-                                    r_idx = ids.index(tid) + 1
-                                    sh_h.update_cell(r_idx, 5, memo_val)
-                                    sh_h.update_cell(r_idx, 8, skip_val)
-                                    st.cache_data.clear()
-                                    st.toast("更新しました", icon="✅")
-                            except Exception:
-                                st.error("保存失敗")
-
-                    # 🌟 カード枠の終了（ここで div を閉じます）
-                    st.markdown("</div>", unsafe_allow_html=True)
-
-else:  # =========================================================
-    # 📖 クイズ実行セクション（全機能統合 ＆ インデント完全修復版）
-    # =========================================================
-    # 🌟 初期化：一発勝負用の管理セットを作成
-    if "attempted_indices" not in st.session_state:
-        st.session_state["attempted_indices"] = set()
-
-    idx = st.session_state.index
-    qs = st.session_state.questions
-
-    # --- [A] 全問終了時の画面 ---
-    if idx >= len(qs):
-        st.balloons()
-        st.title("MISSION COMPLETE!")
-        sc = (
-            round((st.session_state.correct_count / len(qs)) * 100, 1)
-            if len(qs) > 0
+            rr_disp = "-"
+
+        ma_div = (
+            (price / d.get("buy", 1) - 1) * 100
+            if d.get("buy", 1) > 0 and price > 0
             else 0
         )
-        st.markdown(f"# 到達率: {sc}%")
+        mdd = d.get("max_dd_pct", 0.0)
+        sl_ma = d.get("sl_ma", 0)
+        atr_sl_price = d.get("atr_sl_price", 0)
+        ma25_sl_price = d.get("ma25", 0) * 0.995
+        rci_val = d.get("rci", 0)
 
-        if st.session_state.get("is_cheating_flagged"):
-            st.error("⚠️ 警告：連続で極端に早いスキップが検知されました。")
+        low_liq = (
+            "致命的低流動性:警告(1000株未満)"
+            if d.get("avg_volume_5d", 0) < 1000
+            else "流動性:問題なし"
+        )
+        atr_msg = d.get("atr_comment", "")
 
-        c_re, c_sv = st.columns(2)
-        if c_re.button("🔄 最初から解き直す", use_container_width=True):
-            st.session_state.attempted_indices = set()
-            st.session_state.index = 0
-            st.session_state.correct_count = 0
-            st.session_state.show_result = False
-            st.session_state.show_options = False
-            st.session_state.current_opts = None
-            st.session_state["user_ans_order"] = []
-            st.session_state.active_q_id = None
-            st.rerun()
+        earnings_info = ""
+        days = d.get("earnings_day_count")
+        if days is not None:
+            if days >= 0:
+                earnings_info = f" | EARNINGS_DAYS:{days}"
+            elif days >= -3:
+                earnings_info = " | EARNINGS_DONE:RECENT"
 
-        if c_sv.button(
-            "💾 保存してホームへ戻る", type="primary", use_container_width=True
-        ):
-            batch_save_to_db()
-            st.session_state.mode = None
-            st.rerun()
+        data_for_ai += (
+            f"ID:{d['code']}: 名称:{d['name']} | 点:{d['score']} | 戦略:{d['strategy']} | "
+            f"RSI:{d['rsi']:.1f} | RCI:{rci_val:.1f} | 乖離:{ma_div:+.1f}% | R/R:{rr_disp} | MDD:{mdd:+.1f}% | "
+            f"SL_R/R:{sl_ma:,.0f} | SL_ATR:{atr_sl_price:,.0f} | SL_MA25:{ma25_sl_price:,.0f} | "
+            f"LIQUIDITY:{low_liq} | ATR_MSG:{atr_msg}{earnings_info}\n"
+        )
 
-    # --- [B] クイズ実行中の画面 ---
+    global market_25d_ratio
+    r25 = market_25d_ratio
+
+    market_alert_info = f"市場25日騰落レシオ: {r25:.2f}%。"
+    if r25 >= 125.0:
+        market_alert_info += (
+            "市場は【明確な過熱ゾーン】にあり、全体的な調整リスクが非常に高いです。"
+        )
+    elif r25 <= 80.0:
+        market_alert_info += (
+            "市場は【明確な底値ゾーン】にあり、全体的な反発期待が高いです。"
+        )
     else:
-        q = qs[idx]
-        st.session_state["current_question"] = q
+        market_alert_info += "市場の過熱感は中立的です。"
 
-        # 🌟 1. データの確定取得
-        cat = str(q.get("orig_cat") or q.get("category") or "共通").strip()
-        sub_cat = str(q.get("unit") or q.get("sub_category") or "").strip()
-        ans_raw = str(q.get("a", "")).strip()
-        target_id = str(q.get("id", f"no_id_{idx}"))
-        is_kanji = "漢字" in cat
+    prompt = f"""あなたは「アイ」という名前のプロトレーダー（30代女性、冷静・理知的）です。以下の【市場環境】と【銘柄データ】に基づき、それぞれの「所感コメント（丁寧語）」を【生成コメントの原則】に従って作成してください。
 
-        # 🌟 ランクの変換処理を追加
-        rank_raw = str(q.get("rank", "")).upper().strip()
-        if rank_raw == "A":
-            rank_disp = "🟢必須"
-        elif rank_raw == "B":
-            rank_disp = "🟡応用"
-        elif rank_raw == "C":
-            rank_disp = "🔴発展"
+【市場環境】{market_alert_info}
+
+【生成コメントの原則（厳守）】
+1. <b>最重要厳守ルール: アプリケーション側での警告表示（例: ⚠️長文注意）を避けるため、何があっても最大文字数（100文字）を厳格に守ってください。</b>
+2. <b>Markdownの太字（**）は絶対に使用せず、HTMLの太字（<b>）のみをコメント内で使用してください。</b>
+3. <b>表現の多様性は最小限に抑えてください。</b>定型的な文章構造を維持してください。
+4. <b>撤退基準の定型文禁止: 「MA25を終値で割るか〜」という長文を毎回書かないでください。代わりに「MA25(X円)付近が支持線」「ATR基準(Y円)をロスカットの目安に」など、文脈に合わせて簡潔に数値を示してください。</b>
+5. <b>最大文字数の厳守：全てのコメント（プレフィックス含む）は最大でも100文字とします。</b>これを厳格に守ってください。投資助言と誤解される表現は避けてください。
+6. <b>コメントの先頭に、必ず「<b>[銘柄名]</b>｜」というプレフィックスを挿入してください。</b>
+7. <b>総合分析点に応じた文章量を厳格に調整してください。</b>（プレフィックスの文字数も考慮し、制限を厳しくします）
+   - 85点以上 (超高評価): 85文字以下。
+   - 75点 (高評価): 75文字以下。
+   - 65点以下 (中立/様子見): 65文字以下。
+8. 市場環境が【明確な過熱ゾーン】の場合、全てのコメントのトーンを控えめにし、「市場全体が過熱しているため、この銘柄にも調整が入るリスクがある」といった<b>強い警戒感</b>を盛り込んでください。
+9. 戦略の根拠、RSIの状態、RCIの反転、出来高倍率、およびR/R比を具体的に盛り込んでください。特に、RCIが底値圏(-80以下)から反転している場合は、リバウンド期待に言及してください。
+10. <b>GC:発生またはDC:発生の銘柄については、コメント内で必ずその事実に言及してください。</b>
+11. 【リスク情報と撤退基準】
+    - リスク情報（MDD、SL乖離率）を参照し、リスク管理の重要性に言及してください。
+    - **【決算リスク警告（最優先）】**: `EARNINGS_DAYS:X` があり、Xが7以下の場合は、冒頭に「⚠️あとX日で決算発表です。持ち越しには十分ご注意ください。」と警告してください。
+    - **流動性**: 致命的低流動性:警告(1000株未満)の銘柄は、冒頭で「平均出来高が1,000株未満と極めて低く、<b>流動性リスク</b>を伴います。」と警告してください。
+    - **【ATRリスク】**: ATR_MSGがある場合、ボラティリティリスクとして必ずコメントに含めてください。
+    - **撤退基準（MA25/ATR併記）:** コメントの末尾で、**構造的崩壊ライン**の**MA25_SL（X円）**と、**ボラティリティ基準**の**ATR_SL（Y円）**を**両方とも**言及し、「**MA25を終値で割るか、ATR_SLを割るかのどちらかをロスカット基準としてご検討ください**」という趣旨を明確に伝えてください。
+    - **青天井領域:** ターゲット情報が「青天井」の場合、<b>「利益目標は固定目標ではなく、動的なATRトレーリング・ストップ（X円）に切り替わっています。」</b>という趣旨を含めてください。
+
+【銘柄データ】
+{data_for_ai}
+
+【出力形式】ID:コード | コメント
+（例）
+ID:9984 | <b>ソフトバンクグループ</b>｜RCIが-80から反転し底打ちを示唆。MA25_SL（6,500円）を終値で割るか、ATR_SL（6,400円）を割るかのどちらかをロスカット基準としてご検討ください。
+
+【最後に】リストの最後に「END_OF_LIST」と書き、その後に続けて「アイの独り言（常体・独白調）」を1行で書いてください。語尾に「ね」や「だわ」などは使わず、冷静な口調で。※見出し不要。独り言は、市場25日騰落レシオ({r25:.2f}%)を総括し、規律ある撤退の重要性に言及する。
+"""
+
+    try:
+        # 新仕様：client.models.generate_content を使用
+        res = client.models.generate_content(model=model_name, contents=prompt)
+        text = res.text
+        comments = {}
+        monologue = ""
+
+        if "END_OF_LIST" not in text:
+            st.session_state.error_messages.append(
+                "AI分析エラー: Geminiモデルからの応答にEND_OF_LISTが見つかりません。"
+            )
+            return {}, "AI分析失敗"
+
+        parts = text.split("END_OF_LIST", 1)
+        comment_lines = parts[0].strip().split("\n")
+        monologue = parts[1].strip()
+        monologue = re.sub(r"\*\*(.*?)\*\*", r"\1", monologue).replace("**", "").strip()
+
+        for line in comment_lines:
+            line = line.strip()
+            if line.startswith("ID:") and "|" in line:
+                try:
+                    c_code_part, c_com = line.split("|", 1)
+                    c_code = c_code_part.replace("ID:", "").strip()
+                    c_com_cleaned = c_com.strip()
+                    c_com_cleaned = (
+                        re.sub(r"\*\*(.*?)\*\*", r"\1", c_com_cleaned)
+                        .replace("**", "")
+                        .strip()
+                    )
+                    CLEANUP_PATTERN_START = r"^(<b>.*?</b>)\s*[:：].*?"
+                    c_com_cleaned = re.sub(
+                        CLEANUP_PATTERN_START, r"\1", c_com_cleaned
+                    ).strip()
+                    c_com_cleaned = re.sub(
+                        r"^[\s\:\｜\-\・\*\,\.]*", "", c_com_cleaned
+                    ).strip()
+                    CLEANUP_PATTERN_END = r"(\s*(?:ATR_SL|SL|採用SL)[:：].*?円\.?)$"
+                    c_com_cleaned = re.sub(
+                        CLEANUP_PATTERN_END, "", c_com_cleaned, flags=re.IGNORECASE
+                    ).strip()
+                    if len(c_com_cleaned) > 128:
+                        c_com_cleaned = (
+                            '<span style="color:orange; font-size:11px; margin-right: 5px;"><b>⚠️長文注意/全文はスクロール</b></span>'
+                            + c_com_cleaned
+                        )
+                    comments[c_code] = c_com_cleaned
+                except Exception:
+                    pass
+        return comments, monologue
+    except Exception as e:
+        st.session_state.error_messages.append(
+            f"AI分析エラー: Gemini応答解析失敗。詳細: {e}"
+        )
+        return {}, "コメント生成エラー"
+
+
+def merge_new_data(new_data_list):
+    existing_map = {d["code"]: d for d in st.session_state.analyzed_data}
+    for d in existing_map.values():
+        if "is_updated_in_this_run" in d:
+            d["is_updated_in_this_run"] = False
+    for new_data in new_data_list:
+        if new_data["code"] in existing_map:
+            new_data["update_count"] = (
+                existing_map[new_data["code"]].get("update_count", 0) + 1
+            )
         else:
-            rank_disp = rank_raw if rank_raw else "未設定"
+            new_data["update_count"] = 1
+        new_data["is_updated_in_this_run"] = True
+        existing_map[new_data["code"]] = new_data
+    st.session_state.analyzed_data = list(existing_map.values())
 
-        is_p_mode = st.session_state.get("parent_unlock_key") == "7777"
 
-        # 🌟 2. 【リセットガード】問題が変わったら前回の記憶を消去
-        if st.session_state.get("active_q_id") != target_id:
-            st.session_state.current_opts = None
-            st.session_state.show_result = False
-            st.session_state.show_options = False
-            st.session_state["user_ans_order"] = []
-            st.session_state.active_q_id = target_id
-            st.rerun()
+# --- サイドバー構成 ---
+with st.sidebar:
+    st.markdown(
+        """
+        <div style="border: 1px solid #d1d5db; padding: 4px 8px; border-radius: 4px; background-color: #ffffff; margin-bottom: 12px; line-height: 1.1;">
+            <div style="color: #dc2626; font-size: 10px; font-weight: 900; text-align: center;">【内部検証：実売買禁止】</div>
+            <div style="color: #64748b; font-size: 9px; text-align: center; margin-top: 2px;">投資助言または売買推奨ではありません。</div>
+        </div>
+    """,
+        unsafe_allow_html=True,
+    )
 
-        # 🌟 3. 習熟レベル（Lv.）の取得
-        mastery_score = 0
-        if "db" in locals() or "db" in globals():
-            m_list = db.get("mastery", [])
-            m_data = next(
-                (
-                    m
-                    for m in m_list
-                    if str(m.get("q", "")).strip() == str(q.get("q", "")).strip()
-                ),
-                None,
-            )
-            if m_data:
-                mastery_score = m_data.get("score", 0)
+    # 認証
+    if not st.session_state.authenticated:
+        st.header("🔑 LOGIN")
+        with st.form("login_form"):
+            api_input = st.text_input("Gemini API Key (User ID)")
+            pwd_input = st.text_input("認証パスワード", type="password")
+            if st.form_submit_button("ログイン ＆ 保存"):
+                if hash_password(pwd_input) == SECRET_HASH:
+                    st.session_state.authenticated = True
+                    st.session_state.gemini_api_key_input = api_input
+                    st.success("認証成功")
+                    st.rerun()
+                else:
+                    st.error("パスワードが違います")
+        st.stop()
 
-        # 🌟 4. 1行ステータスバー ＆ スリムヒントスイッチ
-        c_cnt = st.session_state.get("correct_count", 0)
-        m_stars = "⭐"
-        s_line = f"<b>Mission</b> {idx + 1}/{len(qs)} | {m_stars}({c_cnt}pts) | 📈 <b>Lv.{mastery_score}</b> | 🏷️ {cat} / {sub_cat} | {rank_disp}"
+    # 認証後コントロール
+    api_key = None
+    if st.session_state.authenticated:
+        st.markdown(
+            '<div class="slim-status status-ok">SYSTEM AUTHENTICATED</div>',
+            unsafe_allow_html=True,
+        )
 
-        st_col_left, st_col_hint = st.columns([8.5, 1.5])
-        with st_col_left:
+        secret_key_val = st.secrets.get("GEMINI_API_KEY")
+        manual_key_val = st.session_state.get("gemini_api_key_input")
+
+        if secret_key_val and str(secret_key_val).strip() != "":
             st.markdown(
-                f"<div style='padding: 6px 12px; background: #f8f9fa; border-radius: 8px; border: 1px solid #eee; font-size: 14px; white-space: nowrap; overflow-x: auto;'>{s_line}</div>",
+                '<div class="slim-status status-ok">API KEY: ✅ LOADED (secrets.toml)</div>',
                 unsafe_allow_html=True,
             )
-        with st_col_hint:
-            h_c1, h_c2 = st.columns([0.4, 0.6])
-            is_help_on = h_c1.toggle(
-                "H",
-                value=st.session_state.get("show_help_persistence", False),
-                key=f"h_tg_{idx}",
-                label_visibility="collapsed",
-            )
-            st.session_state.show_help_persistence = is_help_on
-            h_c2.markdown(
-                "<div style='margin-top:12px; margin-left:-20px; font-weight:bold; color:#4b5563; font-size:13px;'>💡ヒント</div>",
-                unsafe_allow_html=True,
-            )
-
-        # スリム・ヒントバナー（横幅拡大版）
-        if is_help_on:
-            h_t = q.get("h", "")
-            clean_h = to_pretty_display(str(h_t).strip()) if h_t else "ヒントなし"
+            api_key = secret_key_val
+        elif manual_key_val and str(manual_key_val).strip() != "":
             st.markdown(
-                f"""
-                <div style='
-                    background-color: #e3f2fd; 
-                    border-left: 5px solid #2196f3; 
-                    padding: 12px 20px; 
-                    border-radius: 6px; 
-                    color: #0d47a1; 
-                    font-size: 16px; 
-                    font-weight: bold; 
-                    margin-top: 15px;
-                    margin-bottom: 12px; 
-                    line-height: 0.8;
-                    /* 🌟 横幅の調整：fit-contentをやめて幅を指定します */
-                    display: block;        /* ブロック要素に戻す */
-                    width: 84.5%;            /* 🌟 ここで横幅を調整（Mission行に合わせるなら80-90%程度） */
-                    min-width: 300px;      /* 短すぎ防止 */
-                    box-shadow: 2px 2px 5px rgba(0,0,0,0.05);
-                '>
-                    💡 {clean_h}
-                </div>
-                """,
+                '<div class="slim-status status-ok">API KEY: 🟢 CONNECTED (MEMORIZED)</div>',
                 unsafe_allow_html=True,
             )
+            api_key = manual_key_val
+        else:
+            st.warning("⚠️ API KEY MISSING")
+            retry_key = st.text_input(
+                "Gemini API Keyを再入力", key="retry_token_storage_visible"
+            )
+            if retry_key:
+                st.session_state.gemini_api_key_input = retry_key
+                st.rerun()
+            api_key = None
 
-        # ---------------------------------------------------------
-        # 📖 問題表示 / 原本編集
-        # ---------------------------------------------------------
-        en_disp, jp_disp, _ = parse_order_question(q.get("q", ""), cat)
-        if not is_p_mode:
-            if is_kanji:
+        st.session_state.selected_model_name = st.selectbox(
+            "使用AIモデル",
+            options=["gemma-3-27b-it", "gemma-3-12b-it"],
+            index=0,
+        )
+        st.markdown(
+            '<hr style="margin: 10px 0; border: 0; border-top: 1px solid #eee;">',
+            unsafe_allow_html=True,
+        )
+
+        st.session_state.sort_option_key = st.selectbox(
+            "📊 結果のソート順",
+            options=[
+                "スコア順 (高い順)",
+                "更新回数順",
+                "R/R比順 (高い順)",
+                "時価総額順 (高い順)",
+                "出来高倍率順 (高い順)",
+                "RSI順 (低い順)",
+                "RSI順 (高い順)",
+                "5MA実績順 (高い順)",
+                "銘柄コード順",
+            ],
+            index=0,
+        )
+        st.markdown(
+            '<div style="margin-top: -10px; margin-bottom: -5px;"><span class="sidebar-header-style">🔍 表示フィルター</span></div>',
+            unsafe_allow_html=True,
+        )
+        col_f1, col_f2 = st.columns([0.6, 0.4])
+        st.session_state.ui_filter_min_score = col_f1.number_input(
+            "n点以上", 0, 100, st.session_state.ui_filter_min_score, 5
+        )
+        st.session_state.ui_filter_score_on = col_f2.checkbox(
+            "適用", value=st.session_state.ui_filter_score_on, key="f_sc_check"
+        )
+
+        col_f3, col_f4 = st.columns([0.6, 0.4])
+        st.session_state.ui_filter_min_liquid_man = col_f3.number_input(
+            "出来高(n万株)",
+            0.0,
+            500.0,
+            st.session_state.ui_filter_min_liquid_man,
+            0.5,
+            format="%.1f",
+        )
+        st.session_state.ui_filter_liquid_on = col_f4.checkbox(
+            "適用", value=st.session_state.ui_filter_liquid_on, key="f_lq_check"
+        )
+
+        col_f5, col_f6 = st.columns([0.6, 0.4])
+        st.session_state.ui_filter_max_rsi = col_f5.number_input(
+            "RSI (n未満)", 0, 100, st.session_state.ui_filter_max_rsi, 5
+        )
+        st.session_state.ui_filter_rsi_on = col_f6.checkbox(
+            "適用", value=st.session_state.ui_filter_rsi_on, key="f_rsi_check"
+        )
+
+        # ▼▼▼ 入力欄の不具合修正箇所 ▼▼▼
+        # 入力内容変更時にインデックスをリセットする関数
+        def on_tickers_change():
+            st.session_state.analysis_index = 0
+
+        # keyを指定してStreamlitに入力管理を任せる（これで消えなくなります）
+        st.text_area(
+            "銘柄コード (上限10銘柄/回)",
+            key="tickers_input_value",  # session_stateと自動連携
+            placeholder="7203\n8306",
+            height=150,
+            on_change=on_tickers_change,  # 変更時にリセット関数を実行
+        )
+        # ▲▲▲ 修正箇所ここまで ▲▲▲
+
+        col_start, col_cont = st.columns([0.6, 0.4])
+        col_cont.checkbox(
+            "連続",
+            value=st.session_state.get("run_continuously_checkbox", False),
+            key="run_continuously_checkbox_key",
+            on_change=toggle_continuous_run,
+        )
+
+        is_btn_disabled = (
+            st.session_state.get("is_running_continuous", False) or api_key is None
+        )
+        analyze_start_clicked = col_start.button(
+            "▶️分析", use_container_width=True, disabled=is_btn_disabled
+        )
+
+        col_clr, col_re = st.columns(2)
+        is_mng_disabled = st.session_state.get("is_running_continuous", False)
+        clear_button_clicked = col_clr.button(
+            "🗑️消去",
+            on_click=clear_all_data_confirm,
+            use_container_width=True,
+            disabled=is_mng_disabled,
+        )
+        reload_button_clicked = col_re.button(
+            "🔄再診",
+            on_click=reanalyze_all_data_logic,
+            use_container_width=True,
+            disabled=is_mng_disabled,
+        )
+
+        if st.session_state.is_running_continuous:
+            if st.button("⏹️ 分析中止", use_container_width=True, key="cancel_run_btn"):
+                st.session_state.is_running_continuous = False
+                st.session_state.wait_start_time = None
+                st.rerun()
+    else:
+        analyze_start_clicked = False
+        clear_button_clicked = False
+        reload_button_clicked = False
+# ボタン処理
+if clear_button_clicked or reload_button_clicked:
+    st.rerun()
+# ▼▼▼ 修正後のクリア処理ブロック ▼▼▼
+
+
+# クリア処理を安全に行うための関数（コールバック）
+def perform_clear_all():
+    st.session_state.analyzed_data = []
+    st.session_state.ai_monologue = ""
+    st.session_state.error_messages = []
+    st.session_state.clear_confirmed = False
+    st.session_state.score_history = {}
+    # コールバック内であれば、入力欄の値（キー）を書き換えてもエラーになりません
+    st.session_state.tickers_input_value = ""
+    st.session_state.analysis_index = 0
+    st.session_state.current_input_hash = ""
+    st.session_state.is_running_continuous = False
+    st.session_state.wait_start_time = None
+    st.session_state.run_continuously_checkbox = False
+
+
+if st.session_state.clear_confirmed:
+    st.warning(
+        "⚠️ 本当に分析結果をすべてクリアしますか？この操作は取り消せません。", icon="🚨"
+    )
+    col_confirm, col_cancel, col_clear_spacer = st.columns([0.2, 0.2, 0.6])
+
+    # on_click引数を使って関数を呼び出すことで、再描画前に値をリセットできます
+    col_confirm.button(
+        "✅ はい、クリアします", on_click=perform_clear_all, use_container_width=False
+    )
+
+    if col_cancel.button("❌ キャンセル", use_container_width=False):
+        st.session_state.clear_confirmed = False
+        st.rerun()
+
+# ▲▲▲ 修正後のクリア処理ブロック ▲▲▲
+
+if not st.session_state.authenticated:
+    st.info("⬅️ サイドバーでユーザー名を入力して認証してください。")
+    st.stop()
+
+# --- メイン実行制御 ---
+if (
+    st.session_state.is_running_continuous
+    and st.session_state.wait_start_time is not None
+):
+    REQUIRED_DELAY = 60 + random.uniform(5.0, 10.0)
+    time_elapsed = (
+        datetime.datetime.now() - st.session_state.wait_start_time
+    ).total_seconds()
+    if time_elapsed >= REQUIRED_DELAY or not st.session_state.is_running_continuous:
+        st.session_state.wait_start_time = None
+        st.rerun()
+    else:
+        time_to_wait = REQUIRED_DELAY - time_elapsed
+        status_placeholder = st.empty()
+        while time_to_wait > 0 and st.session_state.is_running_continuous:
+            time_to_wait = (
+                REQUIRED_DELAY
+                - (
+                    datetime.datetime.now() - st.session_state.wait_start_time
+                ).total_seconds()
+            )
+            status_placeholder.info(
+                f"⌛️ サーバー負荷を考慮し、次のバッチ分析まで【残り {time_to_wait:.1f}秒間】待機中です。"
+            )
+            time.sleep(1)
+            if time_to_wait <= 0:
+                break
+        if st.session_state.is_running_continuous:
+            st.session_state.wait_start_time = None
+            st.info("✅ 待機完了。分析開始。")
+        else:
+            st.warning("⏹️ 連続分析キャンセル。停止します。")
+            st.session_state.wait_start_time = None
+        st.rerun()
+
+if analyze_start_clicked or (
+    st.session_state.is_running_continuous
+    and st.session_state.wait_start_time is None
+    and st.session_state.analysis_index > 0
+):
+    st.session_state.error_messages = []
+    input_tickers = st.session_state.tickers_input_value
+    resolved_api_key = (
+        api_key if api_key else st.session_state.get("gemini_api_key_input")
+    )
+
+    if not resolved_api_key or str(resolved_api_key).strip() == "":
+        st.warning("APIキーが認識されていません。サイドバーから再入力してください。")
+    elif not input_tickers.strip():
+        st.warning("銘柄コードを入力してください。")
+    else:
+        api_key = resolved_api_key
+        raw_tickers_str = (
+            input_tickers.replace("\n", ",").replace(" ", ",").replace("、", ",")
+        )
+        current_hash = hashlib.sha256(raw_tickers_str.encode()).hexdigest()
+        is_input_changed = st.session_state.current_input_hash != current_hash
+
+        if is_input_changed:
+            st.session_state.analysis_index = 0
+            st.session_state.current_input_hash = current_hash
+
+        all_unique_tickers = list(
+            set([t.strip() for t in raw_tickers_str.split(",") if t.strip()])
+        )
+        total_tickers = len(all_unique_tickers)
+        if analyze_start_clicked:
+            is_checkbox_on = st.session_state.get(
+                "run_continuously_checkbox_key", False
+            )
+            if total_tickers > MAX_TICKERS and is_checkbox_on:
+                st.session_state.is_running_continuous = True
+            else:
+                st.session_state.is_running_continuous = False
+        if (
+            not st.session_state.is_running_continuous
+            and st.session_state.analysis_index > 0
+            and not analyze_start_clicked
+        ):
+            st.info("キャンセルされました。手動で再実行してください。")
+            st.session_state.analysis_index = 0
+            st.stop()
+        start_index = st.session_state.analysis_index
+        end_index = min(start_index + MAX_TICKERS, total_tickers)
+        raw_tickers = all_unique_tickers[start_index:end_index]
+        if not raw_tickers:
+            if start_index > 0:
+                st.info("✅ 分析完了。")
+            else:
+                st.warning("⚠️ 分析対象なし。")
+            st.session_state.analysis_index = 0
+        st.session_state.analysis_run_count += 1
+        current_run_count = st.session_state.analysis_run_count
+        if total_tickers > MAX_TICKERS and end_index < total_tickers:
+            current_batch_num = start_index // MAX_TICKERS + 1
+            remaining_tickers = total_tickers - end_index
+            mode_text = (
+                "自動継続します。"
+                if st.session_state.is_running_continuous
+                else "再度【🚀 分析開始】を押してください。"
+            )
+            st.warning(
+                f"⚠️ {MAX_TICKERS}件超。第{current_batch_num}回分析中。（残り {remaining_tickers} 件）{mode_text}"
+            )
+        elif total_tickers > MAX_TICKERS and end_index == total_tickers:
+            current_batch_num = start_index // MAX_TICKERS + 1
+            st.info(f"📊 【最終回: 第{current_batch_num}回】分析開始。")
+        elif end_index <= total_tickers and total_tickers > 0:
+            st.info("📊 分析開始。")
+
+        data_list, bar, status_label, jst_now, new_analyzed_data = (
+            [],
+            None,
+            get_market_status(),
+            get_market_status()[1],
+            [],
+        )
+        if len(raw_tickers) > 0:
+            if len(raw_tickers) > 20:
+                st.info(f"💡 {len(raw_tickers)}件分析中。")
+            else:
+                bar = st.progress(0)
+            for i, t in enumerate(raw_tickers):
+                d = get_stock_data(t, current_run_count)
+                if d:
+                    d["batch_order"] = start_index + i + 1
+                    new_analyzed_data.append(d)
+                if bar:
+                    bar.progress((i + 1) / len(raw_tickers))
+                time.sleep(random.uniform(1.5, 2.5))
+            with st.spinner("アイが診断中..."):
+                comments_map, monologue = batch_analyze_with_ai(new_analyzed_data)
+                for d in new_analyzed_data:
+                    d["comment"] = comments_map.get(d["code"], "コメント生成失敗")
+                merge_new_data(new_analyzed_data)
+                st.session_state.ai_monologue = monologue
+                st.session_state.is_first_session_run = False
+                st.session_state.analysis_index = end_index
+                is_analysis_complete = end_index >= total_tickers
+                if is_analysis_complete:
+                    st.success(f"🎉 全{total_tickers}銘柄完了。")
+                    # st.session_state.tickers_input_value = ""  <-- エラー原因のこの行を削除しました
+                    st.session_state.analysis_index = 0
+                    st.session_state.is_running_continuous = False
+                    st.session_state.wait_start_time = None
+                    st.session_state.run_continuously_checkbox = False
+                elif new_analyzed_data and st.session_state.is_running_continuous:
+                    current_batch_num = start_index // MAX_TICKERS + 1
+                    st.success(f"✅ 第{current_batch_num}回完了。次へ自動移行。")
+                    st.session_state.wait_start_time = datetime.datetime.now()
+                    st.rerun()
+                elif (
+                    new_analyzed_data
+                    and not st.session_state.is_running_continuous
+                    and start_index > 0
+                ):
+                    st.warning("⏹️ 停止しました。残りは未分析です。")
+                if raw_tickers:
+                    st.empty()
+                if is_analysis_complete or not st.session_state.is_running_continuous:
+                    st.rerun()
+
+        if st.session_state.error_messages:
+            if not st.session_state.tickers_input_value and end_index >= total_tickers:
+                st.session_state.error_messages = []
+            else:
+                st.error("❌ エラーによりスキップされました。")
+                with st.expander("詳細"):
+                    for msg in st.session_state.error_messages:
+                        st.markdown(
+                            f'<p style="color: red;">- {msg}</p>',
+                            unsafe_allow_html=True,
+                        )
+        elif not st.session_state.analyzed_data and raw_tickers:
+            st.warning("⚠️ 全データ取得失敗。")
+        if new_analyzed_data and end_index >= total_tickers:
+            st.success(f"✅ 全{total_tickers}件完了。")
+        elif new_analyzed_data and end_index < total_tickers:
+            st.success(f"✅ {len(new_analyzed_data)}件完了。")
+
+# --- 結果表示UI ---
+HEADER_MAP = [
+    ("No", "No", "center", "40px", "40px"),
+    ("code_disp", "コード", "center", "70px", "70px"),
+    ("name", "　企業名", "left", "190px", "190px"),
+    ("cap_disp", "時価総額", "center", "100px", "100px"),
+    ("score_disp", "点", "center", "50px", "50px"),
+    ("strategy", "分析戦略", "center", "80px", "80px"),
+    ("price_disp", "現在値", "center", "70px", "70px"),
+    ("buy_disp", "想定水準\n（乖離）", "center", "80px", "80px"),
+    ("rr_disp", "R/R比", "center", "50px", "50px"),
+    ("dd_sl_disp", "最大含損率\n損切乖離率", "center", "90px", "90px"),
+    ("target_txt", "　利益確定目標値", "left", "130px", "130px"),
+    ("rsi_disp", "RSI", "center", "60px", "60px"),
+    ("vol_disp_html", "出来高比\n(5日平均)", "center", "80px", "80px"),
+    ("bt_cell_content", "5MA実績", "center", "65px", "65px"),
+    ("per_pbr_disp", "PER\nPBR", "center", "60px", "60px"),
+    ("momentum", "直近勝率", "center", "60px", "60px"),
+    ("comment", "　アイの所感", "left", "345px", "345px"),
+]
+
+st.markdown("---")
+
+if st.session_state.analyzed_data:
+    data = st.session_state.analyzed_data
+    filtered_data = []
+
+    is_filter_active = (
+        st.session_state.ui_filter_score_on
+        or st.session_state.ui_filter_liquid_on
+        or st.session_state.ui_filter_rsi_on
+    )
+    if is_filter_active:
+        min_score = st.session_state.ui_filter_min_score
+        min_liquid_man = st.session_state.ui_filter_min_liquid_man
+        max_rsi = st.session_state.ui_filter_max_rsi
+        for d in data:
+            keep = True
+            if st.session_state.ui_filter_score_on:
+                if d["score"] < min_score:
+                    keep = False
+            if keep and st.session_state.ui_filter_liquid_on:
+                if d["avg_volume_5d"] < min_liquid_man * 10000:
+                    keep = False
+            if keep and st.session_state.ui_filter_rsi_on and d["rsi"] >= max_rsi:
+                keep = False
+            if keep:
+                filtered_data.append(d)
+    else:
+        filtered_data = data
+
+    df = pd.DataFrame(filtered_data)
+
+    if st.session_state.get("trigger_copy_filtered_data", False):
+        st.session_state.trigger_copy_filtered_data = False
+        st.warning("⚠️ 現在、コピー機能は無効化されています。")
+
+    if df.empty:
+        if is_filter_active:
+            st.info("⚠️ フィルター条件に該当なし。")
+        else:
+            st.info("⚠️ 結果なし。")
+        st.markdown("---")
+        st.markdown("【アイの独り言】")
+        st.markdown(st.session_state.ai_monologue)
+        if st.session_state.ai_monologue or st.session_state.error_messages:
+            st.stop()
+        st.stop()
+
+    sort_key_map = {
+        "スコア順 (高い順)": ("score", False),
+        "更新回数順": ("update_count", False),
+        "R/R比順 (高い順)": ("risk_reward", False),
+        "時価総額順 (高い順)": ("cap_val", False),
+        "出来高倍率順 (高い順)": ("vol_ratio", False),
+        "RSI順 (低い順)": ("rsi", True),
+        "RSI順 (高い順)": ("rsi", False),
+        "5MA実績順 (高い順)": ("win_rate_pct", False),
+        "銘柄コード順": ("code", True),
+    }
+    selected_key = st.session_state.sort_option_key
+    sort_res = sort_key_map.get(selected_key)
+    sort_col, ascending = sort_res if sort_res else ("score", False)
+
+    numeric_cols_for_sort = [
+        "score",
+        "update_count",
+        "cap_val",
+        "rsi",
+        "vol_ratio",
+        "win_rate_pct",
+        "risk_reward",
+    ]
+    for col in numeric_cols_for_sort:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(-1)
+
+    df = df.sort_values(by=sort_col, ascending=ascending).reset_index(drop=True)
+
+    # --- サイト表示用データ加工 ---
+    def fmt_smart(val):
+        if pd.isna(val):
+            return "-"
+        return f"{int(val):,}" if val % 1 == 0 else f"{val:,.1f}"
+
+    def fmt_floor(val):
+        return f"{int(val):,}" if pd.notna(val) and val > 0 else "-"
+
+    def fmt_round(val):
+        return f"{int(val + 0.5):,}" if pd.notna(val) and val > 0 else "-"
+
+    def format_code(row):
+        code_html = f"<b>{row['code']}</b>"
+        days = row.get("earnings_day_count")
+        disp_str = row.get("earnings_disp_str", "")
+        if days is None and not disp_str:
+            return code_html
+        if disp_str == "発表済":
+            return f"{code_html}<br><span style='font-size:11px; color:blue;'>決算発表済</span>"
+        if days is not None and disp_str:
+            color = "red" if days <= 7 else "#cc5500"
+            return f"{code_html}<br><span style='font-size:11px; color:{color}; font-weight:bold;'>決算 {disp_str}</span>"
+        return code_html
+
+    df["code_disp"] = df.apply(format_code, axis=1)
+
+    df["price_disp"] = df["price"].apply(fmt_smart)
+
+    df["diff_disp"] = df.apply(
+        lambda row: (
+            "(0)"
+            if not row["price"] or not row["buy"] or (row["price"] - row["buy"]) == 0
+            else f"({int(row['price'] - row['buy']):+,})"
+            if (row["price"] - row["buy"]) % 1 == 0
+            else f"({row['price'] - row['buy']:+,.1f})"
+        ),
+        axis=1,
+    )
+
+    df["buy_disp"] = df.apply(
+        lambda row: (
+            f"{fmt_round(row['buy'])}<br>{row['diff_disp']}"
+            if "🚀" not in row["strategy"]
+            else (
+                f"<span style='color:#1977d2; font-weight:bold; background-color:#E3F2FD; padding:1px 3px;'>{fmt_round(row['buy'])}</span><br>"
+                f"<span style='font-size:10px;color:#1976d2; font-weight:bold;'>{row['diff_disp']}</span>"
+                + (
+                    f"<br><span style='font-size:10px;color:#e65100;font-weight:bold;'>押: {fmt_round(row.get('oshime_price', 0))}</span>"
+                    if row.get("oshime_price", 0) > 0
+                    else ""
+                )
+            )
+        ),
+        axis=1,
+    )
+
+    df["rr_disp"] = df.apply(
+        lambda row: (
+            "青天"
+            if row["is_aoteng"]
+            else (f"{row['risk_reward']:.1f}" if row["risk_reward"] >= 0.1 else "-")
+        ),
+        axis=1,
+    )
+
+    def format_target(row):
+        kabu_price = row["price"]
+        p_half = row["p_half"]
+        p_full = row["p_full"]
+        if row.get("is_aoteng"):
+            pct = (
+                ((p_full / kabu_price) - 1) * 100
+                if kabu_price > 0 and p_full > 0
+                else 0
+            )
+            return f'<span style="color:green;font-weight:bold;">青天井追従</span><br>SL:{fmt_round(p_full)} ({pct:+.1f}%)'
+
+        lines = []
+        if "順" in row["strategy"] or "ブレイク" in row["strategy"]:
+            if p_half > 0:
+                pct_h = ((p_half / kabu_price) - 1) * 100 if kabu_price > 0 else 0
+                lines.append(f"半:{fmt_floor(p_half)} ({pct_h:+.1f}%)")
+            if p_full > 0:
+                pct_f = ((p_full / kabu_price) - 1) * 100 if kabu_price > 0 else 0
+                lines.append(f"全:{fmt_floor(p_full)} ({pct_f:+.1f}%)")
+            if not lines:
+                return "目標超過"
+            return "<br>".join(lines)
+        return (
+            "MA回帰目標" if "逆" in row["strategy"] or "底" in row["strategy"] else "-"
+        )
+
+    df["target_txt"] = df.apply(format_target, axis=1)
+
+    def format_rsi_atr(row):
+        rsi = row["rsi"]
+        mark = (
+            "🔵"
+            if rsi <= 30
+            else ("🟢" if 55 <= rsi <= 65 else ("🔴" if rsi >= 70 else "⚪"))
+        )
+        atr_color = "#800000" if row.get("atr_pct", 0) >= 5.0 else "#555"
+        return f"{mark}{rsi:.1f}<br><span style='font-size:10px; color:{atr_color}; font-weight: bold;'>ATR:{fmt_round(row.get('atr_smoothed', 0))}円<br>({row.get('atr_pct', 0):.1f}%)</span>"
+
+    df["rsi_disp"] = df.apply(format_rsi_atr, axis=1)
+
+    df["vol_disp_html"] = df.apply(
+        lambda row: (
+            f"<b>{row['vol_ratio']:.1f}倍</b><br>({format_volume(row['avg_volume_5d'])})"
+            if row["vol_ratio"] > 1.5
+            else f"{row['vol_ratio']:.1f}倍<br>({format_volume(row['avg_volume_5d'])})"
+        ),
+        axis=1,
+    )
+    df["dd_sl_disp"] = df.apply(
+        lambda row: f"{row['max_dd_pct']:+.1f}%<br>{row['sl_pct']:+.1f}%", axis=1
+    )
+    df["score_disp"] = df.apply(
+        lambda row: (
+            f"<span style='color:red; font-weight:bold;'>{row['score']:.0f}</span><br><span style='font-size:10px;color:#555;'>({int(row.get('score_diff', 0)):+d})</span>"
+            if row["score"] >= 80
+            else f"{row['score']:.0f}<br><span style='font-size:10px;color:#555;'>({int(row.get('score_diff', 0)):+d})</span>"
+        ),
+        axis=1,
+    )
+    df["bt_cell_content"] = df.apply(
+        lambda row: (
+            f"<b>{row['backtest_raw']}</b><br><span style='font-size:11px;'>({row['bt_win_count']}勝{row.get('bt_loss_count', 0)}敗)</span>"
+        ),
+        axis=1,
+    )
+    df["per_pbr_disp"] = df.apply(lambda row: f"{row['per']}<br>{row['pbr']}", axis=1)
+    df["No"] = range(1, len(df) + 1)
+    df["No"] = df.apply(
+        lambda row: (
+            f"{row['No']} <span class='update-badge'>更新</span>"
+            if row.get("is_updated_in_this_run") and row.get("update_count", 1) > 1
+            else f"{row['No']}"
+        ),
+        axis=1,
+    )
+
+    # --- CSV用データ加工 ---
+    df_csv = df.copy()
+
+    # ▼ ブレイク時はCSVの「想定水準」を押し目価格に直接上書きする ▼
+    df_csv["buy"] = df_csv.apply(
+        lambda row: (
+            row.get("oshime_price", 0)
+            if "🚀ブレイク" in str(row.get("strategy", ""))
+            and row.get("oshime_price", 0) > 0
+            else row.get("buy", 0)
+        ),
+        axis=1,
+    )
+
+    final_csv_columns = [
+        ("code", "コード"),
+        ("name", "企業名"),
+        ("cap_val", "時価総額(億円)"),
+        ("score", "総合点"),
+        ("strategy", "分析戦略"),
+        ("price", "現在値"),
+        ("buy", "想定水準(価格)"),
+        ("p_half", "目標_半利確"),
+        ("p_full", "目標_全利確"),
+        ("sl_ma", "損切ライン(円)"),
+        ("max_dd_pct", "最大含損率"),
+        ("risk_reward", "R/R比"),
+        ("rsi", "RSI"),
+        ("rci", "RCI"),
+        ("vol_ratio", "出来高倍率"),
+        ("avg_volume_5d", "5日平均出来高(株)"),
+        ("momentum", "直近勝率"),
+        ("backtest_raw", "MA5実績"),
+        ("per", "PER"),
+        ("pbr", "PBR"),
+        ("comment", "アイの所感"),
+        ("earnings_disp_str", "決算日"),
+        ("is_earnings_soon", "決算直前フラグ"),
+    ]
+
+    rename_map = {key: name for key, name in final_csv_columns}
+    df_csv.rename(columns=rename_map, inplace=True)
+    available_cols = [name for _, name in final_csv_columns if name in df_csv.columns]
+    df_csv = df_csv[available_cols]
+
+    if "PER" in df_csv.columns:
+        df_csv["PER"] = (
+            df_csv["PER"].astype(str).str.replace("倍", "").str.replace(",", "")
+        )
+        df_csv["PER"] = pd.to_numeric(df_csv["PER"], errors="coerce").round(1)
+    if "PBR" in df_csv.columns:
+        df_csv["PBR"] = (
+            df_csv["PBR"].astype(str).str.replace("倍", "").str.replace(",", "")
+        )
+        df_csv["PBR"] = pd.to_numeric(df_csv["PBR"], errors="coerce").round(2)
+
+    for col in ["R/R比", "出来高倍率", "RSI", "RCI"]:
+        if col in df_csv.columns:
+            df_csv[col] = pd.to_numeric(df_csv[col], errors="coerce").round(1)
+
+    if "最大含損率" in df_csv.columns:
+        df_csv["最大含損率"] = pd.to_numeric(
+            df_csv["最大含損率"], errors="coerce"
+        ).apply(lambda x: f"{round(x, 1):.1f}%" if pd.notna(x) else "－")
+
+    if "損切ライン(円)" in df_csv.columns:
+        df_csv["損切ライン(円)"] = pd.to_numeric(
+            df_csv["損切ライン(円)"], errors="coerce"
+        ).apply(lambda x: f"{int(round(x)):,}" if pd.notna(x) else "－")
+
+    if "決算日" in df_csv.columns:
+        df_csv["決算日"] = (
+            df_csv["決算日"]
+            .replace(["", "None", "nan", "NaN"], np.nan)
+            .infer_objects(copy=False)
+            .fillna("－")
+        )
+
+    for col in ["アイの所感", "MA5実績"]:
+        if col in df_csv.columns:
+            df_csv[col] = (
+                df_csv[col]
+                .apply(clean_html_tags)
+                .apply(remove_emojis_and_special_chars)
+            )
+
+    df_csv = df_csv.fillna("－")
+    csv_str = df_csv.to_csv(index=False, encoding="utf-8-sig")
+    b64 = base64.b64encode(csv_str.encode("utf-8-sig")).decode()
+    href = f"data:text/csv;base64,{b64}"
+    jst_now_for_csv = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(
+        hours=9
+    )
+    filename = f"analysis_{jst_now_for_csv.strftime('%Y%m%d_%H%M')}.csv"
+
+    st.markdown(
+        f'''
+        <a href="{href}" download="{filename}" style="
+            text-decoration:none; display:block; width:100%; text-align:center; padding:12px; border-radius:8px; 
+            color:#ffffff; background-color:#007bff; font-weight:bold; border: 1px solid #0056b3;
+        ">✅ 内部検証用データをダウンロード</a>
+    ''',
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("### 📊 アイ分析結果")
+    r25 = market_25d_ratio
+    ratio_color = (
+        "#d32f2f" if r25 >= 125.0 else ("#1976d2" if r25 <= 80.0 else "#4A4A4A")
+    )
+    st.markdown(
+        f'<p class="big-font"><b>市場環境（25日騰落レシオ）：<span style="color:{ratio_color};">{r25:.2f}%</span></b></p>',
+        unsafe_allow_html=True,
+    )
+
+    # バッジ定義
+    FACTOR_META = {
+        "垂直立ち上げ": {"char": "飛", "prio": 5},
+        "強気転換": {"char": "転", "prio": 6},
+        "RCI反転底打": {"char": "底", "prio": 7},
+        "新高値ブレイク": {"char": "新", "prio": 10},
+        "スクイーズ": {"char": "充", "prio": 20},
+        "週足上昇": {"char": "週", "prio": 30},
+        "週足下落": {"char": "週", "prio": 30},
+        "戦略優位性": {"char": "戦", "prio": 40},
+        "青天井": {"char": "青", "prio": 50},
+        "大型堅調": {"char": "堅", "prio": 55},
+        "高R/R比": {"char": "Ｒ", "prio": 60},
+        "低R/R比": {"char": "損", "prio": 60},
+        "低含損率": {"char": "安", "prio": 70},
+        "高DDリスク": {"char": "落", "prio": 70},
+        "早期回復": {"char": "復", "prio": 80},
+        "回復遅延": {"char": "遅", "prio": 80},
+        "GC発生": {"char": "Ｇ", "prio": 90},
+        "DC発生": {"char": "Ｄ", "prio": 90},
+        "出来高急増": {"char": "出", "prio": 100},
+        "直近勢い": {"char": "勢", "prio": 110},
+        "RSI適正": {"char": "適", "prio": 120},
+        "RSIダイバー": {"char": "逆", "prio": 125},
+        "RCI好転": {"char": "機", "prio": 126},
+        "市場過熱": {"char": "市", "prio": 130},
+        "流動性欠如": {"char": "板", "prio": 140},
+        "低ボラ": {"char": "凪", "prio": 150},
+        "RSIペナルティ": {"char": "熱", "prio": 160},
+    }
+
+    def generate_html_table(data_frame, title):
+        if data_frame.empty:
+            return ""
+        header_html = "".join(
+            [
+                f'<th class="has-tooltip" data-tooltip="{h[1]}" style="width:{h[4]}; min-width:{h[3]}; text-align:{h[2]};">{h[1].replace(chr(10), "<br>")}</th>'
+                for h in HEADER_MAP
+            ]
+        )
+        rows_html = []
+        raw_data_map = {d["code"]: d for d in st.session_state.analyzed_data}
+        for _, row in data_frame.iterrows():
+            bg_class = ""
+            if row.get("is_low_liquidity"):
+                bg_class = "bg-low-liquidity"
+            elif row.get("is_aoteng"):
+                bg_class = "bg-aoteng"
+            elif row.get("score", 0) >= 75:
+                bg_class = "bg-triage-high"
+
+            if "bg-triage-high" not in bg_class and "color:red" in str(
+                row["score_disp"]
+            ):
+                bg_class = "bg-triage-high"
+
+            row_cells = []
+            for col_key, _, col_align, _, _ in HEADER_MAP:
+                cell_data = row[col_key]
+                if col_key == "name":
+                    badges_html = ""
+                    raw_row = raw_data_map.get(row["code"])
+                    if raw_row and "score_factors" in raw_row:
+                        factors = raw_row["score_factors"]
+                        pos = []
+                        neg = []
+                        for f_key, f_val in factors.items():
+                            if f_val == 0 or f_key == "基礎点" or "合計" in f_key:
+                                continue
+                            if f_key in FACTOR_META:
+                                meta = FACTOR_META[f_key]
+                                item = {
+                                    "char": meta["char"],
+                                    "val": f_val,
+                                    "name": f_key,
+                                }
+                                if f_val > 0:
+                                    pos.append(item)
+                                else:
+                                    neg.append(item)
+                        pos.sort(key=lambda x: x["val"], reverse=True)
+                        neg.sort(key=lambda x: x["val"])
+                        final_badges = pos + neg
+                        spans = []
+                        for b in final_badges:
+                            cls = "badge-plus" if b["val"] > 0 else "badge-minus"
+                            spans.append(
+                                f'<span class="factor-badge {cls}" title="{b["name"]}: {b["val"]:+}">{b["char"]}</span>'
+                            )
+                        if spans:
+                            badges_html = (
+                                f'<div class="badge-container">{"".join(spans)}</div>'
+                            )
+                    cell_html = f'<td class="{bg_class} td-{col_align}">{cell_data}{badges_html}</td>'
+                elif col_key == "comment":
+                    cell_html = f'<td class="{bg_class} td-{col_align}"><div class="comment-scroll-box">{cell_data}</div></td>'
+                else:
+                    cell_html = (
+                        f'<td class="{bg_class} td-{col_align}">{cell_data}</td>'
+                    )
+                row_cells.append(cell_html)
+            rows_html.append(f"<tr>{''.join(row_cells)}</tr>")
+        return f"""
+        <h4 style="margin-top: 1.5rem; margin-bottom: 0.5rem;">{title} ({len(data_frame)}件)</h4>
+        <div class="table-container">
+            <table class="ai-table">
+                <thead><tr>{header_html}</tr></thead>
+                <tbody>{"".join(rows_html)}</tbody>
+            </table>
+        </div>
+        """
+
+    df_high = df[df["score"] >= 75].index
+    df_mid = df[(df["score"] >= 50) & (df["score"] < 75)].index
+    df_low = df[df["score"] < 50].index
+
+    if not df_high.empty:
+        st.markdown(
+            generate_html_table(df.loc[df_high], "【🥇 最優位】75点以上"),
+            unsafe_allow_html=True,
+        )
+    if not df_mid.empty:
+        st.markdown(
+            generate_html_table(df.loc[df_mid], "【✅ 分析推奨】50点以上75点未満"),
+            unsafe_allow_html=True,
+        )
+    if not df_low.empty:
+        st.markdown(
+            generate_html_table(df.loc[df_low], "【⚠️ リスク高】50点未満"),
+            unsafe_allow_html=True,
+        )
+
+    st.markdown("---")
+    st.markdown("【アイの独り言】")
+    st.markdown(st.session_state.ai_monologue)
+
+    with st.expander("詳細なスコア内訳（透明性向上）"):
+        st.subheader("銘柄ごとのスコア要因")
+        raw_data_map = {d["code"]: d for d in st.session_state.analyzed_data}
+        for index, row in df.iterrows():
+            raw_row = raw_data_map.get(row["code"])
+            if raw_row:
                 st.markdown(
-                    f"<div style='text-align:center; font-size:22px; font-weight:bold; margin-bottom:10px;'>🛡️ 漢字特訓：{str(q.get('q', '')).replace('検索', '').strip()}</div>",
+                    f"**No.{index + 1} - {row['name']} ({row['code']}) - 総合点: {row['score']:.0f}**",
                     unsafe_allow_html=True,
                 )
-            else:
-                st.markdown(f"### {en_disp}")
-                if jp_disp:
-                    st.markdown(f"**{jp_disp}**")
-        else:
-            with st.container(border=True):  # 原本一括編集
-                st.markdown(f"### 🛠️ 原本一括編集 (ID: {target_id})")
-                c1, c2 = st.columns(2)
-                e_cat = c1.text_input("カテゴリ", value=cat, key=f"bk_cat_{idx}")
-                e_sub = c2.text_input("サブ", value=sub_cat, key=f"bk_sub_{idx}")
-                e_q = st.text_input("問題本文", value=q.get("q", ""), key=f"bk_q_{idx}")
-                c3, c4 = st.columns([0.3, 0.7])
-                e_rank = c3.text_input("ランク", value=rank_raw, key=f"bk_r_{idx}")
-                e_a = c4.text_input("正解", value=ans_raw, key=f"bk_a_{idx}")
-
-                # 🌟 新規追加：ヒントとダミー案の編集欄
-                c5, c6 = st.columns(2)
-                e_h = c5.text_input("ヒント", value=q.get("h", ""), key=f"bk_h_{idx}")
-                e_dummy = c6.text_input(
-                    "ダミー案", value=q.get("dummy", ""), key=f"bk_d_{idx}"
-                )
-
-                if st.button(
-                    "🚀 原本を更新",
-                    key=f"bk_save_{idx}",
-                    type="primary",
-                    use_container_width=True,
-                ):
-                    # 🌟 取得したヒントとダミーも保存データに含める
-                    new_d = {
-                        "category": e_cat,
-                        "sub_cat": e_sub,
-                        "rank": e_rank,
-                        "q": e_q,
-                        "a": e_a,
-                        "h": e_h,
-                        "p_dummy": e_dummy,
-                    }
-                    if update_question_fields_batch(target_id, new_d):
-                        st.cache_data.clear()
-                        st.success("✅ 更新完了")
-                        time.sleep(0.5)
-                        st.rerun()
-
-        # ---------------------------------------------------------
-        # ✍️ 解答エリア
-        # ---------------------------------------------------------
-        if is_kanji:
-            # --- 漢字特訓モード（累計100点演出） ---
-            st.markdown(
-                r"<style>canvas.stCanvas { background-color: #ffffff !important; border: 1px solid #ddd !important; border-radius: 4px; width: 230px !important; height: 230px !important; }</style>",
-                unsafe_allow_html=True,
-            )
-            chars = list(ans_raw)
-            if "kj_scores" not in st.session_state or st.session_state.get(
-                "kj_q_id"
-            ) != q.get("q"):
-                st.session_state.kj_scores = {i: 0 for i in range(len(chars))}
-                st.session_state.kj_q_id = q.get("q")
-            cols_kj = st.columns(len(chars))
-            for i, char in enumerate(chars):
-                with cols_kj[i]:
-                    stroke_setting = q.get(f"strokes{i + 1}")
-                    if not (stroke_setting and str(stroke_setting).strip().isdigit()):
-                        st.session_state.kj_scores[i] = 100
+                if "score_factors" in raw_row:
+                    st.markdown("##### ➕ 加点要因")
+                    for k, v in raw_row["score_factors"].items():
+                        if k == "基礎点" or v > 0:
+                            color = "green" if v > 0 else "black"
+                            st.markdown(
+                                f'<p style="color:{color}; margin: 0; padding: 0 0 0 15px; font-weight: bold;">{k}: {v:+.0f}点</p>',
+                                unsafe_allow_html=True,
+                            )
+                    st.markdown("##### ➖ 減点要因")
+                    has_minus = False
+                    for k, v in raw_row["score_factors"].items():
+                        if "合計" in k:
+                            continue
+                        if v < 0:
+                            st.markdown(
+                                f'<p style="color:#800000; margin: 0; padding: 0 0 0 15px; font-weight: bold;">{k}: {v:+.0f}点</p>',
+                                unsafe_allow_html=True,
+                            )
+                            has_minus = True
+                    if not has_minus:
                         st.markdown(
-                            f"<div style='text-align:center; color:#ddd; font-size:60px; height:230px; display:flex; align-items:center; justify-content:center;'>{char}</div>",
+                            '<p style="color:#666; margin: 0; padding: 0 0 0 15px;">- 該当なし</p>',
                             unsafe_allow_html=True,
                         )
-                        continue
-                    sc_val = st.session_state.kj_scores[i]
-                    # 記憶に応じた透明度変化
-                    opacity = 0.15 if sc_val == 34 else (0.0 if sc_val == 66 else 1.0)
-                    st.markdown(
-                        f"<div style='text-align:center; font-weight:bold; opacity:{opacity}; transition: opacity 0.5s;'>{char} ({sc_val}%)</div>",
-                        unsafe_allow_html=True,
-                    )
-                    with st.container(border=True):
-                        st.markdown(
-                            f"<div style='text-align:center;'><div style='font-size:55px; font-family:serif; opacity:{opacity};'>{char}</div><div style='font-size:10px;'>{stroke_setting}画</div></div>",
-                            unsafe_allow_html=True,
-                        )
-                        st.progress(sc_val / 100)
-                        if sc_val < 100:
-                            r_key = st.session_state.get(f"reset_{idx}_{i}", 0)
-                            cv_res = st_canvas(
-                                stroke_width=8,
-                                stroke_color="#000000",
-                                height=230,
-                                width=230,
-                                key=f"kj_cv_{idx}_{i}_{r_key}",
-                                display_toolbar=False,
-                                background_color="#ffffff",
-                                update_streamlit=True,
-                            )
-                            b1, b2 = st.columns(2)
-                            if b1.button(
-                                "📮 判定", key=f"sc_{idx}_{i}", use_container_width=True
-                            ):
-                                s_p, _ = get_kanji_score(cv_res, char, stroke_setting)
-                                if s_p == 100:
-                                    st.session_state.kj_scores[i] = 100
-                                elif s_p > 0:  # 累計加算ロジック
-                                    if sc_val == 0:
-                                        st.session_state.kj_scores[i] = 34
-                                    elif sc_val == 34:
-                                        st.session_state.kj_scores[i] = 66
-                                    elif sc_val == 66:
-                                        st.session_state.kj_scores[i] = 100
-                                queue_sound("correct.mp3" if s_p > 0 else "wrong.mp3")
-                                st.rerun()
-                            if b2.button(
-                                "🧽", key=f"cl_{idx}_{i}", use_container_width=True
-                            ):
-                                st.session_state[f"reset_{idx}_{i}"] = r_key + 1
-                                st.rerun()
-                        else:
-                            st.success("OK!")
-            all_clear = all(v == 100 for v in st.session_state.kj_scores.values())
+                st.markdown("---")
 
-        else:
-            # --- 英語・パズルモード（ホワイトボード機能） ---
-            all_text = str(q)
+    st.markdown(
+        """
+    <br>
+    <div style="border: 1px solid #ffcccc; background-color: #fff5f5; padding: 15px; border-radius: 5px; color: #d32f2f; font-size: 13px; line-height: 1.6;">
+        <h5 style="margin-top: 0; color: #d32f2f;">【注意事項】</h5>
+        本アプリは研究・検証目的の内部ツールです。<br>
+        特定の銘柄の売買を推奨するものではなく、実際の投資判断や売買に用いることを目的としていません。
+    </div>
+    """,
+        unsafe_allow_html=True,
+    )
 
-            # 🌟 基本のキーワード
-            target_kws = ["数学", "物理", "化学", "地学"]
-            is_m_style = any(kw in all_text for kw in target_kws)
-
-            # 🌟 「計算」というワードでの判定（ヒントも含む）
-            # ただし、歴史（社会）という文字がA列にある時だけは「計算」で広げない
-            if "計算" in all_text:
-                if "歴史" not in cat and "社会" not in cat:
-                    is_m_style = True
-
-            # 2. 数値の決定
-            c_h = 450 if is_m_style else 250
-
-            # 🌟 2. ツール選択（キャンバスの「前」にあるので切り替えが速い）
-            mode = st.radio(
-                "Tool",
-                options=["✏️", "🧽"],
-                horizontal=True,
-                key=f"msel_{idx}",
-                label_visibility="collapsed",
-            )
-
-            # 色と太さの即時確定
-            current_color = "#000000" if "✏️" in mode else "#ffffff"
-            current_width = 3 if "✏️" in mode else 35
-
-            # 3. キャンバス本体
-            st_canvas(
-                fill_color="rgba(255, 165, 0, 0.3)",
-                stroke_width=current_width,
-                stroke_color=current_color,
-                height=c_h,
-                width=1050,
-                drawing_mode="freedraw",
-                key=f"dyn_cv_{idx}",
-                update_streamlit=True,
-            )
-
-            # 4. CSSで「下方向（ゴミ箱の横）」へ移動させる
-            # position: relative で、キャンバスの下からゴミ箱の高さまで「下ろして」固定します
-            st.markdown(
-                f"""
-                <style>
-                div.st-key-msel_{idx} {{
-                    position: relative !important;
-                    top: {c_h - 18}px !important;  /* 👈 キャンバスの高さ分だけ下にずらす */
-                    left: 145px !important;       /* ⬅️ ゴミ箱の右側へ */
-                    z-index: 1000 !important;
-                    height: 0px !important;       /* 後の要素が間延びしないように */
-                    margin-bottom: -30px !important;
-                }}
-                /* ボタンを横並びにする */
-                div.st-key-msel_{idx} div[data-testid="stRadio"] > div {{
-                    display: flex !important;
-                    flex-direction: row !important;
-                    gap: 15px !important;
-                }}
-                </style>
-            """,
-                unsafe_allow_html=True,
-            )
-
-            # 形式判定
-            # 🌟 修正：p_check（ボタンの元ネタ）を、正解(ans_raw)ではなく
-            # カッコ内(clean_opts)から作るように変更します。
-            # これにより「不要な語」がボタンとして残ります。
-
-            m_in = re.search(r"[\(（](.*?)[\)）]", q.get("q", ""))
-            raw_in = m_in.group(1) if m_in else ""
-            clean_opts = [
-                opt.strip() for opt in re.split(r"[/／]", raw_in) if opt.strip()
-            ]
-
-            p_check = clean_opts  # 👈 ここが最大のポイントです
-
-            is_scramble = "英語" in cat and len(p_check) > 1
-            is_2choice = not is_scramble and len(clean_opts) == 2
-            is_scramble = "英語" in cat and len(p_check) > 1
-            m_in = re.search(r"[\(（](.*?)[\)）]", q.get("q", ""))
-            raw_in = m_in.group(1) if m_in else ""
-            clean_opts = [
-                opt.strip() for opt in re.split(r"[/／]", raw_in) if opt.strip()
-            ]
-            is_2choice = not is_scramble and len(clean_opts) == 2
-
-            def f_clean(t):
-                return (
-                    re.sub(
-                        r"[\$ ,.\?!\(\)/／「」『』（） \s　]", "", clean_text(str(t))
-                    )
-                    .lower()
-                    .strip()
-                )
-
-            if st.session_state.get("show_result"):
-                # --- 結果発表バナー ---
-                # 🌟 修正：ans_raw_str ではなく、確実に存在する ans_raw (308行目) を使用します
-                display_ans = (
-                    to_pretty_display(str(ans_raw))
-                    .replace("/", " ")
-                    .replace(" ,", ",")
-                    .strip()
-                )
-
-                if st.session_state.last_is_correct:
-                    st.markdown(
-                        f"""<div style="background-color: #d4edda; color: #155724; padding: 12px 18px; border-radius: 8px; border-left: 8px solid #28a745; display: flex; align-items: center; flex-wrap: wrap; gap: 15px; margin-bottom: 15px;">
-                            <span style='font-size: 1.5rem; font-weight: bold; white-space: nowrap;'>⭕️ 正解！</span>
-                            <span style='font-size: 2.2rem; font-weight: 900; line-height: 1.1;'>{display_ans}</span>
-                        </div>""",
-                        unsafe_allow_html=True,
-                    )
-                else:
-                    st.markdown(
-                        f"""<div style="background-color: #f8d7da; color: #721c24; padding: 12px 18px; border-radius: 8px; border-left: 8px solid #dc3545; display: flex; align-items: center; flex-wrap: wrap; gap: 15px; margin-bottom: 15px;">
-                            <span style='font-size: 1.5rem; font-weight: bold; white-space: nowrap;'>❌ 残念！正解は：</span>
-                            <span style='font-size: 2.2rem; font-weight: 900; line-height: 1.1;'>{display_ans}</span>
-                        </div>""",
-                        unsafe_allow_html=True,
-                    )
-
-            elif is_scramble:
-                # [A] 英語並べ替え（表示エリア）
-                u_ans = st.session_state.get("user_ans_order", [])
-                st.info(
-                    f"解答: {' '.join([clean_text(w) for w in u_ans]) if u_ans else '...'}"
-                )
-
-                if st.session_state.current_opts is None:
-                    st.session_state.current_opts = random.sample(p_check, len(p_check))
-
-                # 🌟 単語ボタンの表示（ここを1回だけにすることで増殖を防ぎます）
-                with st.container():
-                    cols_sc = st.columns(8)
-                    for j, word in enumerate(st.session_state.current_opts):
-                        used_count = u_ans.count(word)
-                        total_count = st.session_state.current_opts.count(word)
-                        if used_count < total_count:
-                            if cols_sc[j % 8].button(
-                                to_pretty_display(word),
-                                key=f"scr_btn_{target_id}_{idx}_{j}_v_final_fix",
-                                use_container_width=True,
-                            ):
-                                st.session_state["user_ans_order"].append(word)
-                                st.rerun()
-
-            elif is_2choice:
-                # [B] 英語2択
-                if st.session_state.current_opts is None:
-                    st.session_state.current_opts = random.sample(clean_opts, 2)
-                cols = st.columns(2)
-                for j, word in enumerate(st.session_state.current_opts):
-                    if cols[j].button(
-                        to_pretty_display(word),
-                        key=f"t2_{idx}_{j}",
-                        use_container_width=True,
-                    ):
-                        ok = f_clean(word) == f_clean(
-                            ans_raw.split("/")[0].split("／")[0]
-                        )
-
-                        # 🌟🌟🌟 ミス記録の追加部分 🌟🌟🌟
-                        if not ok:
-                            if "today_wrong_cards" not in st.session_state:
-                                st.session_state.today_wrong_cards = []
-                            if q not in st.session_state.today_wrong_cards:
-                                st.session_state.today_wrong_cards.append(q)
-                                st.toast(f"ミスを記録中... ID:{target_id}")
-
-                        if target_id not in st.session_state.attempted_indices:
-                            if ok:
-                                st.session_state.correct_count += 1
-                            st.session_state.session_results.append(
-                                {"q": q["q"], "cat": cat, "correct": ok}
-                            )
-                            st.session_state.attempted_indices.add(target_id)
-                        (
-                            st.session_state.last_is_correct,
-                            st.session_state.show_result,
-                        ) = ok, True
-                        queue_sound("correct.mp3" if ok else "wrong.mp3")
-                        st.rerun()
-            else:
-                # [C] 4択クイズ
-                if not st.session_state.get("show_options"):
-                    if st.button(
-                        "🤔 答えを表示する", key=f"sh_{idx}", use_container_width=True
-                    ):
-                        cv = clean_text(ans_raw.split("/")[0].split("／")[0])
-                        all_d = [
-                            clean_text(d)
-                            for d in re.split(r"[,、]", str(q.get("dummy", "")))
-                            if d.strip() and clean_text(d) != cv
-                        ]
-                        raw_opts = [cv] + random.sample(all_d, min(len(all_d), 3))
-                        st.session_state.current_opts = random.sample(
-                            raw_opts, len(raw_opts)
-                        )
-                        st.session_state.show_options = True
-                        st.rerun()
-                else:
-                    cols = st.columns(len(st.session_state.current_opts))
-                    for j, word in enumerate(st.session_state.current_opts):
-                        if cols[j].button(
-                            to_pretty_display(word),
-                            key=f"f4_{idx}_{j}",
-                            use_container_width=True,
-                        ):
-                            ok = f_clean(word) == f_clean(
-                                ans_raw.split("/")[0].split("／")[0]
-                            )
-
-                            # 🌟🌟🌟 ミス記録の追加部分 🌟🌟🌟
-                            if not ok:
-                                if "today_wrong_cards" not in st.session_state:
-                                    st.session_state.today_wrong_cards = []
-                                if q not in st.session_state.today_wrong_cards:
-                                    st.session_state.today_wrong_cards.append(q)
-                                    st.toast(f"ミスを記録中... ID:{target_id}")
-
-                            if target_id not in st.session_state.attempted_indices:
-                                if ok:
-                                    st.session_state.correct_count += 1
-                                st.session_state.session_results.append(
-                                    {"q": q["q"], "cat": cat, "correct": ok}
-                                )
-                                st.session_state.attempted_indices.add(target_id)
-                            (
-                                st.session_state.last_is_correct,
-                                st.session_state.show_result,
-                            ) = ok, True
-                            queue_sound("correct.mp3" if ok else "wrong.mp3")
-                            st.rerun()
-
-        # 🌟 5. 最下部ナビゲーション
-        st.markdown("---")
-        n_col = st.columns([0.5, 1.0, 1.0, 1.0, 2.5])
-        with n_col[0]:
-            if st.button("💣", key=f"db_del_{idx}"):
-                st.session_state.confirm_delete = True
-                st.rerun()
-        with n_col[1]:
-            if st.button("⬅️ 前へ", key=f"nv_p_{idx}", use_container_width=True):
-                if st.session_state.index > 0:
-                    st.session_state.index -= 1
-                    st.session_state.active_q_id = None
-                    st.rerun()
-        with n_col[2]:
-            if not st.session_state.get("show_result", False):
-                if st.button(
-                    "⏩ スキップ", key=f"nv_s_{idx}", use_container_width=True
-                ):
-                    st.session_state.index += 1
-                    st.session_state.active_q_id = None
-                    st.rerun()
-            else:
-                if st.button(
-                    "🔄 もう一度", key=f"retry_{idx}", use_container_width=True
-                ):
-                    st.session_state.show_result = False
-                    st.session_state.show_options = False
-                    st.session_state.current_opts = None
-                    st.session_state["user_ans_order"] = []
-                    st.rerun()
-        with n_col[3]:  # 並べ替え消去
-            if not is_kanji and is_scramble and not st.session_state.show_result:
-                if st.button("🔙 1つ消す", key=f"nv_b_{idx}", use_container_width=True):
-                    if st.session_state.get("user_ans_order"):
-                        st.session_state["user_ans_order"].pop()
-                        st.rerun()
-        with n_col[4]:
-            if is_kanji:  # 漢字完了
-                if st.button(
-                    "✅ 完了！次へ",
-                    key=f"kj_n_{idx}",
-                    use_container_width=True,
-                    type="primary" if all_clear else "secondary",
-                ):
-                    # 🌟🌟🌟 ミス記録の追加部分 🌟🌟🌟
-                    if not all_clear:
-                        if "today_wrong_cards" not in st.session_state:
-                            st.session_state.today_wrong_cards = []
-                        if q not in st.session_state.today_wrong_cards:
-                            st.session_state.today_wrong_cards.append(q)
-                            st.toast(f"ミスを記録中... ID:{target_id}")
-
-                    if target_id not in st.session_state.attempted_indices:
-                        st.session_state.correct_count += 1
-                        st.session_state.session_results.append(
-                            {"q": q["q"], "cat": cat, "correct": True}
-                        )
-                        st.session_state.attempted_indices.add(target_id)
-                    st.session_state.index += 1
-                    st.session_state.active_q_id = None
-                    st.rerun()
-
-            else:  # 英語確定
-                if not st.session_state.get("show_result", False) and is_scramble:
-                    if st.button(
-                        "✅ 確定する",
-                        type="primary",
-                        key=f"nv_fix_{idx}",
-                        use_container_width=True,
-                    ):
-                        u_ans_list = st.session_state.get("user_ans_order", [])
-                        u_str = "".join([f_clean(w) for w in u_ans_list])
-                        a_str = f_clean(ans_raw)
-                        ok = u_str == a_str
-
-                        # 🌟 修正1: 保存先を確実に確保
-                        if "today_wrong_cards" not in st.session_state:
-                            st.session_state.today_wrong_cards = []
-
-                        # 🌟 修正2: 不正解なら無条件でリストへ追加（重複チェック付き）
-                        if not ok:
-                            # デバッグ表示（もし保存が動いたら画面上に一瞬出ます）
-                            st.toast(f"ミスを記録中... ID:{target_id}")
-
-                            # カード(q)をリストに保存
-                            if q not in st.session_state.today_wrong_cards:
-                                st.session_state.today_wrong_cards.append(q)
-
-                        # 統計情報の更新
-                        if target_id not in st.session_state.attempted_indices:
-                            if ok:
-                                st.session_state.correct_count += 1
-                            st.session_state.session_results.append(
-                                {"q": q["q"], "cat": cat, "correct": ok}
-                            )
-                            st.session_state.attempted_indices.add(target_id)
-
-                        st.session_state.last_is_correct = ok
-                        st.session_state.show_result = True
-                        queue_sound("correct.mp3" if ok else "wrong.mp3")
-                        st.rerun()
-
-                elif st.session_state.get("show_result", False):
-                    # 結果表示中の「次へ」ボタン
-                    if st.button(
-                        "次へ ➡️",
-                        type="primary",
-                        key=f"nv_next_{idx}",
-                        use_container_width=True,
-                    ):
-                        # 🌟 ここでの自動削除（remove）も行いません。
-                        # 通常モードでの解き直し正解によってリストから消えることはありません。
-
-                        st.session_state.index += 1
-                        st.session_state.active_q_id = None
-                        st.rerun()
-
-        st.caption(f"ID: {target_id}")
-
-        if st.session_state.get("confirm_delete", False):
-            st.warning("完全に削除しますか？")
-            d_y, d_n = st.columns(2)
-            if d_y.button(
-                "はい、削除",
-                key=f"del_y_{idx}",
-                type="primary",
-                use_container_width=True,
-            ):
-                if delete_question_by_id(target_id):
-                    st.session_state.questions.pop(idx)
-                    st.cache_data.clear()
-                    st.session_state.confirm_delete = False
-                    st.session_state.active_q_id = None
-                    st.rerun()
-            if d_n.button("キャンセル", key=f"del_n_{idx}", use_container_width=True):
-                st.session_state.confirm_delete = False
-                st.rerun()
-
-# 🔊 最後の一行
-execute_queued_sound()
+# --- stock_analyzer.py の一番下に追記 ---
+if st.session_state.error_messages:
+    st.error("⚠️ 内部エラーが発生しています（隠れていたメッセージ）:")
+    for msg in st.session_state.error_messages:
+        st.write(msg)
