@@ -77,44 +77,47 @@ def clean_text(text):
 
 # --- [1] 作業員：実際にシートを書き換える担当 ---
 def sync_timer_to_row2(added_seconds):
+    """
+    スプレッドシートの2行目（A2:D2）を更新し、アプリ内の表示変数も最新にする関数。
+    """
     try:
         from datetime import datetime
         import re
         import streamlit as st
 
+        # 1. 準備：Googleシートに接続
         creds = get_creds()
-        # シートを開く
         sh = gspread.authorize(creds).open("study_stats_db").worksheet("timer")
 
-        # 1. 2行目のデータを取得（A2:D2に相当）
+        # 2. 現在の2行目のデータを取得
         row_data = sh.row_values(2)
 
-        # 2. 日付の取得と形式統一
+        # 3. 日付の取得と形式統一（今日の日付と比較するため）
         raw_sheet_date = str(row_data[0]) if len(row_data) > 0 else ""
         sheet_date = raw_sheet_date.replace("-", "/").strip()
         today_str = datetime.now().strftime("%Y/%m/%d")
 
-        # 3. 数値を読み取る（安全な変換関数）
+        # 4. 数値を安全に読み取るための補助関数
         def safe_int(val):
             if not val:
                 return 0
             num_str = re.sub(r"[^0-9]", "", str(val))
             return int(num_str) if num_str else 0
 
-        # B列: Today, C列: Total を読み込み
+        # B列: Today, C列: Total を数値として読み込み
         current_today_total = safe_int(row_data[1]) if len(row_data) > 1 else 0
         current_total = safe_int(row_data[2]) if len(row_data) > 2 else 0
 
-        # 4. 日付チェック：今日でない場合は「Today」だけ 0 にリセット
+        # 5. 日付チェック：今日でない場合は「Today」だけ 0 にリセット（全累計は維持）
         if sheet_date != "" and sheet_date != today_str:
             print(f"🌅 日付変更を検知: {sheet_date} -> {today_str} (Todayをリセット)")
             current_today_total = 0
 
-        # 5. 今回の勉強時間を加算
+        # 6. 今回の勉強時間を加算して新しい合計を出す
         new_today_total = current_today_total + added_seconds
         new_total = current_total + added_seconds
 
-        # 🚀 6. A2:D2 の範囲を強制上書き
+        # 🚀 7. Googleスプレッドシートの A2:D2 を強制上書き（行は増やさない）
         sh.update(
             range_name="A2:D2",
             values=[
@@ -127,18 +130,22 @@ def sync_timer_to_row2(added_seconds):
             ],
         )
 
-        # ✨ 7. 【最重要】アプリ内の表示用変数も最新に書き換える
-        # これにより、リロードしなくても画面の数字がパッと変わります
+        # ✨ 8. アプリ内の表示用変数（箱）を最新の数字に書き換える
         st.session_state.daily_seconds = new_today_total
         st.session_state.total_seconds = new_total
 
         print(
             f"✅ 同期完了: Today={new_today_total}s, Total={new_total}s (+{added_seconds}s)"
         )
+
+        # 🔄 9. 画面を強制的に再読み込みして、最新の数字をブラウザに表示させる
+        st.rerun()
+
         return new_today_total
 
     except Exception as e:
         print(f"❌ Timer Error: {e}")
+        # エラー時は現在のセッションの値を守るため、そのままの値を返す
         return st.session_state.get("daily_seconds", 0)
 
 
