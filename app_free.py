@@ -79,6 +79,7 @@ def clean_text(text):
 def sync_timer_to_row2(added_seconds):
     """
     スプレッドシートの2行目（A2:D2）を更新し、アプリ内の表示変数も最新にする関数。
+    インデックス修正版：0=Date(A), 1=Today(B), 2=Total(C)
     """
     try:
         from datetime import datetime
@@ -92,60 +93,61 @@ def sync_timer_to_row2(added_seconds):
         # 2. 現在の2行目のデータを取得
         row_data = sh.row_values(2)
 
-        # 3. 日付の取得と形式統一（今日の日付と比較するため）
-        raw_sheet_date = str(row_data[0]) if len(row_data) > 0 else ""
-        sheet_date = raw_sheet_date.replace("-", "/").strip()
-        today_str = datetime.now().strftime("%Y/%m/%d")
-
-        # 4. 数値を安全に読み取るための補助関数
+        # 3. 数値を安全に読み取るための補助関数
         def safe_int(val):
             if not val:
                 return 0
             num_str = re.sub(r"[^0-9]", "", str(val))
             return int(num_str) if num_str else 0
 
-        # B列: Today, C列: Total を数値として読み込み
+        # 🔥 修正ポイント：インデックスを0始まりの正しい列番号に変更
+        # A列(日付): index 0
+        raw_sheet_date = str(row_data[0]) if len(row_data) > 0 else ""
+        sheet_date = raw_sheet_date.replace("-", "/").strip()
+
+        # B列(Today): index 1
         current_today_total = safe_int(row_data[1]) if len(row_data) > 1 else 0
+
+        # C列(Total): index 2
         current_total = safe_int(row_data[2]) if len(row_data) > 2 else 0
 
-        # 5. 日付チェック：今日でない場合は「Today」だけ 0 にリセット（全累計は維持）
+        today_str = datetime.now().strftime("%Y/%m/%d")
+
+        # 4. 日付チェック：今日でない場合は「Today」だけ 0 にリセット
         if sheet_date != "" and sheet_date != today_str:
             print(f"🌅 日付変更を検知: {sheet_date} -> {today_str} (Todayをリセット)")
             current_today_total = 0
 
-        # 6. 今回の勉強時間を加算して新しい合計を出す
+        # 5. 加算処理
         new_today_total = current_today_total + added_seconds
         new_total = current_total + added_seconds
 
-        # 🚀 7. Googleスプレッドシートの A2:D2 を強制上書き（行は増やさない）
+        # 🚀 6. A2:D2 を上書き
         sh.update(
             range_name="A2:D2",
             values=[
                 [
-                    today_str,  # A: Date
-                    int(new_today_total),  # B: Today
-                    int(new_total),  # C: Total
-                    int(added_seconds),  # D: Last Added
+                    today_str,  # A: Date (index 0)
+                    int(new_today_total),  # B: Today (index 1)
+                    int(new_total),  # C: Total (index 2)
+                    int(added_seconds),  # D: Last Added (index 3)
                 ]
             ],
         )
 
-        # ✨ 8. アプリ内の表示用変数（箱）を最新の数字に書き換える
+        # ✨ 7. アプリ内の表示用変数も更新
         st.session_state.daily_seconds = new_today_total
         st.session_state.total_seconds = new_total
 
-        print(
-            f"✅ 同期完了: Today={new_today_total}s, Total={new_total}s (+{added_seconds}s)"
-        )
+        print(f"✅ 同期完了: Today={new_today_total}s, Total={new_total}s")
 
-        # 🔄 9. 画面を強制的に再読み込みして、最新の数字をブラウザに表示させる
+        # 🔄 8. 画面再描画
         st.rerun()
 
         return new_today_total
 
     except Exception as e:
         print(f"❌ Timer Error: {e}")
-        # エラー時は現在のセッションの値を守るため、そのままの値を返す
         return st.session_state.get("daily_seconds", 0)
 
 
@@ -180,7 +182,7 @@ def run_auto_timer_logic():
             # 書き込んだのでメモをリセット
             st.session_state.unsynced_seconds = 0
             st.session_state.last_sync_time = now
-            print(f"📡 Googleへまとめて送信しました。")
+            print("📡 Googleへまとめて送信しました。")
         else:
             print(
                 f"⏳ アプリ内で蓄積中... (現在: {st.session_state.unsynced_seconds}s)"
@@ -1204,11 +1206,12 @@ def init_session():
     """
     アプリの状態管理変数を一括初期化。
     """
+    # 1. 初期値の定義
     defaults = {
         "questions": [],
         "index": 0,
         "mode": None,
-        "show_help_persistence": False,  # 💡 ヘルプの状態を保持する変数
+        "show_help_persistence": False,
         "show_options": False,
         "show_result": False,
         "last_is_correct": False,
@@ -1227,40 +1230,47 @@ def init_session():
         "is_cheating_flagged": False,
         "is_saving": False,
         "delete_list": [],
+        # 🌟 ここにも初期値を入れておくと安心
+        "daily_seconds": 0,
+        "total_seconds": 0,
     }
-    # --- init_session の一番下にある `if "daily_seconds" ...` の部分をこれに差し替え ---
-    if (
-        "daily_seconds" not in st.session_state
-        or "total_seconds" not in st.session_state
-    ):
+
+    # 🔥 2. 【重要】defaults をループで回して session_state に登録（これでRuffの警告が消えます）
+    for k, v in defaults.items():
+        if k not in st.session_state:
+            st.session_state[k] = v
+
+    # 3. スプレッドシートから最新の学習時間を読み込む（初回のみ）
+    # is_timer_loaded というフラグを使って、何度もシートを読みに行くのを防ぎます
+    if "is_timer_loaded" not in st.session_state:
         try:
-            # 1. シートの2行目をまるごと読み込む
+            import re
+
             creds = get_creds()
             sh = gspread.authorize(creds).open("study_stats_db").worksheet("timer")
-            row2 = sh.row_values(2)  # [日付, Today, Total, LastAdded] が入ってくる
-
-            # 2. Today(B列:インデックス1) と Total(C列:インデックス2) を変数に入れる
-            # 数字以外（カンマなど）があっても大丈夫なように int() で保護
-            import re
+            row2 = sh.row_values(2)  # A=0:Date, B=1:Today, C=2:Total
 
             def safe_int(v):
                 s = re.sub(r"[^0-9]", "", str(v))
                 return int(s) if s else 0
 
+            # 正しいインデックス（B=1, C=2）で上書き
             st.session_state.daily_seconds = safe_int(row2[1]) if len(row2) > 1 else 0
             st.session_state.total_seconds = safe_int(row2[2]) if len(row2) > 2 else 0
 
+            # 読み込み完了フラグを立てる
+            st.session_state.is_timer_loaded = True
+
             print(
-                f"✅ 起動時にシートから読込成功: Today={st.session_state.daily_seconds}, Total={st.session_state.total_seconds}"
+                f"✅ 起動読込成功: Today={st.session_state.daily_seconds}, Total={st.session_state.total_seconds}"
             )
 
         except Exception as e:
-            # エラー時は0からスタート
-            st.session_state.daily_seconds = 0
-            st.session_state.total_seconds = 0
             print(f"⚠️ 起動読込エラー: {e}")
+            # エラー時は defaults の 0 がそのまま使われます
 
 
+# 関数の実行
 init_session()
 
 # タイマー：リアルタイム加算（240秒以内の活動を記録）
