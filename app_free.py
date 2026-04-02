@@ -4,13 +4,15 @@ from google import genai
 import datetime
 import time
 import requests
-import io
+
+# import io
 import re
 import numpy as np
 import random
 import hashlib
 import os
 import base64
+import yfinance as yf  # 追加
 
 # --- アイコン設定（オリジナル画像） ---
 ICON_URL = "https://raw.githubusercontent.com/soutori296/stock-analysis/main/aisan.png"
@@ -345,20 +347,23 @@ def fetch_with_retry(url, max_retry=3):
     }
 
     # Stooqの場合、まず「ポーランド本国」のトップページを訪れてクッキーを取得（人間らしさ）
+    #    if "stooq" in url:
+    #        try:
+    #            target_base = "https://stooq.pl/"
+    #            session.get(target_base, headers=headers, timeout=10)
+    #            time.sleep(random.uniform(1.5, 3.0))  # ページを読んでるふり
+    #            headers["Referer"] = "https://stooq.pl/q/d/"
+    #        except Exception:
+    #            pass
+
     if "stooq" in url:
-        try:
-            target_base = "https://stooq.pl/"
-            session.get(target_base, headers=headers, timeout=10)
-            time.sleep(random.uniform(1.5, 3.0))  # ページを読んでるふり
-            headers["Referer"] = "https://stooq.pl/q/d/"
-        except Exception:
-            pass
+        headers["Referer"] = "https://stooq.pl/q/d/"
 
     for attempt in range(max_retry):
         try:
             # 待機時間を「人間が操作する間隔」に設定
             wait_time = (
-                random.uniform(5.0, 9.0) if attempt > 0 else random.uniform(2.0, 4.0)
+                random.uniform(10.0, 20.0) if attempt > 0 else random.uniform(5.0, 8.0)
             )
             time.sleep(wait_time)
 
@@ -591,21 +596,51 @@ def get_kabutan_recent_history(code):
 
 
 # --- テクニカル指標ロジック (RCI/Divergence) ---
-def calculate_rci(series, period=9):
-    rci_values = []
-    n = period
-    date_ranks = np.arange(n, 0, -1)
-    for i in range(len(series)):
-        if i < n - 1:
-            rci_values.append(None)
-            continue
-        window = series.iloc[i - n + 1 : i + 1]
-        price_ranks = window.rank(method="first", ascending=False).values
-        d = price_ranks - date_ranks
-        d2_sum = np.sum(d**2)
-        rci = (1 - (6 * d2_sum) / (n**3 - n)) * 100
-        rci_values.append(rci)
-    return pd.Series(rci_values, index=series.index)
+def calculate_rci(series, period=26):
+    """
+    RCI(26)を計算する関数
+    株探の中期線(26)に準拠した仕様です。
+    """
+    # データを古い順に並べ替え
+    series = series.sort_index(ascending=True)
+
+    if len(series) < period:
+        return 0
+
+    # 直近の期間分を切り出す
+    window = series.tail(period)
+
+    # 日付の順位（1, 2, ..., 26）
+    date_ranks = np.arange(1, period + 1)
+
+    # 価格の順位（低い=1, 高い=26）※同値は平均順位
+    price_ranks = window.rank(method="average").values
+
+    # RCI公式
+    d = date_ranks - price_ranks
+    d2_sum = np.sum(d**2)
+    rci = (1 - (6 * d2_sum) / (period * (period**2 - 1))) * 100
+
+    return rci
+
+
+def calculate_rsi(series, period=14):
+    """
+    RSI(14)を計算する関数（列を返す修正版）
+    """
+    series = series.sort_index(ascending=True)
+    if len(series) <= period:
+        return pd.Series(50, index=series.index)  # データ不足時は50で埋めた列を返す
+
+    delta = series.diff()
+    gain = delta.where(delta > 0, 0).rolling(window=period).mean()
+    loss = -delta.where(delta < 0, 0).rolling(window=period).mean()
+
+    # ゼロ除算を避けて計算
+    rs = gain / loss
+    rsi = 100 - (100 / (1 + rs))
+
+    return rsi.fillna(50)  # 計算できない初期期間を50で埋める
 
 
 def check_bullish_divergence(df):
@@ -1103,33 +1138,34 @@ def calculate_score_and_logic(df, info, vol_ratio, status, market_ratio=100.0):
     df["SMA75"] = df["Close"].rolling(75).mean()
     df["Vol_SMA5"] = df["Volume"].rolling(5).mean()
 
-    # 指標計算
-    delta = df["Close"].diff()
-    gain = (delta.where(delta > 0, 0)).rolling(14).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
-    df["RSI"] = 100 - (100 / (1 + (gain / loss)))
-    df["RCI9"] = calculate_rci(df["Close"], period=9)
+    # --- 指標計算（最新修正版：RSIを列として保持） ---
+    # 1. RSIを列として算出し、データフレームに格納（ダイバージェンス判定用）
+    df["RSI"] = calculate_rsi(df["Close"], period=14)
+
+    # 2. 各判定で使う「最新の数値」を抽出
+    rsi_val = df["RSI"].iloc[-1]
+    rci_val = calculate_rci(df["Close"], period=26)  # 株探準拠の26日
 
     last = df.iloc[-1]
     prev = df.iloc[-2]
     curr_price = round(float(last["Close"]), 1)
     ma5, ma25, ma75 = last["SMA5"], last["SMA25"], last["SMA75"]
-    rsi_val = last["RSI"]
-    rci_val = last.get("RCI9", 0)
-    prev_rci = prev.get("RCI9", 0)
+
+    # 3. 前日RCI（好転判定用）を算出
+    prev_rci = calculate_rci(df["Close"].iloc[:-1], period=26)
+
     atr_smoothed = df["Close"].rolling(14).std().iloc[-1]
     vol_sma5_val = last["Vol_SMA5"]
 
-    # モメンタム
+    # モメンタム（直近5日の陽線確率）
     recent = df["Close"].diff().tail(5)
     up_days = int((recent > 0).sum())
     momentum_str = f"{(up_days / 5) * 100:.0f}%"
 
-    # --- 1. 鉄の掟 (Gatekeeper) 強制除外判定 (16個構成に修正済) ---
-    vol_sma5_val = last["Vol_SMA5"]
+    # --- 1. 鉄の掟 (Gatekeeper) 強制除外判定 ---
     is_trend_dead = curr_price < ma75
     is_supply_dead = (curr_price < prev["Close"]) and (vol_ratio >= 1.5)
-    is_short_trend_dead = curr_price < ma5 * 0.98  # 5MAを2%以上割り込み
+    is_short_trend_dead = curr_price < ma5 * 0.98
     is_illiquid = vol_sma5_val < 1000
 
     if is_trend_dead or is_supply_dead or is_short_trend_dead or is_illiquid:
@@ -1143,26 +1179,27 @@ def calculate_score_and_logic(df, info, vol_ratio, status, market_ratio=100.0):
         if is_illiquid:
             reasons.append("流動性欠如")
 
-        # 戻り値を16個に調整
         return (
-            0,  # 1: score
-            {"鉄の掟（除外）": -50},  # 2: factors
-            "⛔対象外",  # 3: strategy
-            0,  # 4: buy_target
-            0,  # 5: p_half
-            0,  # 6: p_full
-            0,  # 7: sl_ma
-            False,  # 8: is_aoteng
-            0,  # 9: sl_pct
-            rsi_val,  # 10: rsi_val
-            atr_smoothed,  # 11: atr_smoothed
-            " | ".join(reasons),  # 12: atr_comment
-            momentum_str,  # 13: momentum_str
-            rci_val,  # 14: rci_val
-            0,  # 15: oshime_price (追加)
-            0,  # 16: dd_abs_val (追加)
+            0,
+            {"鉄の掟（除外）": -50},
+            "⛔対象外",
+            0,
+            0,
+            0,
+            0,
+            False,
+            0,
+            rsi_val,
+            atr_smoothed,
+            " | ".join(reasons),
+            momentum_str,
+            rci_val,
+            0,
+            0,
         )
-    # --- 2. ダイバージェンス & RCI好転 & 青天井(完全独立判定) ---
+
+    # --- 2. ダイバージェンス & RCI好転 & 青天井 判定 ---
+    # ここで df["RSI"] を参照するため、列として存在している必要があります
     is_divergence = check_bullish_divergence(df)
     is_rci_reversal = (prev_rci < -80 and rci_val > prev_rci and rci_val > -80) or (
         prev_rci < -70 and rci_val > prev_rci + 10
@@ -1191,7 +1228,7 @@ def calculate_score_and_logic(df, info, vol_ratio, status, market_ratio=100.0):
     lookback_75_high = df["High"].iloc[:-1].tail(75).max()
     is_breakout = curr_price > lookback_75_high
 
-    # 急落判定
+    # 最大含損率(MDD)と急落判定
     dd_75 = df.tail(75).copy()
     max_1d_drop = dd_75["Close"].pct_change(1).min()
     max_3d_drop = dd_75["Close"].pct_change(3).min()
@@ -1199,8 +1236,6 @@ def calculate_score_and_logic(df, info, vol_ratio, status, market_ratio=100.0):
     is_plunge = (is_large and (max_1d_drop <= -0.04 or max_3d_drop <= -0.08)) or (
         not is_large and (max_1d_drop <= -0.07 or max_3d_drop <= -0.12)
     )
-
-    # 最大含損率(MDD)の計算
     dd_75["Peak"] = dd_75["Close"].cummax()
     dd_abs_val = ((dd_75["Close"] / dd_75["Peak"]) - 1).min() * 100
 
@@ -1225,32 +1260,19 @@ def calculate_score_and_logic(df, info, vol_ratio, status, market_ratio=100.0):
     oshime_price = 0
     if is_breakout:
         strategy = "🚀ブレイク"
-        # 押し目価格（5MA付近）は、R/R比の参考値や深い調整の目安として保持
         oshime_price = round(max(lookback_75_high, ma5), 1)
-
-        # 利確の基準を「現在値」に設定（上値追いモード）
         buy_target = curr_price
-
-        cat = get_market_cap_category(info.get("cap", 0))
-        # 損切の計算：現在値からATRの1.5倍、または最低1%の幅を持たせる
         atr_sl_calc = round(curr_price - max(atr_smoothed * 1.5, curr_price * 0.01), 1)
 
         if is_aoteng:
-            # --- 青天井モード：マニュアル通りのATR追随 ---
             max_high_today = df["High"].iloc[-1]
-            # 当日高値からATRの2.5倍の位置をストップラインとする
-            atr_trailing = max(0, max_high_today - (atr_smoothed * 2.5))
-            sl_ma = round(atr_trailing, 1)
-            p_full = sl_ma  # 目標値は設定せず、ストップラインを全利確の目安にする
-            p_half = 0  # 半分利確は設定せず、トレンドを出し切る
+            sl_ma = round(max(0, max_high_today - (atr_smoothed * 2.5)), 1)
+            p_full = sl_ma
+            p_half = 0
         else:
-            # --- 通常ブレイクモード：強気の上値追い ---
-            # 現在値(buy_target)から +5% / +10% を狙う
             p_half = round(buy_target * 1.05, 1)
             p_full = round(buy_target * 1.10, 1)
-            # 損切は「現在値の-4%」または「ATR損切」の深い方を採用
             sl_ma = round(max(atr_sl_calc, buy_target * 0.96), 1)
-
         sl_pct = ((curr_price / sl_ma) - 1) * 100 if sl_ma > 0 else 0.0
 
     # --- 5. スコアリング ---
@@ -1289,23 +1311,17 @@ def calculate_score_and_logic(df, info, vol_ratio, status, market_ratio=100.0):
         factors["青天井"] = 15
         trend_sum += 15
 
-    # 上限キャップなしで合算
     score += trend_sum
 
     if market_ratio >= 125.0:
         score -= 10
         factors["市場過熱"] = -10
 
-    # --- R/R比判定ロジック：押し目基準に固定 ---
+    # R/R比判定
     if is_breakout and oshime_price > 0 and not is_aoteng:
-        # 判定基準を「押し目価格」に設定（現在値に依存しない）
-        base_rr_price = oshime_price
-        risk = base_rr_price - sl_ma
-
-        # 目標値平均（半確と全確の平均）
+        risk = oshime_price - sl_ma
         target_avg = (p_half + p_full) / 2 if p_half > 0 else p_full
-        reward = target_avg - base_rr_price
-
+        reward = target_avg - oshime_price
         if risk > 0 and reward > 0:
             rr_ratio = reward / risk
             if rr_ratio >= 2.0:
@@ -1315,7 +1331,6 @@ def calculate_score_and_logic(df, info, vol_ratio, status, market_ratio=100.0):
                 factors["低R/R比"] = -25
                 score -= 25
 
-    # 最大含損率による加減点
     if dd_abs_val > -1.0:
         factors["低含損率"] = 5
         score += 5
@@ -1489,31 +1504,46 @@ run_backtest = run_backtest_precise
 @st.cache_data(ttl=1)
 def get_stock_data(ticker, current_run_count):
     status, jst_now_local = get_market_status()
-    ticker_clean = str(ticker).strip().lower()
+    ticker_clean = str(ticker).strip().upper()
+    # Yahoo Finance用のシンボルに変換 (例: 8306 -> 8306.T)
+    yf_ticker = f"{ticker_clean}.T"
 
-    # --- 0. 変数の初期化（NameError防止） ---
-    bt_str, bt_win_rate, bt_wins, bt_losses = "-", 0.0, 0, 0
-    vol_ratio = 1.0
-    vol_sma5_val = 0
-
-    info = get_stock_info(ticker_clean.upper())
+    info = get_stock_info(ticker_clean)
     if info.get("price") is None:
         return None
 
     try:
-        csv_url = f"https://stooq.pl/q/d/l/?s={ticker_clean}.jp&f=sdnji&e=csv"
-        res = fetch_with_retry(csv_url)
-        if not res or len(res.content) < 100:
+        # --- 人間らしい振る舞い：リクエスト前にランダム待機 ---
+        # 連続実行時の負荷を下げ、Yahoo側の制限を回避します
+        time.sleep(random.uniform(2.0, 5.0))
+
+        # yfinanceでデータを取得（期間はスコア計算に必要な6ヶ月分あれば十分）
+        df_yf = yf.download(
+            yf_ticker, period="6mo", interval="1d", progress=False, auto_adjust=False
+        )
+
+        if df_yf.empty:
+            st.session_state.error_messages.append(f"Yahooデータ空空 ({yf_ticker})")
             return None
 
-        df = pd.read_csv(io.BytesIO(res.content))
-        df.columns = ["Date", "Open", "High", "Low", "Close", "Volume"] + list(
-            df.columns[6:]
-        )
-        df["Date"] = pd.to_datetime(df["Date"])
-        df = df.set_index("Date").sort_index()
+        # pandasの形式を整形（MultiIndex対策）
+        df = df_yf.copy()
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
 
-        # --- 【重要】今日の現在値を計算用データに追加 (これで-2%を即判定) ---
+        df = df.sort_index()
+        # カラム名を統一
+        df = df.rename(
+            columns={
+                "Open": "Open",
+                "High": "High",
+                "Low": "Low",
+                "Close": "Close",
+                "Volume": "Volume",
+            }
+        )
+
+        # --- 今日の現在値を反映（場中の場合など） ---
         today_date = pd.to_datetime(jst_now_local.date())
         if info.get("price") is not None:
             new_row = pd.Series(
@@ -1526,31 +1556,34 @@ def get_stock_data(ticker, current_run_count):
                 },
                 name=today_date,
             )
+
             if today_date > df.index[-1]:
                 df = pd.concat([df, new_row.to_frame().T])
             else:
-                df.iloc[-1] = new_row
+                # 最終行を最新の株探データで上書き
+                for col in new_row.index:
+                    df.iloc[-1, df.columns.get_loc(col)] = new_row[col]
 
+        # --- 以下、既存のスコア計算ロジックへ続く ---
         df["Vol_SMA5"] = df["Volume"].rolling(5).mean()
-        vol_sma5_val = df["Vol_SMA5"].iloc[-1] if not df["Vol_SMA5"].isna().all() else 0
+        vol_sma5_val = df["Vol_SMA5"].iloc[-1]
 
-        # 正しい出来高倍率の計算
         v_weight = get_volume_weight(jst_now_local, info["cap"])
-        curr_vol = info.get("volume", 0)
         vol_ratio = (
-            curr_vol / (vol_sma5_val * v_weight)
+            info.get("volume", 0) / (vol_sma5_val * v_weight)
             if (vol_sma5_val * v_weight) > 0
             else 1.0
         )
 
-        # --- 1. バックテスト実行 ---
+        # バックテストとスコア計算（既存の関数を利用）
         bt_res = run_backtest(df, info["cap"])
         bt_str, bt_win_rate, _, _, _, bt_wins, bt_losses = bt_res
 
-        # --- 2. スコア計算 ---
+        # 前日比スコア計算
         (p_s, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = calculate_score_and_logic(
             df.iloc[:-1], info, 1.0, "引け後", market_25d_ratio
         )
+        # 本日分スコア計算
         (
             s,
             f,
@@ -1570,9 +1603,8 @@ def get_stock_data(ticker, current_run_count):
             mdd_val,
         ) = calculate_score_and_logic(df, info, vol_ratio, status, market_25d_ratio)
 
-        # --- 4. 画面表示用データ作成 ---
         return {
-            "code": ticker_clean.upper(),
+            "code": ticker_clean,
             "name": info["name"],
             "price": info.get("price"),
             "cap_val": info["cap"],
@@ -1608,7 +1640,7 @@ def get_stock_data(ticker, current_run_count):
             "is_updated_in_this_run": True,
         }
     except Exception as e:
-        st.session_state.error_messages.append(f"解析エラー ({ticker}): {e}")
+        st.session_state.error_messages.append(f"Yahoo解析エラー ({ticker}): {e}")
         return None
 
 
