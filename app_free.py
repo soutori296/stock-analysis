@@ -1533,29 +1533,22 @@ def get_stock_data(ticker, current_run_count):
     if info.get("price") is None:
         return None
 
-    # --- 【追加】株探の時系列ページから決算日を取得 ---
+    # 株探から決算日を取得
     k_earnings_date = get_kabutan_earnings_date(ticker_clean)
 
     try:
-        # リクエスト過多を防ぐための待機
         time.sleep(random.uniform(2.0, 5.0))
-
-        # yfinanceで価格履歴を取得
         df_yf = yf.download(
             yf_ticker, period="6mo", interval="1d", progress=False, auto_adjust=False
         )
-
         if df_yf.empty:
             st.session_state.error_messages.append(f"Yahooデータ空空 ({yf_ticker})")
             return None
 
-        # MultiIndex対策
         df = df_yf.copy()
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
-
-        df = df.sort_index()
-        df = df.rename(
+        df = df.sort_index().rename(
             columns={
                 "Open": "Open",
                 "High": "High",
@@ -1565,7 +1558,7 @@ def get_stock_data(ticker, current_run_count):
             }
         )
 
-        # 今日の現在値を反映
+        # 現在値の反映
         today_date = pd.to_datetime(jst_now_local.date())
         if info.get("price") is not None:
             new_row = pd.Series(
@@ -1578,25 +1571,38 @@ def get_stock_data(ticker, current_run_count):
                 },
                 name=today_date,
             )
-
             if today_date > df.index[-1]:
                 df = pd.concat([df, new_row.to_frame().T])
             else:
                 for col in new_row.index:
                     df.iloc[-1, df.columns.get_loc(col)] = new_row[col]
 
-        # --- 【重要】決算直前フラグ (TRUE/FALSE) の計算ロジック ---
+        # --- 決算判定ロジック：7日以内(赤)、14日以内(橙)、14日超(灰)、発表後3日(灰) ---
         earnings_day_count = None
-        earnings_disp_str = None
-        is_earnings_soon = False
+        earnings_disp_str = ""
+        is_earnings_soon = False  # CSV用: 7日以内のみ TRUE
 
         if k_earnings_date:
-            earnings_day_count = (k_earnings_date.date() - jst_now_local.date()).days
-            earnings_disp_str = k_earnings_date.strftime("%m/%d")
+            days = (k_earnings_date.date() - jst_now_local.date()).days
+            earnings_day_count = days
+            dt_str = k_earnings_date.strftime("%m/%d")
 
-            # 【判定基準】決算まで7日以内（当日含む）なら TRUE
-            if 0 <= earnings_day_count <= 7:
+            if days > 14:
+                # 2週間以上先：グレー表示
+                earnings_disp_str = f"決算 {dt_str} (あと{days}日)"
+            elif 7 < days <= 14:
+                # 2週間以内：オレンジ表示
+                earnings_disp_str = f"決算 {dt_str} (あと{days}日)"
+            elif 0 <= days <= 7:
+                # 1週間以内：赤色表示（CSVフラグ TRUE）
+                earnings_disp_str = f"決算 {dt_str} (あと{days}日)"
                 is_earnings_soon = True
+            elif -3 <= days < 0:
+                # 発表後3日間：グレー表示（発表済）
+                earnings_disp_str = f"決算発表済"
+            else:
+                # それ以外は表示しない
+                earnings_day_count = None
 
         # 指標計算
         df["Vol_SMA5"] = df["Volume"].rolling(5).mean()
@@ -1608,12 +1614,11 @@ def get_stock_data(ticker, current_run_count):
             else 1.0
         )
 
-        # スコアとバックテスト計算
         bt_res = run_backtest(df, info["cap"])
         bt_str, bt_win_rate, _, _, _, bt_wins, bt_losses = bt_res
 
         (p_s, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = calculate_score_and_logic(
-            df.iloc[:-1], info, 1.0, "引け後", market_25d_ratio
+            df.iloc[:-1], info, 1.0, "引け後"
         )
         (
             s,
@@ -1632,7 +1637,7 @@ def get_stock_data(ticker, current_run_count):
             rci,
             osh,
             mdd_val,
-        ) = calculate_score_and_logic(df, info, vol_ratio, status, market_25d_ratio)
+        ) = calculate_score_and_logic(df, info, vol_ratio, status)
 
         return {
             "code": ticker_clean,
@@ -1669,14 +1674,13 @@ def get_stock_data(ticker, current_run_count):
             "bt_loss_count": bt_losses,
             "update_count": 1,
             "is_updated_in_this_run": True,
-            # --- ここで算出したフラグを戻り値に含める ---
             "earnings_date": k_earnings_date,
             "earnings_day_count": earnings_day_count,
             "earnings_disp_str": earnings_disp_str,
-            "is_earnings_soon": is_earnings_soon,  # これがCSVのTRUE/FALSEになります
+            "is_earnings_soon": is_earnings_soon,
         }
     except Exception as e:
-        st.session_state.error_messages.append(f"Yahoo解析エラー ({ticker}): {e}")
+        st.session_state.error_messages.append(f"Yahoo解析エラー ({ticker_clean}): {e}")
         return None
 
 
@@ -2378,17 +2382,31 @@ if st.session_state.analyzed_data:
         return f"{int(val + 0.5):,}" if pd.notna(val) and val > 0 else "-"
 
     def format_code(row):
+        """銘柄名の下に、多段階の決算警告を表示する"""
         code_html = f"<b>{row['code']}</b>"
         days = row.get("earnings_day_count")
         disp_str = row.get("earnings_disp_str", "")
+
         if days is None and not disp_str:
             return code_html
-        if disp_str == "発表済":
-            return f"{code_html}<br><span style='font-size:11px; color:blue;'>決算発表済</span>"
-        if days is not None and disp_str:
-            color = "red" if days <= 7 else "#cc5500"
-            return f"{code_html}<br><span style='font-size:11px; color:{color}; font-weight:bold;'>決算 {disp_str}</span>"
-        return code_html
+
+        # 表示色の決定
+        if disp_str == "決算発表済":
+            color = "#888888"  # グレー（発表後3日間）
+        elif days is not None:
+            if days <= 7:
+                color = "red"  # 赤（1週間以内・デッドライン）
+            elif days <= 14:
+                color = "#cc5500"  # オレンジ（2週間以内・警戒）
+            else:
+                color = "#888888"  # グレー（2週間超・まだ先）
+        else:
+            return code_html
+
+        # 太字設定（14日以内の場合のみ強調）
+        weight = "bold" if days is not None and days <= 14 else "normal"
+
+        return f"{code_html}<br><span style='font-size:11px; color:{color}; font-weight:{weight};'>{disp_str}</span>"
 
     df["code_disp"] = df.apply(format_code, axis=1)
 
