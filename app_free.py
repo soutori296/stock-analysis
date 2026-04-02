@@ -597,22 +597,31 @@ def get_kabutan_recent_history(code):
 
 def get_kabutan_earnings_date(code):
     """
-    株探の時系列ページ（日足）のヘッダーから決算発表予定日を抽出する。
-    価格データは yfinance を使うため、ここでは決算日のみを取得。
+    株探の時系列ページから決算日を抽出。
+    「発表予定日」と、発表後の「実績日（New!表示など）」の両方に対応。
     """
     url = f"https://kabutan.jp/stock/kabuka?code={code}&ashi=day"
-    earnings_date = None
     try:
         res = fetch_with_retry(url)
         res.encoding = res.apparent_encoding
-        # HTML内の「決算発表予定日 2026/04/10」という文字列を検索 (image_f3934b.png の箇所)
         html_text = res.text.replace("\n", "").replace("\r", "")
-        m_earn = re.search(r"決算発表予定日.*?(\d{4})/(\d{1,2})/(\d{1,2})", html_text)
-        if m_earn:
-            earnings_date = datetime.datetime(
-                int(m_earn.group(1)), int(m_earn.group(2)), int(m_earn.group(3))
+
+        # 1. 予定日パターン (例: 決算発表予定日 2026/04/10)
+        m_plan = re.search(r"決算発表予定日.*?(\d{4})/(\d{1,2})/(\d{1,2})", html_text)
+        if m_plan:
+            return datetime.datetime(
+                int(m_plan.group(1)), int(m_plan.group(2)), int(m_plan.group(3))
             )
-        return earnings_date
+
+        # 2. 発表済パターン (例: 決算New! 2026/04/01 発表)
+        # 「決算」と「発表」の間にある日付を抜き出します
+        m_done = re.search(r"決算.*?(\d{4})/(\d{1,2})/(\d{1,2}).*?発表", html_text)
+        if m_done:
+            return datetime.datetime(
+                int(m_done.group(1)), int(m_done.group(2)), int(m_done.group(3))
+            )
+
+        return None
     except Exception:
         return None
 
@@ -1533,7 +1542,7 @@ def get_stock_data(ticker, current_run_count):
     if info.get("price") is None:
         return None
 
-    # 株探から決算日を取得
+    # 株探から最新の決算日情報を取得
     k_earnings_date = get_kabutan_earnings_date(ticker_clean)
 
     try:
@@ -1577,10 +1586,10 @@ def get_stock_data(ticker, current_run_count):
                 for col in new_row.index:
                     df.iloc[-1, df.columns.get_loc(col)] = new_row[col]
 
-        # --- 決算判定ロジック：7日以内(赤)、14日以内(橙)、14日超(灰)、発表後3日(灰) ---
+        # --- 決算判定ロジック：多段階カラー表示と発表後3日間の維持 ---
         earnings_day_count = None
         earnings_disp_str = ""
-        is_earnings_soon = False  # CSV用: 7日以内のみ TRUE
+        is_earnings_soon = False
 
         if k_earnings_date:
             days = (k_earnings_date.date() - jst_now_local.date()).days
@@ -1588,23 +1597,23 @@ def get_stock_data(ticker, current_run_count):
             dt_str = k_earnings_date.strftime("%m/%d")
 
             if days > 14:
-                # 2週間以上先：グレー表示
+                # 14日超：グレー表示
                 earnings_disp_str = f"決算 {dt_str} (あと{days}日)"
             elif 7 < days <= 14:
-                # 2週間以内：オレンジ表示
+                # 8〜14日：オレンジ表示
                 earnings_disp_str = f"決算 {dt_str} (あと{days}日)"
             elif 0 <= days <= 7:
-                # 1週間以内：赤色表示（CSVフラグ TRUE）
+                # 0〜7日：赤色表示（CSVフラグをTRUEに）
                 earnings_disp_str = f"決算 {dt_str} (あと{days}日)"
                 is_earnings_soon = True
             elif -3 <= days < 0:
-                # 発表後3日間：グレー表示（発表済）
+                # 発表後3日間：グレー表示（決算発表済）
                 earnings_disp_str = f"決算発表済"
             else:
-                # それ以外は表示しない
+                # 発表から4日以上：表示を消去
                 earnings_day_count = None
 
-        # 指標計算
+        # 指標・スコア計算
         df["Vol_SMA5"] = df["Volume"].rolling(5).mean()
         vol_sma5_val = df["Vol_SMA5"].iloc[-1]
         v_weight = get_volume_weight(jst_now_local, info["cap"])
@@ -2382,7 +2391,7 @@ if st.session_state.analyzed_data:
         return f"{int(val + 0.5):,}" if pd.notna(val) and val > 0 else "-"
 
     def format_code(row):
-        """銘柄名の下に、多段階の決算警告を表示する"""
+        """銘柄名の下に、決算の状態に合わせた色で警告を表示する"""
         code_html = f"<b>{row['code']}</b>"
         days = row.get("earnings_day_count")
         disp_str = row.get("earnings_disp_str", "")
@@ -2390,20 +2399,20 @@ if st.session_state.analyzed_data:
         if days is None and not disp_str:
             return code_html
 
-        # 表示色の決定
+        # 表示色の決定ルール
         if disp_str == "決算発表済":
             color = "#888888"  # グレー（発表後3日間）
         elif days is not None:
             if days <= 7:
-                color = "red"  # 赤（1週間以内・デッドライン）
+                color = "red"  # 赤（1週間以内：デッドライン）
             elif days <= 14:
-                color = "#cc5500"  # オレンジ（2週間以内・警戒）
+                color = "#cc5500"  # オレンジ（2週間以内：警戒）
             else:
-                color = "#888888"  # グレー（2週間超・まだ先）
+                color = "#888888"  # グレー（2週間超：まだ先）
         else:
             return code_html
 
-        # 太字設定（14日以内の場合のみ強調）
+        # 14日以内の場合は太字で強調
         weight = "bold" if days is not None and days <= 14 else "normal"
 
         return f"{code_html}<br><span style='font-size:11px; color:{color}; font-weight:{weight};'>{disp_str}</span>"
