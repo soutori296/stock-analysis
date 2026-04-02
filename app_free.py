@@ -595,6 +595,28 @@ def get_kabutan_recent_history(code):
         return pd.DataFrame()
 
 
+def get_kabutan_earnings_date(code):
+    """
+    株探の時系列ページ（日足）のヘッダーから決算発表予定日を抽出する。
+    価格データは yfinance を使うため、ここでは決算日のみを取得。
+    """
+    url = f"https://kabutan.jp/stock/kabuka?code={code}&ashi=day"
+    earnings_date = None
+    try:
+        res = fetch_with_retry(url)
+        res.encoding = res.apparent_encoding
+        # HTML内の「決算発表予定日 2026/04/10」という文字列を検索 (image_f3934b.png の箇所)
+        html_text = res.text.replace("\n", "").replace("\r", "")
+        m_earn = re.search(r"決算発表予定日.*?(\d{4})/(\d{1,2})/(\d{1,2})", html_text)
+        if m_earn:
+            earnings_date = datetime.datetime(
+                int(m_earn.group(1)), int(m_earn.group(2)), int(m_earn.group(3))
+            )
+        return earnings_date
+    except Exception:
+        return None
+
+
 # --- テクニカル指標ロジック (RCI/Divergence) ---
 def calculate_rci(series, period=26):
     """
@@ -732,10 +754,6 @@ def get_volume_weight(current_dt, market_cap):
 
 
 def format_volume(volume):
-    # 数値チェック（NoneやNaNを排除）
-    if volume is None or not np.isfinite(volume):
-        return "0株"
-
     if volume < 10000:
         return f"{volume:,.0f}株"
     else:
@@ -1509,19 +1527,20 @@ run_backtest = run_backtest_precise
 def get_stock_data(ticker, current_run_count):
     status, jst_now_local = get_market_status()
     ticker_clean = str(ticker).strip().upper()
-    # Yahoo Finance用のシンボルに変換 (例: 8306 -> 8306.T)
     yf_ticker = f"{ticker_clean}.T"
 
     info = get_stock_info(ticker_clean)
     if info.get("price") is None:
         return None
 
+    # --- 【追加】株探の時系列ページから決算日を取得 ---
+    k_earnings_date = get_kabutan_earnings_date(ticker_clean)
+
     try:
-        # --- 人間らしい振る舞い：リクエスト前にランダム待機 ---
-        # 連続実行時の負荷を下げ、Yahoo側の制限を回避します
+        # リクエスト過多を防ぐための待機
         time.sleep(random.uniform(2.0, 5.0))
 
-        # yfinanceでデータを取得（期間はスコア計算に必要な6ヶ月分あれば十分）
+        # yfinanceで価格履歴を取得
         df_yf = yf.download(
             yf_ticker, period="6mo", interval="1d", progress=False, auto_adjust=False
         )
@@ -1530,13 +1549,12 @@ def get_stock_data(ticker, current_run_count):
             st.session_state.error_messages.append(f"Yahooデータ空空 ({yf_ticker})")
             return None
 
-        # pandasの形式を整形（MultiIndex対策）
+        # MultiIndex対策
         df = df_yf.copy()
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
 
         df = df.sort_index()
-        # カラム名を統一
         df = df.rename(
             columns={
                 "Open": "Open",
@@ -1547,7 +1565,7 @@ def get_stock_data(ticker, current_run_count):
             }
         )
 
-        # --- 今日の現在値を反映（場中の場合など） ---
+        # 今日の現在値を反映
         today_date = pd.to_datetime(jst_now_local.date())
         if info.get("price") is not None:
             new_row = pd.Series(
@@ -1564,14 +1582,25 @@ def get_stock_data(ticker, current_run_count):
             if today_date > df.index[-1]:
                 df = pd.concat([df, new_row.to_frame().T])
             else:
-                # 最終行を最新の株探データで上書き
                 for col in new_row.index:
                     df.iloc[-1, df.columns.get_loc(col)] = new_row[col]
 
-        # --- 以下、既存のスコア計算ロジックへ続く ---
+        # --- 【重要】決算直前フラグ (TRUE/FALSE) の計算ロジック ---
+        earnings_day_count = None
+        earnings_disp_str = None
+        is_earnings_soon = False
+
+        if k_earnings_date:
+            earnings_day_count = (k_earnings_date.date() - jst_now_local.date()).days
+            earnings_disp_str = k_earnings_date.strftime("%m/%d")
+
+            # 【判定基準】決算まで7日以内（当日含む）なら TRUE
+            if 0 <= earnings_day_count <= 7:
+                is_earnings_soon = True
+
+        # 指標計算
         df["Vol_SMA5"] = df["Volume"].rolling(5).mean()
         vol_sma5_val = df["Vol_SMA5"].iloc[-1]
-
         v_weight = get_volume_weight(jst_now_local, info["cap"])
         vol_ratio = (
             info.get("volume", 0) / (vol_sma5_val * v_weight)
@@ -1579,15 +1608,13 @@ def get_stock_data(ticker, current_run_count):
             else 1.0
         )
 
-        # バックテストとスコア計算（既存の関数を利用）
+        # スコアとバックテスト計算
         bt_res = run_backtest(df, info["cap"])
         bt_str, bt_win_rate, _, _, _, bt_wins, bt_losses = bt_res
 
-        # 前日比スコア計算
         (p_s, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = calculate_score_and_logic(
             df.iloc[:-1], info, 1.0, "引け後", market_25d_ratio
         )
-        # 本日分スコア計算
         (
             s,
             f,
@@ -1642,6 +1669,11 @@ def get_stock_data(ticker, current_run_count):
             "bt_loss_count": bt_losses,
             "update_count": 1,
             "is_updated_in_this_run": True,
+            # --- ここで算出したフラグを戻り値に含める ---
+            "earnings_date": k_earnings_date,
+            "earnings_day_count": earnings_day_count,
+            "earnings_disp_str": earnings_disp_str,
+            "is_earnings_soon": is_earnings_soon,  # これがCSVのTRUE/FALSEになります
         }
     except Exception as e:
         st.session_state.error_messages.append(f"Yahoo解析エラー ({ticker}): {e}")
