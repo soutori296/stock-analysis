@@ -732,6 +732,10 @@ def get_volume_weight(current_dt, market_cap):
 
 
 def format_volume(volume):
+    # 数値チェック（NoneやNaNを排除）
+    if volume is None or not np.isfinite(volume):
+        return "0株"
+
     if volume < 10000:
         return f"{volume:,.0f}株"
     else:
