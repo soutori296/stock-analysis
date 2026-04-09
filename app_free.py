@@ -763,6 +763,12 @@ def get_volume_weight(current_dt, market_cap):
 
 
 def format_volume(volume):
+    # 数値変換を試みる（文字列やNone対策）
+    try:
+        volume = float(volume)
+    except (ValueError, TypeError):
+        return "－"
+
     if volume < 10000:
         return f"{volume:,.0f}株"
     else:
@@ -2371,6 +2377,7 @@ if st.session_state.analyzed_data:
         "vol_ratio",
         "win_rate_pct",
         "risk_reward",
+        "avg_volume_5d",  # ← ここに追加
     ]
     for col in numeric_cols_for_sort:
         if col in df.columns:
@@ -2497,9 +2504,9 @@ if st.session_state.analyzed_data:
 
     df["vol_disp_html"] = df.apply(
         lambda row: (
-            f"<b>{row['vol_ratio']:.1f}倍</b><br>({format_volume(row['avg_volume_5d'])})"
-            if row["vol_ratio"] > 1.5
-            else f"{row['vol_ratio']:.1f}倍<br>({format_volume(row['avg_volume_5d'])})"
+            f"<b>{pd.to_numeric(row['vol_ratio'], errors='coerce'):.1f}倍</b><br>({format_volume(row['avg_volume_5d'])})"
+            if pd.to_numeric(row["vol_ratio"], errors="coerce") > 1.5
+            else f"{pd.to_numeric(row['vol_ratio'], errors='coerce'):.1f}倍<br>({format_volume(row['avg_volume_5d'])})"
         ),
         axis=1,
     )
